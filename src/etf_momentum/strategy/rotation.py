@@ -61,6 +61,17 @@ def _shift_idx_by_rebalance(
     return int(max(pos - 1, 0))
 
 
+def _event_effective_price(event: dict[str, Any]) -> float:
+    for key in ("trigger_price_eff", "trigger_price", "fill_price", "stop_price"):
+        try:
+            v = float(event.get(key))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v):
+            return float(v)
+    return float("-inf")
+
+
 @dataclass(frozen=True)
 class RotationInputs:
     codes: list[str]
@@ -153,6 +164,11 @@ class RotationInputs:
     atr_stop_window: int = 14
     atr_stop_n: float = 2.0
     atr_stop_m: float = 0.5
+    r_take_profit_enabled: bool = False
+    r_take_profit_reentry_mode: str = "reenter"
+    r_take_profit_execution_mode: str = "intraday"
+    r_take_profit_execution_time: str | None = None  # open|close|full_day
+    r_take_profit_tiers: list[dict[str, float]] | None = None
     # --- Correlation filter (qfq price basis) ---
     corr_filter: bool = False
     corr_window: int | None = None  # None -> defaults to lookback_days
@@ -1710,6 +1726,31 @@ def backtest_rotation(
         "trailing": "atr_stop_trailing",
         "tightening": "atr_stop_tightening",
     }[atr_stop_mode]
+    r_take_profit_enabled = bool(getattr(inp, "r_take_profit_enabled", False))
+    r_take_profit_reentry_mode = (
+        str(getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter")
+        .strip()
+        .lower()
+    )
+    if r_take_profit_reentry_mode not in {"reenter", "wait_next_entry"}:
+        raise ValueError(
+            "r_take_profit_reentry_mode must be one of: reenter|wait_next_entry"
+        )
+    r_take_profit_execution_mode = (
+        str(getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    r_take_profit_execution_time = _trend_semantic_helpers._resolve_stop_execution_time(
+        execution_mode=r_take_profit_execution_mode,
+        execution_time=getattr(inp, "r_take_profit_execution_time", None),
+        exec_price=str(inp.exec_price or "open"),
+        mode_field="r_take_profit_execution_mode",
+        time_field="r_take_profit_execution_time",
+    )
+    r_take_profit_tiers = _trend_semantic_helpers._normalize_r_take_profit_tiers(
+        getattr(inp, "r_take_profit_tiers", None)
+    )
     if inp.corr_window is not None and int(inp.corr_window) < 2:
         raise ValueError("corr_window must be >= 2")
     if (
@@ -2014,6 +2055,7 @@ def backtest_rotation(
         or (pos_mode == "risk_budget")
         or (pos_mode == "inverse_vol")
         or (stop_scheme == "atr" and atr_stop_mode != "none")
+        or bool(r_take_profit_enabled)
     )
     high_qfq, low_qfq = (
         _load_high_low_prices(
@@ -2114,7 +2156,10 @@ def backtest_rotation(
     # Return decomposition needs open/close legs for all execution modes.
     need_hfq_ohlc = True
     need_none_ohlc = True
-    need_qfq_ohlc = bool(stop_scheme == "atr" and atr_stop_mode != "none")
+    need_qfq_ohlc = bool(
+        (stop_scheme == "atr" and atr_stop_mode != "none")
+        or bool(r_take_profit_enabled)
+    )
     ohlc_hfq = (
         _load_ohlc_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq")
         if need_hfq_ohlc
@@ -2726,6 +2771,18 @@ def backtest_rotation(
     w = pd.DataFrame(0.0, index=dates, columns=codes)
     holdings: dict[str, list[dict[str, Any]]] = {"periods": []}
     daily_exit_events: list[dict[str, Any]] = []
+    r_take_profit_events_all: list[dict[str, Any]] = []
+    r_take_profit_trigger_count_total = 0
+    r_take_profit_trigger_count_by_code: dict[str, int] = {str(c): 0 for c in codes}
+    r_take_profit_tier_trigger_counts_total: dict[str, int] = {}
+    r_take_profit_tier_trigger_counts_by_code: dict[str, dict[str, int]] = {
+        str(c): {} for c in codes
+    }
+    rtp_raw_w = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
+    rtp_processed_event_keys: set[tuple[str, str, str | None, str]] = set()
+    atr_pending_events_by_code: dict[str, list[dict[str, Any]]] = {
+        str(c): [] for c in codes
+    }
     # Stop-loss carry: track prior picks and whether a stop-out occurred in the prior holding segment.
     prev_picks_key: tuple[str, ...] | None = None
     prev_segment_stopped_out: bool = False
@@ -3266,6 +3323,25 @@ def backtest_rotation(
             "execution_mode": str(atr_stop_execution_mode),
             "execution_time": str(atr_stop_execution_time),
             "equity_stop_risk_pct": float(equity_stop_risk_pct),
+        }
+        r_take_profit: dict[str, Any] = {
+            "enabled": bool(r_take_profit_enabled),
+            "reentry_mode": str(r_take_profit_reentry_mode),
+            "execution_mode": str(r_take_profit_execution_mode),
+            "execution_time": str(r_take_profit_execution_time),
+            "tiers": [
+                {
+                    "r_multiple": float((x or {}).get("r_multiple")),
+                    "retrace_ratio": float((x or {}).get("retrace_ratio")),
+                }
+                for x in (r_take_profit_tiers or [])
+            ],
+            "events": [],
+            "triggered": False,
+            "trigger_count": 0,
+            "trigger_count_by_code": {},
+            "tier_trigger_counts": {},
+            "tier_trigger_counts_by_code": {},
         }
         stop_trigger_date: str | None = None
         stop_triggered = False
@@ -4601,77 +4677,45 @@ def backtest_rotation(
             # weights already copied from previous day; compute exposure for reporting
             exposure = float(w.iloc[start_i].sum()) if start_i < len(dates) else 0.0
 
+        seg_dates = dates[start_i : end_i + 1]
+        # Keep raw target-position history (before ATR/RTP overlays) for cross-segment
+        # RTP state continuity such as peak-profit and wait_next_entry lock semantics.
+        if len(seg_dates) > 0:
+            rtp_raw_w.loc[seg_dates, :] = w.loc[seg_dates, :].astype(float)
+        seg_w_base = w.loc[seg_dates, :].copy().astype(float)
         stop_enabled = bool(
             (stop_scheme == "atr" and atr_stop_exec_mode != "none")
             or (stop_scheme == "equity_budget")
         )
-        if stop_enabled and (not dd_in_sleep) and risk_picks:
-            seg_dates = dates[start_i : end_i + 1]
-            stop_codes = [str(c) for c in risk_picks if str(c) in rank_codes]
-            entry_px: dict[str, float] = {}
-            entry_atr: dict[str, float] = {}
-            prev_close: dict[str, float] = {}
-            stop: dict[str, float] = {}
-            events: list[dict[str, Any]] = []
-            atr_n = float(inp.atr_stop_n)
-            atr_m = float(inp.atr_stop_m)
-            atr_min = float(inp.atr_stop_m)
-
-            equity_at_entry = 1.0
-            if stop_scheme == "equity_budget":
-                _advance_nav_to(int(di))
-                equity_at_entry = float(nav_running.iloc[int(di)])
-                if (not np.isfinite(equity_at_entry)) or equity_at_entry <= 0.0:
-                    equity_at_entry = 1.0
-
+        rtp_enabled_seg = bool(r_take_profit_enabled)
+        atr_has_pending = any(bool(v) for v in atr_pending_events_by_code.values())
+        # Risk overlays (ATR / R take-profit) must still execute while dd_sleep is on.
+        # Otherwise deferred next-day events can expire as stale before sleep ends.
+        if (stop_enabled or rtp_enabled_seg) and (bool(risk_picks) or atr_has_pending):
+            stop_codes = sorted(
+                {str(c) for c in risk_picks if str(c) in rank_codes}
+                | {str(c) for c, evs in atr_pending_events_by_code.items() if bool(evs)}
+            )
+            atr_events: list[dict[str, Any]] = []
+            atr_events_by_code: dict[str, list[dict[str, Any]]] = {
+                str(c): [
+                    dict(x) for x in list(atr_pending_events_by_code.get(str(c), []))
+                ]
+                for c in stop_codes
+            }
             for c in stop_codes:
-                try:
-                    p0 = float(close_qfq.loc[seg_dates[0], c])
-                except (KeyError, TypeError, ValueError):
-                    continue
-                if (not np.isfinite(p0)) or p0 <= 0.0:
-                    continue
-                wt0 = (
-                    float(w.loc[seg_dates[0], c])
-                    if (c in w.columns and seg_dates[0] in w.index)
-                    else 0.0
-                )
-                if (not np.isfinite(wt0)) or wt0 <= 1e-12:
-                    continue
-                entry_px[c] = float(p0)
-                prev_close[c] = float(p0)
-                if stop_scheme == "atr":
-                    try:
-                        a0 = float(atr.loc[seg_dates[0], c])
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    if not (np.isfinite(a0) and a0 > 0.0):
-                        continue
-                    entry_atr[c] = float(a0)
-                    stop[c] = float(p0 - float(atr_n) * float(a0))
-                else:
-                    risk_abs = float(equity_at_entry) * float(equity_stop_risk_pct)
-                    notional = float(equity_at_entry) * float(wt0)
-                    if notional <= 1e-12:
-                        continue
-                    dist_pct = float(risk_abs / max(notional, 1e-12))
-                    dist_pct = float(min(max(dist_pct, 0.0), 0.9999))
-                    stop[c] = float(p0 * (1.0 - dist_pct))
-
-            if stop_scheme == "atr":
-                atr_stop["atr_window_used"] = int(w_atr) if w_atr is not None else None
-                atr_stop["atr_stop_n"] = float(inp.atr_stop_n)
-                atr_stop["atr_stop_m"] = float(inp.atr_stop_m)
-                atr_stop["atr_stop_min_distance_mult"] = float(inp.atr_stop_m)
-                atr_stop["atr_stop_mode"] = str(atr_stop_mode)
-                atr_stop["atr_stop_atr_basis"] = str(atr_stop_atr_basis)
-            atr_stop["entry_price_by_code"] = {k: float(v) for k, v in entry_px.items()}
-            atr_stop["initial_stop_by_code"] = {k: float(v) for k, v in stop.items()}
-            if stop_scheme == "equity_budget":
-                atr_stop["equity_at_entry"] = float(equity_at_entry)
+                atr_pending_events_by_code[str(c)] = []
+            rtp_events_by_code: dict[str, list[dict[str, Any]]] = {
+                str(c): [] for c in stop_codes
+            }
 
             open_qfq_stop = (
                 ohlc_qfq.get("open", pd.DataFrame())
+                if isinstance(ohlc_qfq, dict)
+                else pd.DataFrame()
+            )
+            high_qfq_stop = (
+                ohlc_qfq.get("high", pd.DataFrame())
                 if isinstance(ohlc_qfq, dict)
                 else pd.DataFrame()
             )
@@ -4680,142 +4724,449 @@ def backtest_rotation(
                 if isinstance(ohlc_qfq, dict)
                 else pd.DataFrame()
             )
-            stopped_codes: set[str] = set()
 
-            for j, day in enumerate(seg_dates):
-                # 1) trigger check for each held code (single-asset stop-out).
+            if stop_enabled and stop_codes:
+                entry_px: dict[str, float] = {}
+                entry_atr: dict[str, float] = {}
+                prev_close: dict[str, float] = {}
+                stop: dict[str, float] = {}
+                atr_n = float(inp.atr_stop_n)
+                atr_m = float(inp.atr_stop_m)
+                atr_min = float(inp.atr_stop_m)
+
+                equity_at_entry = 1.0
+                if stop_scheme == "equity_budget":
+                    _advance_nav_to(int(di))
+                    equity_at_entry = float(nav_running.iloc[int(di)])
+                    if (not np.isfinite(equity_at_entry)) or equity_at_entry <= 0.0:
+                        equity_at_entry = 1.0
+
                 for c in stop_codes:
-                    if c in stopped_codes or c not in stop:
+                    try:
+                        p0 = float(close_qfq.loc[seg_dates[0], c])
+                    except (KeyError, TypeError, ValueError):
                         continue
-                    wt_now = (
-                        float(w.loc[day, c])
-                        if (c in w.columns and day in w.index)
+                    if (not np.isfinite(p0)) or p0 <= 0.0:
+                        continue
+                    wt0 = (
+                        float(seg_w_base.loc[seg_dates[0], c])
+                        if (
+                            c in seg_w_base.columns and seg_dates[0] in seg_w_base.index
+                        )
                         else 0.0
                     )
-                    if (not np.isfinite(wt_now)) or wt_now <= 1e-12:
+                    if (not np.isfinite(wt0)) or wt0 <= 1e-12:
                         continue
-                    try:
-                        px_close = float(close_qfq.loc[day, c])
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    if not np.isfinite(px_close):
-                        continue
-                    px_open = px_close
-                    try:
-                        if c in open_qfq_stop.columns and day in open_qfq_stop.index:
-                            px_open = float(open_qfq_stop.loc[day, c])
-                    except (KeyError, TypeError, ValueError):
-                        px_open = px_close
-                    if not np.isfinite(px_open):
-                        px_open = px_close
-                    px_low = px_close
-                    try:
-                        if c in low_qfq_stop.columns and day in low_qfq_stop.index:
-                            px_low = float(low_qfq_stop.loc[day, c])
-                    except (KeyError, TypeError, ValueError):
-                        px_low = px_close
-                    if not np.isfinite(px_low):
-                        px_low = px_close
-
-                    stop_px = float(stop[c])
-                    triggered = False
-                    trigger_px = px_close
-                    exec_time_now = str(atr_stop_execution_time or "close")
-                    if stop_scheme == "equity_budget":
-                        exec_time_now = "close"
-                    if exec_time_now == "open":
-                        triggered = bool(px_open < stop_px)
-                        trigger_px = float(px_open)
-                    elif exec_time_now == "full_day":
-                        triggered = bool(px_low < stop_px)
-                        trigger_px = float(px_low)
+                    entry_px[c] = float(p0)
+                    prev_close[c] = float(p0)
+                    if stop_scheme == "atr":
+                        try:
+                            a0 = float(atr.loc[seg_dates[0], c])
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                        if not (np.isfinite(a0) and a0 > 0.0):
+                            continue
+                        entry_atr[c] = float(a0)
+                        stop[c] = float(p0 - float(atr_n) * float(a0))
                     else:
-                        triggered = bool(px_close < stop_px)
-                        trigger_px = float(px_close)
-                    if not triggered:
+                        risk_abs = float(equity_at_entry) * float(equity_stop_risk_pct)
+                        notional = float(equity_at_entry) * float(wt0)
+                        if notional <= 1e-12:
+                            continue
+                        dist_pct = float(risk_abs / max(notional, 1e-12))
+                        dist_pct = float(min(max(dist_pct, 0.0), 0.9999))
+                        stop[c] = float(p0 * (1.0 - dist_pct))
+
+                if stop_scheme == "atr":
+                    atr_stop["atr_window_used"] = (
+                        int(w_atr) if w_atr is not None else None
+                    )
+                    atr_stop["atr_stop_n"] = float(inp.atr_stop_n)
+                    atr_stop["atr_stop_m"] = float(inp.atr_stop_m)
+                    atr_stop["atr_stop_min_distance_mult"] = float(inp.atr_stop_m)
+                    atr_stop["atr_stop_mode"] = str(atr_stop_mode)
+                    atr_stop["atr_stop_atr_basis"] = str(atr_stop_atr_basis)
+                atr_stop["entry_price_by_code"] = {
+                    k: float(v) for k, v in entry_px.items()
+                }
+                atr_stop["initial_stop_by_code"] = {
+                    k: float(v) for k, v in stop.items()
+                }
+                if stop_scheme == "equity_budget":
+                    atr_stop["equity_at_entry"] = float(equity_at_entry)
+
+                stopped_codes: set[str] = set()
+                for j, day in enumerate(seg_dates):
+                    for c in stop_codes:
+                        if c in stopped_codes or c not in stop:
+                            continue
+                        wt_now = (
+                            float(seg_w_base.loc[day, c])
+                            if (c in seg_w_base.columns and day in seg_w_base.index)
+                            else 0.0
+                        )
+                        if (not np.isfinite(wt_now)) or wt_now <= 1e-12:
+                            continue
+                        try:
+                            px_close = float(close_qfq.loc[day, c])
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                        if not np.isfinite(px_close):
+                            continue
+                        px_open = px_close
+                        try:
+                            if (
+                                c in open_qfq_stop.columns
+                                and day in open_qfq_stop.index
+                            ):
+                                px_open = float(open_qfq_stop.loc[day, c])
+                        except (KeyError, TypeError, ValueError):
+                            px_open = px_close
+                        if not np.isfinite(px_open):
+                            px_open = px_close
+                        px_low = px_close
+                        try:
+                            if c in low_qfq_stop.columns and day in low_qfq_stop.index:
+                                px_low = float(low_qfq_stop.loc[day, c])
+                        except (KeyError, TypeError, ValueError):
+                            px_low = px_close
+                        if not np.isfinite(px_low):
+                            px_low = px_close
+
+                        stop_px = float(stop[c])
+                        triggered = False
+                        trigger_px = px_close
+                        exec_time_now = str(atr_stop_execution_time or "close")
+                        if stop_scheme == "equity_budget":
+                            exec_time_now = "close"
+                        if exec_time_now == "open":
+                            triggered = bool(px_open < stop_px)
+                            trigger_px = float(px_open)
+                        elif exec_time_now == "full_day":
+                            triggered = bool(px_low < stop_px)
+                            trigger_px = float(px_low)
+                        else:
+                            triggered = bool(px_close < stop_px)
+                            trigger_px = float(px_close)
+                        if not triggered:
+                            continue
+
+                        exec_offset = (
+                            1 if str(atr_stop_execution_mode) == "next_day" else 0
+                        )
+                        exec_abs_idx = int(start_i) + int(j) + int(exec_offset)
+                        execution_date = None
+                        if exec_abs_idx < len(dates):
+                            execution_date = dates[exec_abs_idx].date().isoformat()
+                        ev = {
+                            "scheme": str(stop_scheme),
+                            "type": "atr_stop",
+                            "code": str(c),
+                            "trigger_date": day.date().isoformat(),
+                            "execution_date": execution_date,
+                            "execution_mode": str(atr_stop_execution_mode),
+                            "execution_time": str(exec_time_now),
+                            "trigger_price": float(trigger_px),
+                            "stop_price": float(stop_px),
+                        }
+                        atr_events.append(ev)
+                        atr_events_by_code[str(c)].append(ev)
+                        stopped_codes.add(str(c))
+
+                    if stop_scheme != "atr":
                         continue
+                    for c in stop_codes:
+                        if c in stopped_codes or c not in stop:
+                            continue
+                        try:
+                            px = float(close_qfq.loc[day, c])
+                            a = float(atr.loc[day, c])
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                        if not (np.isfinite(px) and np.isfinite(a) and a > 0.0):
+                            continue
 
-                    exec_offset = 1 if str(atr_stop_execution_mode) == "next_day" else 0
-                    exec_abs_idx = int(start_i) + int(j) + int(exec_offset)
-                    execution_date = None
-                    if exec_abs_idx < len(dates):
-                        execution_date = dates[exec_abs_idx].date().isoformat()
-                        if exec_abs_idx <= int(end_i):
-                            w.loc[dates[exec_abs_idx] : dates[end_i], c] = 0.0
-                    ev = {
-                        "scheme": str(stop_scheme),
-                        "code": str(c),
-                        "trigger_date": day.date().isoformat(),
-                        "execution_date": execution_date,
-                        "execution_mode": str(atr_stop_execution_mode),
-                        "execution_time": str(exec_time_now),
-                        "trigger_price": float(trigger_px),
-                        "stop_price": float(stop_px),
-                    }
-                    events.append(ev)
-                    stopped_codes.add(str(c))
-                    stop_triggered = True
-                    if stop_trigger_date is None:
-                        stop_trigger_date = day.date().isoformat()
+                        should_update = True
+                        if atr_stop_exec_mode == "atr_stop_static":
+                            should_update = False
+                            dist_mult = float(atr_n)
+                        elif atr_stop_exec_mode == "atr_stop_trailing":
+                            dist_mult = float(atr_n)
+                            ep = float(entry_px.get(c, px))
+                            pc = float(prev_close.get(c, px))
+                            should_update = bool((px > ep) or (px > pc))
+                        else:
+                            ep = float(entry_px.get(c, px))
+                            a_ref = (
+                                float(entry_atr.get(c, a))
+                                if atr_stop_atr_basis == "entry"
+                                else float(a)
+                            )
+                            gain_units = (px - ep) / max(a_ref, 1e-12)
+                            steps = (
+                                int(np.floor(gain_units / float(atr_m)))
+                                if np.isfinite(gain_units)
+                                else 0
+                            )
+                            dist_mult = float(atr_n) - float(steps) * float(atr_m)
+                            dist_mult = float(max(float(atr_min), dist_mult))
+                            pc = float(prev_close.get(c, px))
+                            should_update = bool((px > ep) or (px > pc))
 
-                # 2) update ATR stop for next day (equity_budget stop is static by design).
-                if stop_scheme != "atr":
-                    continue
+                        if should_update:
+                            a_ref = (
+                                float(entry_atr.get(c, a))
+                                if atr_stop_atr_basis == "entry"
+                                else float(a)
+                            )
+                            cand = px - dist_mult * a_ref
+                            stop[c] = float(max(float(stop[c]), float(cand)))
+                        prev_close[c] = float(px)
+                atr_stop["final_stop_by_code"] = {k: float(v) for k, v in stop.items()}
+
+            if rtp_enabled_seg and stop_codes:
                 for c in stop_codes:
-                    if c in stopped_codes or c not in stop:
+                    hist_dates = dates[: int(end_i) + 1]
+                    base_pos_c = (
+                        rtp_raw_w.loc[hist_dates, c].astype(float)
+                        if c in rtp_raw_w.columns
+                        else pd.Series(0.0, index=hist_dates, dtype=float)
+                    )
+                    if (
+                        float(np.nansum(np.abs(base_pos_c.to_numpy(dtype=float))))
+                        <= 1e-12
+                    ):
+                        continue
+                    close_c = (
+                        close_qfq.loc[hist_dates, c]
+                        if (c in close_qfq.columns)
+                        else pd.Series(np.nan, index=hist_dates, dtype=float)
+                    )
+                    open_c = (
+                        open_qfq_stop.loc[hist_dates, c]
+                        if (c in open_qfq_stop.columns)
+                        else close_c
+                    )
+                    high_c = (
+                        high_qfq_stop.loc[hist_dates, c]
+                        if (c in high_qfq_stop.columns)
+                        else close_c
+                    )
+                    low_c = (
+                        low_qfq_stop.loc[hist_dates, c]
+                        if (c in low_qfq_stop.columns)
+                        else close_c
+                    )
+                    _, rtp_stats = (
+                        _trend_semantic_helpers._apply_r_multiple_take_profit(
+                            base_pos=base_pos_c.astype(float),
+                            open_=open_c.astype(float),
+                            close=close_c.astype(float),
+                            high=high_c.astype(float),
+                            low=low_c.astype(float),
+                            enabled=bool(rtp_enabled_seg),
+                            reentry_mode=str(r_take_profit_reentry_mode),
+                            execution_mode=str(r_take_profit_execution_mode),
+                            execution_time=str(r_take_profit_execution_time),
+                            atr_window=int(inp.atr_stop_window),
+                            atr_n=float(inp.atr_stop_n),
+                            tiers=list(r_take_profit_tiers or []),
+                            atr_stop_enabled=bool(
+                                stop_scheme == "atr" and atr_stop_mode != "none"
+                            ),
+                        )
+                    )
+                    events_c: list[dict[str, Any]] = []
+                    for ev0 in list((rtp_stats or {}).get("trigger_events") or []):
+                        ev = dict(ev0)
+                        exec_day = str(ev.get("execution_date") or "")
+                        if (
+                            (not exec_day)
+                            or (exec_day < seg_dates[0].date().isoformat())
+                            or (exec_day > seg_dates[-1].date().isoformat())
+                        ):
+                            continue
+                        key = (
+                            str(c),
+                            str(ev.get("trigger_date") or ""),
+                            str(exec_day),
+                            str(ev.get("active_tier_r")),
+                        )
+                        if key in rtp_processed_event_keys:
+                            continue
+                        rtp_processed_event_keys.add(key)
+                        ev["type"] = "r_take_profit"
+                        ev["code"] = str(c)
+                        events_c.append(ev)
+                    if events_c:
+                        rtp_events_by_code[str(c)].extend(events_c)
+
+            for c in stop_codes:
+                by_exec: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+                seg_start_iso = seg_dates[0].date().isoformat()
+                seg_end_iso = seg_dates[-1].date().isoformat()
+                deferred_atr_events: list[dict[str, Any]] = []
+                for overlay_name, src in (
+                    ("atr_stop", atr_events_by_code),
+                    ("r_take_profit", rtp_events_by_code),
+                ):
+                    for ev in src.get(str(c), []):
+                        ev["requested_reduce_fraction"] = 1.0
+                        ev["reduce_fraction"] = 1.0
+                        ev["ignored_by_priority"] = False
+                        ev["ignored_reason"] = None
+                        exec_date = str(ev.get("execution_date") or "")
+                        if not exec_date:
+                            ev["reduce_fraction"] = 0.0
+                            ev["ignored_by_priority"] = True
+                            ev["ignored_reason"] = "missing_execution_date"
+                            continue
+                        if overlay_name == "atr_stop":
+                            if exec_date > seg_end_iso:
+                                ev["reduce_fraction"] = 0.0
+                                ev["ignored_by_priority"] = True
+                                ev["ignored_reason"] = "deferred_to_future_segment"
+                                deferred_atr_events.append(ev)
+                                continue
+                            if exec_date < seg_start_iso:
+                                ev["reduce_fraction"] = 0.0
+                                ev["ignored_by_priority"] = True
+                                ev["ignored_reason"] = "stale_execution_date"
+                                continue
+                        by_exec.setdefault(exec_date, []).append((overlay_name, ev))
+
+                if not by_exec:
+                    if deferred_atr_events:
+                        atr_pending_events_by_code.setdefault(str(c), []).extend(
+                            [dict(x) for x in deferred_atr_events]
+                        )
+                    continue
+
+                exit_applied = False
+                for exec_date in sorted(by_exec.keys()):
+                    candidates = by_exec.get(exec_date, [])
+                    if not candidates:
+                        continue
+                    chosen_overlay, chosen_ev = max(
+                        candidates, key=lambda x: _event_effective_price(x[1])
+                    )
+                    for overlay_name, ev in candidates:
+                        if ev is chosen_ev:
+                            continue
+                        ev["reduce_fraction"] = 0.0
+                        ev["ignored_by_priority"] = True
+                        ev["ignored_reason"] = "full_exit_wins"
+                    if exit_applied:
+                        chosen_ev["reduce_fraction"] = 0.0
+                        chosen_ev["ignored_by_priority"] = True
+                        chosen_ev["ignored_reason"] = "no_position_after_prior_exit"
                         continue
                     try:
-                        px = float(close_qfq.loc[day, c])
-                        a = float(atr.loc[day, c])
-                    except (KeyError, TypeError, ValueError):
+                        exec_ts = pd.to_datetime(exec_date)
+                    except (TypeError, ValueError):
+                        chosen_ev["reduce_fraction"] = 0.0
+                        chosen_ev["ignored_by_priority"] = True
+                        chosen_ev["ignored_reason"] = "invalid_execution_date"
                         continue
-                    if not (np.isfinite(px) and np.isfinite(a) and a > 0.0):
+                    if exec_ts not in w.index or exec_ts > dates[int(end_i)]:
+                        chosen_ev["reduce_fraction"] = 0.0
+                        chosen_ev["ignored_by_priority"] = True
+                        chosen_ev["ignored_reason"] = "execution_out_of_segment"
                         continue
+                    wt_exec = (
+                        float(w.loc[exec_ts, c])
+                        if (c in w.columns and exec_ts in w.index)
+                        else 0.0
+                    )
+                    if (not np.isfinite(wt_exec)) or wt_exec <= 1e-12:
+                        chosen_ev["reduce_fraction"] = 0.0
+                        chosen_ev["ignored_by_priority"] = True
+                        chosen_ev["ignored_reason"] = "no_position_on_execution"
+                        continue
+                    w.loc[exec_ts : dates[end_i], c] = 0.0
+                    exit_applied = True
+                    if chosen_overlay == "atr_stop":
+                        stop_triggered = True
+                        if stop_trigger_date is None:
+                            stop_trigger_date = str(
+                                chosen_ev.get("trigger_date") or None
+                            )
+                if deferred_atr_events:
+                    atr_pending_events_by_code.setdefault(str(c), []).extend(
+                        [dict(x) for x in deferred_atr_events]
+                    )
 
-                    should_update = True
-                    if atr_stop_exec_mode == "atr_stop_static":
-                        should_update = False
-                        dist_mult = float(atr_n)
-                    elif atr_stop_exec_mode == "atr_stop_trailing":
-                        dist_mult = float(atr_n)
-                        ep = float(entry_px.get(c, px))
-                        pc = float(prev_close.get(c, px))
-                        should_update = bool((px > ep) or (px > pc))
-                    else:
-                        ep = float(entry_px.get(c, px))
-                        a_ref = (
-                            float(entry_atr.get(c, a))
-                            if atr_stop_atr_basis == "entry"
-                            else float(a)
-                        )
-                        gain_units = (px - ep) / max(a_ref, 1e-12)
-                        steps = (
-                            int(np.floor(gain_units / float(atr_m)))
-                            if np.isfinite(gain_units)
-                            else 0
-                        )
-                        dist_mult = float(atr_n) - float(steps) * float(atr_m)
-                        dist_mult = float(max(float(atr_min), dist_mult))
-                        pc = float(prev_close.get(c, px))
-                        should_update = bool((px > ep) or (px > pc))
-
-                    if should_update:
-                        a_ref = (
-                            float(entry_atr.get(c, a))
-                            if atr_stop_atr_basis == "entry"
-                            else float(a)
-                        )
-                        cand = px - dist_mult * a_ref
-                        stop[c] = float(max(float(stop[c]), float(cand)))
-                    prev_close[c] = float(px)
-
-            atr_stop["triggered"] = bool(events)
+            atr_stop["events"] = [
+                ev
+                for c in stop_codes
+                for ev in (atr_events_by_code.get(str(c), []) or [])
+            ]
+            atr_stop["triggered"] = bool(
+                any(
+                    float(ev.get("reduce_fraction") or 0.0) > 0.0
+                    for ev in atr_stop["events"]
+                )
+            )
             atr_stop["trigger_date"] = stop_trigger_date
-            atr_stop["trigger_code"] = (
-                str(events[0]["code"]) if events else None
-            )  # backward-compatible summary
-            atr_stop["events"] = events
-            atr_stop["final_stop_by_code"] = {k: float(v) for k, v in stop.items()}
+            atr_stop["trigger_code"] = next(
+                (
+                    str(ev.get("code") or "")
+                    for ev in atr_stop["events"]
+                    if float(ev.get("reduce_fraction") or 0.0) > 0.0
+                ),
+                None,
+            )
+            if not atr_stop["triggered"]:
+                atr_stop["trigger_date"] = None
+                atr_stop["trigger_code"] = None
+
+            rtp_events_flat = [
+                ev
+                for c in stop_codes
+                for ev in (rtp_events_by_code.get(str(c), []) or [])
+            ]
+            r_take_profit["events"] = rtp_events_flat
+            effective_rtp_events = [
+                ev
+                for ev in rtp_events_flat
+                if float(ev.get("reduce_fraction") or 0.0) > 0.0
+            ]
+            r_take_profit["triggered"] = bool(effective_rtp_events)
+            r_take_profit["trigger_count"] = int(len(effective_rtp_events))
+            rtp_by_code: dict[str, int] = {}
+            rtp_tier_total: dict[str, int] = {}
+            rtp_tier_by_code: dict[str, dict[str, int]] = {}
+            for ev in effective_rtp_events:
+                cc = str(ev.get("code") or "")
+                if not cc:
+                    continue
+                rtp_by_code[cc] = int(rtp_by_code.get(cc, 0) + 1)
+                tier_v = ev.get("active_tier_r")
+                if tier_v is None:
+                    continue
+                tier_key = f"{float(tier_v):g}"
+                rtp_tier_total[tier_key] = int(rtp_tier_total.get(tier_key, 0) + 1)
+                by_code = rtp_tier_by_code.setdefault(cc, {})
+                by_code[tier_key] = int(by_code.get(tier_key, 0) + 1)
+            r_take_profit["trigger_count_by_code"] = rtp_by_code
+            r_take_profit["tier_trigger_counts"] = rtp_tier_total
+            r_take_profit["tier_trigger_counts_by_code"] = rtp_tier_by_code
+            if effective_rtp_events:
+                r_take_profit_events_all.extend(effective_rtp_events)
+                r_take_profit_trigger_count_total += int(len(effective_rtp_events))
+                for cc, n in rtp_by_code.items():
+                    r_take_profit_trigger_count_by_code[cc] = int(
+                        r_take_profit_trigger_count_by_code.get(cc, 0) + int(n)
+                    )
+                for tier_key, n in rtp_tier_total.items():
+                    r_take_profit_tier_trigger_counts_total[tier_key] = int(
+                        r_take_profit_tier_trigger_counts_total.get(tier_key, 0)
+                        + int(n)
+                    )
+                for cc, tier_map in rtp_tier_by_code.items():
+                    dst = r_take_profit_tier_trigger_counts_by_code.setdefault(cc, {})
+                    for tier_key, n in tier_map.items():
+                        dst[tier_key] = int(dst.get(tier_key, 0) + int(n))
         else:
             atr_stop["triggered"] = False
             atr_stop["events"] = []
@@ -5170,6 +5521,7 @@ def backtest_rotation(
                 "mode": meta.get("mode"),
                 "exposure": float(exposure),
                 "atr_stop": atr_stop,
+                "r_take_profit": r_take_profit,
                 "corr_filter": corr_meta,
                 "inertia": inertia_meta,
                 "rr_sizing": rr_meta,
@@ -5639,6 +5991,21 @@ def backtest_rotation(
         )
         one["holding_bias_v_ge_5_per_holding_distribution"] = dict(
             holding_bias_v_ge_5_dist_by_code.get(key, {})
+        )
+    trade_stats["overall"]["r_take_profit_trigger_count"] = int(
+        r_take_profit_trigger_count_total
+    )
+    trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = dict(
+        r_take_profit_tier_trigger_counts_total
+    )
+    for c in codes:
+        key = str(c)
+        one = trade_stats["by_code"].setdefault(key, {})
+        one["r_take_profit_trigger_count"] = int(
+            r_take_profit_trigger_count_by_code.get(key, 0)
+        )
+        one["r_take_profit_tier_trigger_counts"] = dict(
+            r_take_profit_tier_trigger_counts_by_code.get(key, {})
         )
     event_study = compute_event_study(
         dates=dates,
@@ -6261,6 +6628,17 @@ def backtest_rotation(
         "atr_stop_reentry_mode": atr_stop_reentry_mode,
         "atr_stop_execution_mode": str(atr_stop_execution_mode),
         "atr_stop_execution_time": str(atr_stop_execution_time),
+        "r_take_profit_enabled": bool(r_take_profit_enabled),
+        "r_take_profit_reentry_mode": str(r_take_profit_reentry_mode),
+        "r_take_profit_execution_mode": str(r_take_profit_execution_mode),
+        "r_take_profit_execution_time": str(r_take_profit_execution_time),
+        "r_take_profit_tiers": [
+            {
+                "r_multiple": float((x or {}).get("r_multiple")),
+                "retrace_ratio": float((x or {}).get("retrace_ratio")),
+            }
+            for x in (r_take_profit_tiers or [])
+        ],
         "codes": codes,
         "untradable_codes_skipped": untradable_codes_skipped,
         "benchmark_codes": bench_codes,
@@ -6416,6 +6794,7 @@ def backtest_rotation(
         "current_holdings": current_holdings,
         "holding_streaks": holding_streaks,
         "daily_exit_events": daily_exit_events,
+        "r_take_profit_events": r_take_profit_events_all,
         "corporate_actions": corporate_actions,
     }
     if return_weights_end:

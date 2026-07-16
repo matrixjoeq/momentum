@@ -46,6 +46,11 @@ class RotationAnalysisInputs:
     atr_stop_window: int = 14
     atr_stop_n: float = 2.0
     atr_stop_m: float = 0.5
+    r_take_profit_enabled: bool = False
+    r_take_profit_reentry_mode: str = "reenter"
+    r_take_profit_execution_mode: str = "intraday"
+    r_take_profit_execution_time: str | None = None
+    r_take_profit_tiers: list[dict[str, float]] | None = None
     score_method: str = "raw_mom"
     # Risk controls (defaults off)
     trend_filter: bool = False
@@ -141,6 +146,11 @@ def compute_rotation_backtest(
             atr_stop_window=inp.atr_stop_window,
             atr_stop_n=inp.atr_stop_n,
             atr_stop_m=inp.atr_stop_m,
+            r_take_profit_enabled=bool(inp.r_take_profit_enabled),
+            r_take_profit_reentry_mode=inp.r_take_profit_reentry_mode,
+            r_take_profit_execution_mode=inp.r_take_profit_execution_mode,
+            r_take_profit_execution_time=inp.r_take_profit_execution_time,
+            r_take_profit_tiers=inp.r_take_profit_tiers,
             score_method=inp.score_method,
             trend_filter=inp.trend_filter,
             trend_exit_filter=inp.trend_exit_filter,

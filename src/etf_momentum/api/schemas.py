@@ -2333,6 +2333,18 @@ class AssetMomentumFloorRule(BaseModel):
     )
 
 
+class RotationRTakeProfitTier(BaseModel):
+    r_multiple: float = Field(
+        gt=0.0,
+        description="Activate drawdown take-profit when peak floating profit reaches this R multiple",
+    )
+    retrace_ratio: float = Field(
+        gt=0.0,
+        lt=1.0,
+        description="Allowed pullback ratio from peak floating profit once activated",
+    )
+
+
 class RotationBacktestRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")
@@ -2467,6 +2479,26 @@ class RotationBacktestRequest(BaseModel):
         default=0.5,
         gt=0.0,
         description="ATR tightening step m (used by tightening mode)",
+    )
+    r_take_profit_enabled: bool = Field(
+        default=False,
+        description="Enable universal R-multiple drawdown take-profit overlay",
+    )
+    r_take_profit_reentry_mode: str = Field(
+        default="reenter",
+        description="Re-entry after R take-profit: reenter|wait_next_entry",
+    )
+    r_take_profit_execution_mode: str = Field(
+        default="intraday",
+        description="R take-profit execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    r_take_profit_execution_time: Literal["open", "close", "full_day"] | None = Field(
+        default=None,
+        description="R take-profit execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+    )
+    r_take_profit_tiers: list[RotationRTakeProfitTier] | None = Field(
+        default=None,
+        description="Tiered config: peak>=R multiple activates pullback-exit threshold, e.g. [{r_multiple:2,retrace_ratio:0.5}]",
     )
     # Pre-trade risk controls (all optional; defaults keep previous behavior)
     trend_filter: bool = Field(
@@ -2635,6 +2667,23 @@ class RotationBacktestRequest(BaseModel):
             execution_time=getattr(self, "atr_stop_execution_time", None),
             mode_field="atr_stop_execution_mode",
             time_field="atr_stop_execution_time",
+        )
+        rtp_reentry = (
+            str(getattr(self, "r_take_profit_reentry_mode", "reenter") or "reenter")
+            .strip()
+            .lower()
+        )
+        if rtp_reentry not in {"reenter", "wait_next_entry"}:
+            raise ValueError(
+                "r_take_profit_reentry_mode must be one of: reenter|wait_next_entry"
+            )
+        _validate_overlay_execution_mode_time(
+            execution_mode=str(
+                getattr(self, "r_take_profit_execution_mode", "intraday") or "intraday"
+            ),
+            execution_time=getattr(self, "r_take_profit_execution_time", None),
+            mode_field="r_take_profit_execution_mode",
+            time_field="r_take_profit_execution_time",
         )
         raw_exec_time = getattr(self, "atr_stop_execution_time", None)
         exec_time_v = (

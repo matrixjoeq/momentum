@@ -774,6 +774,82 @@ def test_api_rotation_backtest_rejects_invalid_atr_aux_fields(
     assert err_msg in str(err)
 
 
+def test_api_rotation_backtest_accepts_r_take_profit_overlay(api_client) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240131",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240131",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "stop_scheme": "none",
+            "atr_stop_mode": "none",
+            "atr_stop_window": 5,
+            "atr_stop_n": 1.0,
+            "r_take_profit_enabled": True,
+            "r_take_profit_reentry_mode": "reenter",
+            "r_take_profit_execution_mode": "intraday",
+            "r_take_profit_execution_time": "close",
+            "r_take_profit_tiers": [{"r_multiple": 2.0, "retrace_ratio": 0.5}],
+        },
+    )
+    assert bool(data.get("r_take_profit_enabled")) is True
+    assert str(data.get("r_take_profit_execution_mode") or "") == "intraday"
+    assert str(data.get("r_take_profit_execution_time") or "") == "close"
+    tiers = list(data.get("r_take_profit_tiers") or [])
+    assert tiers and float((tiers[0] or {}).get("r_multiple") or 0.0) == pytest.approx(
+        2.0, rel=0.0, abs=1e-12
+    )
+
+
+def test_api_rotation_backtest_rejects_r_take_profit_next_day_full_day(
+    api_client,
+) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240131",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240131",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "r_take_profit_enabled": True,
+            "r_take_profit_execution_mode": "next_day",
+            "r_take_profit_execution_time": "full_day",
+            "r_take_profit_tiers": [{"r_multiple": 2.0, "retrace_ratio": 0.5}],
+        },
+        expected_status=422,
+    )
+    assert "r_take_profit_execution_time" in str(err)
+
+
 def test_api_rotation_backtest_legacy_atr_mode_without_stop_scheme_still_works(
     api_client,
 ) -> None:
@@ -2435,7 +2511,7 @@ def test_api_trend_portfolio_risk_budget_rebalance_mode_contract(engine, api_cli
         "/api/analysis/trend/portfolio",
         {**base_payload, "risk_budget_rebalance_mode": "standard"},
     )
-    params = ((out_std.get("meta") or {}).get("params") or {})
+    params = (out_std.get("meta") or {}).get("params") or {}
     assert str(params.get("risk_budget_rebalance_mode") or "") == "standard"
     rc = (out_std.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
     assert str(rc.get("rebalance_mode") or "") == "standard"
@@ -2445,7 +2521,7 @@ def test_api_trend_portfolio_risk_budget_rebalance_mode_contract(engine, api_cli
         "/api/analysis/trend/portfolio",
         {**base_payload, "risk_budget_rebalance_mode": "standard", "engine": "bt"},
     )
-    params_bt = ((out_std_bt.get("meta") or {}).get("params") or {})
+    params_bt = (out_std_bt.get("meta") or {}).get("params") or {}
     assert str(params_bt.get("risk_budget_rebalance_mode") or "") == "standard"
     rc_bt = (out_std_bt.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
     assert str(rc_bt.get("rebalance_mode") or "") == "standard"

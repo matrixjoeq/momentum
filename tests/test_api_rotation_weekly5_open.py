@@ -145,6 +145,41 @@ def test_api_rotation_weekly5_open_rejects_equity_budget_non_close_execution(
         "/api/analysis/rotation/weekly5-open-combo",
     ],
 )
+def test_api_rotation_weekly5_open_variants_accept_r_take_profit_params(
+    api_client, path: str
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20240102",
+        end_date="20240131",
+    )
+    payload = {
+        "start": "20240102",
+        "end": "20240131",
+        "r_take_profit_enabled": True,
+        "r_take_profit_reentry_mode": "reenter",
+        "r_take_profit_execution_mode": "intraday",
+        "r_take_profit_execution_time": "close",
+        "r_take_profit_tiers": [{"r_multiple": 2.0, "retrace_ratio": 0.5}],
+    }
+    if path == "/api/analysis/rotation/weekly5-open":
+        payload["anchor_weekday"] = 5
+    data = post_json_ok(c, path, payload)
+    assert "by_anchor" in data
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/analysis/rotation/weekly5-open",
+        "/api/analysis/rotation/weekly5-open-lite",
+        "/api/analysis/rotation/weekly5-open-combo-lite",
+        "/api/analysis/rotation/weekly5-open-combo",
+    ],
+)
 def test_api_rotation_weekly5_open_variant_rejects_atr_scheme_with_none_mode(
     api_client, path: str
 ):
@@ -236,6 +271,32 @@ def test_api_rotation_weekly5_open_variant_rejects_invalid_atr_aux_fields(
         payload["anchor_weekday"] = 5
     err = post_json(c, path, payload, expected_status=422)
     assert err_msg in str(err)
+
+
+def test_api_rotation_weekly5_open_rejects_r_take_profit_next_day_full_day(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20240102",
+        end_date="20240131",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/weekly5-open",
+        {
+            "start": "20240102",
+            "end": "20240131",
+            "anchor_weekday": 5,
+            "r_take_profit_enabled": True,
+            "r_take_profit_execution_mode": "next_day",
+            "r_take_profit_execution_time": "full_day",
+            "r_take_profit_tiers": [{"r_multiple": 2.0, "retrace_ratio": 0.5}],
+        },
+        expected_status=422,
+    )
+    assert "r_take_profit_execution_time" in str(err)
 
 
 @pytest.mark.parametrize(

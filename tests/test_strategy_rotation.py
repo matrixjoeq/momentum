@@ -1417,13 +1417,370 @@ def test_rotation_equity_budget_next_day_close_exec_delays_exit(session_factory)
     for p in out.get("holdings") or []:
         atr_meta = (p or {}).get("atr_stop") or {}
         events.extend([e for e in (atr_meta.get("events") or []) if e])
+    events_eqn_a = [e for e in events if str((e or {}).get("code") or "") == "EQN_A"]
+    effective_events_eqn_a = [
+        e for e in events_eqn_a if float((e or {}).get("reduce_fraction") or 0.0) > 0.0
+    ]
+    assert len(effective_events_eqn_a) == 1
+    assert any(
+        str((e or {}).get("ignored_reason") or "") == "deferred_to_future_segment"
+        for e in events_eqn_a
+    )
+    target = effective_events_eqn_a[0]
+    trigger_date = str(target.get("trigger_date") or "")
+    execution_date = str(target.get("execution_date") or "")
+    assert execution_date and execution_date > trigger_date
+    assert str(target.get("execution_mode") or "") == "next_day"
+    assert str(target.get("execution_time") or "") == "close"
+    dates_out = list(((out.get("weights") or {}).get("dates") or []))
+    wa = list((((out.get("weights") or {}).get("series") or {}).get("EQN_A") or []))
+    assert execution_date in dates_out
+    idx = dates_out.index(execution_date)
+    assert idx > 0
+    assert float(wa[idx - 1]) > 1e-12
+    assert float(wa[idx]) <= 1e-12
+
+
+def test_rotation_equity_budget_next_day_exec_still_works_during_dd_sleep(
+    session_factory,
+):
+    sf = session_factory
+    with sf() as db:
+        codes = ["EQS_A", "EQS_B"]
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=80, freq="B")]
+        for i, d in enumerate(dates):
+            pa = 100.0 + i * 0.7
+            if i >= 34:
+                pa = 69.0 + (i - 34) * 0.08
+            pb = 100.0 + i * 0.20
+            add_price_all_adjustments(
+                db,
+                code="EQS_A",
+                day=d,
+                close=float(pa),
+                open_price=float(pa),
+                high=float(pa),
+                low=float(pa),
+            )
+            add_price_all_adjustments(
+                db,
+                code="EQS_B",
+                day=d,
+                close=float(pb),
+                open_price=float(pb),
+                high=float(pb),
+                low=float(pb),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=2,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="equity_budget",
+                equity_stop_risk_pct=0.02,
+                atr_stop_execution_mode="next_day",
+                atr_stop_execution_time="close",
+                atr_stop_mode="none",
+                dd_control=True,
+                dd_threshold=0.01,
+                dd_reduce=0.5,
+                dd_sleep_days=10,
+            ),
+        )
+    events = []
+    for p in out.get("holdings") or []:
+        atr_meta = (p or {}).get("atr_stop") or {}
+        events.extend(
+            [
+                e
+                for e in (atr_meta.get("events") or [])
+                if e and str((e or {}).get("code") or "") == "EQS_A"
+            ]
+        )
+    effective = [
+        e for e in events if float((e or {}).get("reduce_fraction") or 0.0) > 0.0
+    ]
+    assert len(effective) == 1
+    target = effective[0]
+    trigger_date = str(target.get("trigger_date") or "")
+    execution_date = str(target.get("execution_date") or "")
+    assert execution_date and execution_date > trigger_date
+
+    exec_period = next(
+        (
+            p
+            for p in (out.get("holdings") or [])
+            if str((p or {}).get("start_date") or "") <= execution_date
+            and execution_date <= str((p or {}).get("end_date") or "")
+        ),
+        None,
+    )
+    assert exec_period is not None
+    assert bool((((exec_period or {}).get("dd_control") or {}).get("in_sleep"))) is True
+
+    dates_out = list(((out.get("weights") or {}).get("dates") or []))
+    wa = list((((out.get("weights") or {}).get("series") or {}).get("EQS_A") or []))
+    assert execution_date in dates_out
+    idx = dates_out.index(execution_date)
+    assert idx > 0
+    assert float(wa[idx - 1]) > 1e-12
+    assert float(wa[idx]) <= 1e-12
+
+
+def test_rotation_r_take_profit_triggers_with_stop_scheme_none(session_factory):
+    sf = session_factory
+    with sf() as db:
+        codes = ["RTPA", "RTPB"]
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=80, freq="B")]
+        for i, d in enumerate(dates):
+            if i < 28:
+                pa = 100.0 + i * 1.2
+            elif i < 46:
+                pa = 133.6 - (i - 28) * 1.8
+            else:
+                pa = 101.2 + (i - 46) * 0.10
+            pb = 100.0 + i * 0.18
+            add_price_all_adjustments(
+                db,
+                code="RTPA",
+                day=d,
+                close=float(pa),
+                open_price=float(pa),
+                high=float(pa) * 1.002,
+                low=float(pa) * 0.998,
+            )
+            add_price_all_adjustments(
+                db,
+                code="RTPB",
+                day=d,
+                close=float(pb),
+                open_price=float(pb),
+                high=float(pb) * 1.002,
+                low=float(pb) * 0.998,
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=2,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="none",
+                atr_stop_mode="none",
+                atr_stop_window=5,
+                atr_stop_n=1.0,
+                r_take_profit_enabled=True,
+                r_take_profit_reentry_mode="reenter",
+                r_take_profit_execution_mode="intraday",
+                r_take_profit_execution_time="close",
+                r_take_profit_tiers=[{"r_multiple": 0.5, "retrace_ratio": 0.1}],
+            ),
+        )
+    assert bool(out.get("r_take_profit_enabled")) is True
+    events = [e for e in (out.get("r_take_profit_events") or []) if e]
+    assert any(float((e or {}).get("reduce_fraction") or 0.0) > 0.0 for e in events)
+    one_period = next(iter(out.get("holdings") or []), {}) or {}
+    rtp_meta = (one_period.get("r_take_profit") or {}) if one_period else {}
+    assert str(rtp_meta.get("execution_mode") or "") == "intraday"
+    assert str(rtp_meta.get("execution_time") or "") == "close"
+    assert isinstance(rtp_meta.get("tiers"), list)
+    stats = ((out.get("trade_statistics") or {}).get("overall")) or {}
+    assert int(stats.get("r_take_profit_trigger_count") or 0) >= 1
+    by_code = ((out.get("trade_statistics") or {}).get("by_code")) or {}
+    assert (
+        sum(
+            int(((v or {}).get("r_take_profit_trigger_count") or 0))
+            for v in by_code.values()
+        )
+        >= 1
+    )
+
+
+def test_rotation_r_take_profit_next_day_execution_cross_segment(session_factory):
+    sf = session_factory
+    with sf() as db:
+        codes = ["RTPX"]
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=50, freq="B")]
+        for i, d in enumerate(dates):
+            if i < 19:
+                px = 100.0 + i * 1.5
+            elif i == 19:
+                px = 102.0
+            else:
+                px = 101.5 - (i - 20) * 0.05
+            add_price_all_adjustments(
+                db,
+                code="RTPX",
+                day=d,
+                close=float(px),
+                open_price=float(px),
+                high=float(px) * 1.002,
+                low=float(px) * 0.998,
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=1,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="none",
+                atr_stop_mode="none",
+                atr_stop_window=5,
+                atr_stop_n=1.0,
+                r_take_profit_enabled=True,
+                r_take_profit_reentry_mode="reenter",
+                r_take_profit_execution_mode="next_day",
+                r_take_profit_execution_time="close",
+                r_take_profit_tiers=[{"r_multiple": 0.5, "retrace_ratio": 0.1}],
+            ),
+        )
+    events = [e for e in (out.get("r_take_profit_events") or []) if e]
     target = next(
-        (e for e in events if str(e.get("code") or "") == "EQN_A"),
+        (
+            e
+            for e in events
+            if str((e or {}).get("code") or "") == "RTPX"
+            and str((e or {}).get("execution_mode") or "") == "next_day"
+            and float((e or {}).get("reduce_fraction") or 0.0) > 0.0
+        ),
         None,
     )
     assert target is not None
     trigger_date = str(target.get("trigger_date") or "")
     execution_date = str(target.get("execution_date") or "")
     assert execution_date and execution_date > trigger_date
-    assert str(target.get("execution_mode") or "") == "next_day"
-    assert str(target.get("execution_time") or "") == "close"
+
+    dates_out = list(((out.get("weights") or {}).get("dates") or []))
+    w = list((((out.get("weights") or {}).get("series") or {}).get("RTPX") or []))
+    assert execution_date in dates_out
+    idx = dates_out.index(execution_date)
+    assert idx > 0
+    assert float(w[idx - 1]) > 1e-12
+    assert float(w[idx]) <= 1e-12
+
+
+def test_rotation_r_take_profit_next_day_exec_still_works_during_dd_sleep(
+    session_factory,
+):
+    sf = session_factory
+    with sf() as db:
+        codes = ["RSD_A", "RSD_B"]
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=80, freq="B")]
+        for i, d in enumerate(dates):
+            if i < 24:
+                pa = 100.0 + i * 1.4
+            elif i < 36:
+                pa = 133.6 - (i - 24) * 2.0
+            else:
+                pa = 109.6 - (i - 36) * 0.03
+            pb = 100.0 + i * 0.02
+            add_price_all_adjustments(
+                db,
+                code="RSD_A",
+                day=d,
+                close=float(pa),
+                open_price=float(pa),
+                high=float(pa) * 1.002,
+                low=float(pa) * 0.998,
+            )
+            add_price_all_adjustments(
+                db,
+                code="RSD_B",
+                day=d,
+                close=float(pb),
+                open_price=float(pb),
+                high=float(pb) * 1.002,
+                low=float(pb) * 0.998,
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=2,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="none",
+                atr_stop_mode="none",
+                atr_stop_window=5,
+                atr_stop_n=1.0,
+                r_take_profit_enabled=True,
+                r_take_profit_reentry_mode="reenter",
+                r_take_profit_execution_mode="next_day",
+                r_take_profit_execution_time="close",
+                r_take_profit_tiers=[{"r_multiple": 0.5, "retrace_ratio": 0.1}],
+                dd_control=True,
+                dd_threshold=0.005,
+                dd_reduce=0.5,
+                dd_sleep_days=10,
+            ),
+        )
+    events = [
+        e
+        for e in (out.get("r_take_profit_events") or [])
+        if str((e or {}).get("code") or "") == "RSD_A"
+        and float((e or {}).get("reduce_fraction") or 0.0) > 0.0
+    ]
+    assert len(events) == 1
+    target = events[0]
+    trigger_date = str(target.get("trigger_date") or "")
+    execution_date = str(target.get("execution_date") or "")
+    assert execution_date and execution_date > trigger_date
+
+    exec_period = next(
+        (
+            p
+            for p in (out.get("holdings") or [])
+            if str((p or {}).get("start_date") or "") <= execution_date
+            and execution_date <= str((p or {}).get("end_date") or "")
+        ),
+        None,
+    )
+    assert exec_period is not None
+    assert bool((((exec_period or {}).get("dd_control") or {}).get("in_sleep"))) is True
+
+    dates_out = list(((out.get("weights") or {}).get("dates") or []))
+    wa = list((((out.get("weights") or {}).get("series") or {}).get("RSD_A") or []))
+    assert execution_date in dates_out
+    idx = dates_out.index(execution_date)
+    assert idx > 0
+    assert float(wa[idx - 1]) > 1e-12
+    assert float(wa[idx]) <= 1e-12

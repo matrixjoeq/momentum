@@ -2055,6 +2055,42 @@
               <input id="rotAtrStopM" value="0.5" />
             </div>
             <div>
+              <label>通用R乘数止盈</label>
+              <select id="rotRTpEnable" style="min-width: 140px">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>R止盈后重入</label>
+              <select id="rotRTpReentry" style="min-width: 150px">
+                <option value="reenter" selected>允许重返</option>
+                <option value="wait_next_entry">等待下一次入场</option>
+              </select>
+            </div>
+            <div>
+              <label>R止盈执行</label>
+              <select id="rotRTpExec" style="min-width: 150px">
+                <option value="intraday" selected>日内执行</option>
+                <option value="next_day">次日执行</option>
+              </select>
+            </div>
+            <div>
+              <label>R止盈执行时点</label>
+              <select id="rotRTpExecTime" style="min-width: 140px">
+                <option value="full_day" selected>全日</option>
+                <option value="open">开盘</option>
+                <option value="close">收盘</option>
+              </select>
+            </div>
+            <div style="min-width: 360px">
+              <label>R阈值与允许回落（r:ratio）</label>
+              <input
+                id="rotRTpTiers"
+                value="2:0.5,3:0.3333333333,4:0.25,5:0.2"
+              />
+            </div>
+            <div>
               <label>分组约束</label>
               <select id="rotGroupEnforce" style="min-width: 140px">
                 <option value="false" selected>关闭</option>
@@ -8186,6 +8222,11 @@
           "rotAtrStopWin",
           "rotAtrStopN",
           "rotAtrStopM",
+          "rotRTpEnable",
+          "rotRTpReentry",
+          "rotRTpExec",
+          "rotRTpExecTime",
+          "rotRTpTiers",
           "rotGroupEnforce",
           "rotGroupPolicy",
           "rotAssetGroups",
@@ -11183,11 +11224,19 @@
           const execModeEl = $("rotStopExecMode");
           const execTimeEl = $("rotStopExecTime");
           const eqRiskEl = $("rotEquityStopRiskPct");
+          const rtpOnEl = $("rotRTpEnable");
+          const rtpReentryEl = $("rotRTpReentry");
+          const rtpExecEl = $("rotRTpExec");
+          const rtpExecTimeEl = $("rotRTpExecTime");
+          const rtpTiersEl = $("rotRTpTiers");
           const stopScheme = stopSchemeEl
             ? String(stopSchemeEl.value || "none")
                 .trim()
                 .toLowerCase()
             : "none";
+          const rtpOn = !!(
+            rtpOnEl && String(rtpOnEl.value || "false").toLowerCase() === "true"
+          );
           const isAtr = stopScheme === "atr";
           const isEq = stopScheme === "equity_budget";
           const mode = String(modeEl.value || "none")
@@ -11196,7 +11245,7 @@
           const isStatic = isAtr && mode === "static";
           const isDynamic =
             isAtr && (mode === "trailing" || mode === "tightening");
-          const canEditWinN = isStatic || isDynamic;
+          const canEditWinN = isStatic || isDynamic || rtpOn;
           const canEditStopAux = isStatic || isDynamic;
           const canEditAll = isDynamic;
           let execMode = execModeEl
@@ -11227,6 +11276,30 @@
               opt.disabled = !!dis;
             }
           }
+          if (rtpExecEl) {
+            let rtpExecMode = String(rtpExecEl.value || "intraday")
+              .trim()
+              .toLowerCase();
+            if (!["intraday", "next_day"].includes(rtpExecMode))
+              rtpExecMode = "intraday";
+            rtpExecEl.value = rtpExecMode;
+            if (rtpExecTimeEl) {
+              let rtpExecTime = String(rtpExecTimeEl.value || "full_day")
+                .trim()
+                .toLowerCase();
+              if (!["open", "close", "full_day"].includes(rtpExecTime))
+                rtpExecTime = "full_day";
+              if (rtpExecMode === "next_day" && rtpExecTime === "full_day")
+                rtpExecTime = "close";
+              rtpExecTimeEl.value = rtpExecTime;
+              for (const opt of Array.from(rtpExecTimeEl.options || [])) {
+                const vv = String(opt.value || "")
+                  .trim()
+                  .toLowerCase();
+                opt.disabled = rtpExecMode === "next_day" && vv === "full_day";
+              }
+            }
+          }
           setEnabled(modeEl, isAtr);
           setEnabled(winEl, canEditWinN);
           setEnabled(nEl, canEditWinN);
@@ -11236,6 +11309,10 @@
           setEnabled(execModeEl, isAtr || isEq);
           setEnabled(execTimeEl, isAtr || isEq);
           setEnabled(eqRiskEl, isEq);
+          setEnabled(rtpReentryEl, rtpOn);
+          setEnabled(rtpExecEl, rtpOn);
+          setEnabled(rtpExecTimeEl, rtpOn);
+          setEnabled(rtpTiersEl, rtpOn);
           return;
         }
         const mode = String(modeEl.value || "none")
@@ -31382,6 +31459,50 @@
           !(atr_stop_n > atr_stop_m)
         )
           return setMsg("通用ATR动态收紧要求 n > m");
+        const r_take_profit_enabled =
+          $("rotRTpEnable") && $("rotRTpEnable").value === "true";
+        const r_take_profit_reentry_mode =
+          $("rotRTpReentry") && $("rotRTpReentry").value
+            ? String($("rotRTpReentry").value)
+            : "reenter";
+        const r_take_profit_execution_mode =
+          $("rotRTpExec") && $("rotRTpExec").value
+            ? String($("rotRTpExec").value)
+            : "intraday";
+        const r_take_profit_execution_time =
+          $("rotRTpExecTime") && $("rotRTpExecTime").value
+            ? String($("rotRTpExecTime").value)
+            : "full_day";
+        const r_take_profit_tiers_text =
+          $("rotRTpTiers") && $("rotRTpTiers").value
+            ? String($("rotRTpTiers").value)
+            : "";
+        if (
+          !["reenter", "wait_next_entry"].includes(r_take_profit_reentry_mode)
+        )
+          return setMsg("R止盈重入模式非法");
+        if (!["intraday", "next_day"].includes(r_take_profit_execution_mode))
+          return setMsg("R止盈执行模式仅支持 intraday/next_day");
+        if (
+          !["open", "close", "full_day"].includes(r_take_profit_execution_time)
+        )
+          return setMsg("R止盈执行时点仅支持 open/close/full_day");
+        if (
+          r_take_profit_execution_mode === "next_day" &&
+          r_take_profit_execution_time === "full_day"
+        )
+          return setMsg("R止盈次日执行时点仅支持 open/close");
+        const parsedRTpTiers = r_take_profit_enabled
+          ? _parseRTpTiers(r_take_profit_tiers_text)
+          : { tiers: [] };
+        if (parsedRTpTiers && parsedRTpTiers.__error)
+          return setMsg(parsedRTpTiers.__error);
+        if (
+          r_take_profit_enabled &&
+          (!Array.isArray(parsedRTpTiers.tiers) ||
+            parsedRTpTiers.tiers.length === 0)
+        )
+          return setMsg("R止盈分层不能为空");
         const trend_filter = $("rotTrendOn").value === "true";
         const trend_exit_filter =
           $("rotExitTrendOn") && $("rotExitTrendOn").value === "true";
@@ -31825,6 +31946,13 @@
           atr_stop_window,
           atr_stop_n,
           atr_stop_m,
+          r_take_profit_enabled,
+          r_take_profit_reentry_mode,
+          r_take_profit_execution_mode,
+          r_take_profit_execution_time,
+          r_take_profit_tiers: r_take_profit_enabled
+            ? parsedRTpTiers.tiers
+            : [],
           corr_filter,
           corr_window,
           corr_threshold,
@@ -33980,6 +34108,50 @@
           !(atr_stop_n > atr_stop_m)
         )
           return setMsg("通用ATR动态收紧要求 n > m");
+        const r_take_profit_enabled =
+          $("rotRTpEnable") && $("rotRTpEnable").value === "true";
+        const r_take_profit_reentry_mode =
+          $("rotRTpReentry") && $("rotRTpReentry").value
+            ? String($("rotRTpReentry").value)
+            : "reenter";
+        const r_take_profit_execution_mode =
+          $("rotRTpExec") && $("rotRTpExec").value
+            ? String($("rotRTpExec").value)
+            : "intraday";
+        const r_take_profit_execution_time =
+          $("rotRTpExecTime") && $("rotRTpExecTime").value
+            ? String($("rotRTpExecTime").value)
+            : "full_day";
+        const r_take_profit_tiers_text =
+          $("rotRTpTiers") && $("rotRTpTiers").value
+            ? String($("rotRTpTiers").value)
+            : "";
+        if (
+          !["reenter", "wait_next_entry"].includes(r_take_profit_reentry_mode)
+        )
+          return setMsg("R止盈重入模式非法");
+        if (!["intraday", "next_day"].includes(r_take_profit_execution_mode))
+          return setMsg("R止盈执行模式仅支持 intraday/next_day");
+        if (
+          !["open", "close", "full_day"].includes(r_take_profit_execution_time)
+        )
+          return setMsg("R止盈执行时点仅支持 open/close/full_day");
+        if (
+          r_take_profit_execution_mode === "next_day" &&
+          r_take_profit_execution_time === "full_day"
+        )
+          return setMsg("R止盈次日执行时点仅支持 open/close");
+        const parsedRTpTiers = r_take_profit_enabled
+          ? _parseRTpTiers(r_take_profit_tiers_text)
+          : { tiers: [] };
+        if (parsedRTpTiers && parsedRTpTiers.__error)
+          return setMsg(parsedRTpTiers.__error);
+        if (
+          r_take_profit_enabled &&
+          (!Array.isArray(parsedRTpTiers.tiers) ||
+            parsedRTpTiers.tiers.length === 0)
+        )
+          return setMsg("R止盈分层不能为空");
 
         let payload = null;
         if (
@@ -34068,6 +34240,13 @@
             atr_stop_window: Math.floor(atr_stop_window),
             atr_stop_n,
             atr_stop_m,
+            r_take_profit_enabled,
+            r_take_profit_reentry_mode,
+            r_take_profit_execution_mode,
+            r_take_profit_execution_time,
+            r_take_profit_tiers: r_take_profit_enabled
+              ? parsedRTpTiers.tiers
+              : [],
             capacity_window_years: Math.trunc(capacity_window_years),
             asset_momentum_floor_rules: floorRules.length ? floorRules : null,
             score_method:
@@ -34232,6 +34411,13 @@
           atr_stop_window: Math.floor(atr_stop_window),
           atr_stop_n,
           atr_stop_m,
+          r_take_profit_enabled,
+          r_take_profit_reentry_mode,
+          r_take_profit_execution_mode,
+          r_take_profit_execution_time,
+          r_take_profit_tiers: r_take_profit_enabled
+            ? parsedRTpTiers.tiers
+            : [],
           capacity_window_years: Math.trunc(capacity_window_years),
           score_method:
             $("rotScoreMethod") && $("rotScoreMethod").value
@@ -35366,6 +35552,50 @@
           !(atr_stop_n > atr_stop_m)
         )
           return setMsg("通用ATR动态收紧要求 n > m");
+        const r_take_profit_enabled =
+          $("rotRTpEnable") && $("rotRTpEnable").value === "true";
+        const r_take_profit_reentry_mode =
+          $("rotRTpReentry") && $("rotRTpReentry").value
+            ? String($("rotRTpReentry").value)
+            : "reenter";
+        const r_take_profit_execution_mode =
+          $("rotRTpExec") && $("rotRTpExec").value
+            ? String($("rotRTpExec").value)
+            : "intraday";
+        const r_take_profit_execution_time =
+          $("rotRTpExecTime") && $("rotRTpExecTime").value
+            ? String($("rotRTpExecTime").value)
+            : "full_day";
+        const r_take_profit_tiers_text =
+          $("rotRTpTiers") && $("rotRTpTiers").value
+            ? String($("rotRTpTiers").value)
+            : "";
+        if (
+          !["reenter", "wait_next_entry"].includes(r_take_profit_reentry_mode)
+        )
+          return setMsg("R止盈重入模式非法");
+        if (!["intraday", "next_day"].includes(r_take_profit_execution_mode))
+          return setMsg("R止盈执行模式仅支持 intraday/next_day");
+        if (
+          !["open", "close", "full_day"].includes(r_take_profit_execution_time)
+        )
+          return setMsg("R止盈执行时点仅支持 open/close/full_day");
+        if (
+          r_take_profit_execution_mode === "next_day" &&
+          r_take_profit_execution_time === "full_day"
+        )
+          return setMsg("R止盈次日执行时点仅支持 open/close");
+        const parsedRTpTiers = r_take_profit_enabled
+          ? _parseRTpTiers(r_take_profit_tiers_text)
+          : { tiers: [] };
+        if (parsedRTpTiers && parsedRTpTiers.__error)
+          return setMsg(parsedRTpTiers.__error);
+        if (
+          r_take_profit_enabled &&
+          (!Array.isArray(parsedRTpTiers.tiers) ||
+            parsedRTpTiers.tiers.length === 0)
+        )
+          return setMsg("R止盈分层不能为空");
         const trend_filter = $("rotTrendOn").value === "true";
         const trend_exit_filter =
           $("rotExitTrendOn") && $("rotExitTrendOn").value === "true";
@@ -35786,6 +36016,13 @@
             atr_stop_window,
             atr_stop_n,
             atr_stop_m,
+            r_take_profit_enabled,
+            r_take_profit_reentry_mode,
+            r_take_profit_execution_mode,
+            r_take_profit_execution_time,
+            r_take_profit_tiers: r_take_profit_enabled
+              ? parsedRTpTiers.tiers
+              : [],
             corr_filter,
             corr_window,
             corr_threshold,
@@ -39058,6 +39295,14 @@
         $("rotAtrStopMode").addEventListener("change", () =>
           _syncAtrStopParamsUi("rot"),
         );
+      if ($("rotRTpEnable"))
+        $("rotRTpEnable").addEventListener("change", () =>
+          _syncAtrStopParamsUi("rot"),
+        );
+      if ($("rotRTpExec"))
+        $("rotRTpExec").addEventListener("change", () =>
+          _syncAtrStopParamsUi("rot"),
+        );
       if ($("trendTraceN"))
         $("trendTraceN").addEventListener("change", () => {
           try {
@@ -39696,6 +39941,50 @@
           !(atr_stop_n > atr_stop_m)
         )
           return setMsg("通用ATR动态收紧要求 n > m");
+        const r_take_profit_enabled =
+          $("rotRTpEnable") && $("rotRTpEnable").value === "true";
+        const r_take_profit_reentry_mode =
+          $("rotRTpReentry") && $("rotRTpReentry").value
+            ? String($("rotRTpReentry").value)
+            : "reenter";
+        const r_take_profit_execution_mode =
+          $("rotRTpExec") && $("rotRTpExec").value
+            ? String($("rotRTpExec").value)
+            : "intraday";
+        const r_take_profit_execution_time =
+          $("rotRTpExecTime") && $("rotRTpExecTime").value
+            ? String($("rotRTpExecTime").value)
+            : "full_day";
+        const r_take_profit_tiers_text =
+          $("rotRTpTiers") && $("rotRTpTiers").value
+            ? String($("rotRTpTiers").value)
+            : "";
+        if (
+          !["reenter", "wait_next_entry"].includes(r_take_profit_reentry_mode)
+        )
+          return setMsg("R止盈重入模式非法");
+        if (!["intraday", "next_day"].includes(r_take_profit_execution_mode))
+          return setMsg("R止盈执行模式仅支持 intraday/next_day");
+        if (
+          !["open", "close", "full_day"].includes(r_take_profit_execution_time)
+        )
+          return setMsg("R止盈执行时点仅支持 open/close/full_day");
+        if (
+          r_take_profit_execution_mode === "next_day" &&
+          r_take_profit_execution_time === "full_day"
+        )
+          return setMsg("R止盈次日执行时点仅支持 open/close");
+        const parsedRTpTiers = r_take_profit_enabled
+          ? _parseRTpTiers(r_take_profit_tiers_text)
+          : { tiers: [] };
+        if (parsedRTpTiers && parsedRTpTiers.__error)
+          return setMsg(parsedRTpTiers.__error);
+        if (
+          r_take_profit_enabled &&
+          (!Array.isArray(parsedRTpTiers.tiers) ||
+            parsedRTpTiers.tiers.length === 0)
+        )
+          return setMsg("R止盈分层不能为空");
         const trend_filter = $("rotTrendOn").value === "true";
         const trend_exit_filter =
           $("rotExitTrendOn") && $("rotExitTrendOn").value === "true";
@@ -40075,6 +40364,13 @@
               atr_stop_window,
               atr_stop_n,
               atr_stop_m,
+              r_take_profit_enabled,
+              r_take_profit_reentry_mode,
+              r_take_profit_execution_mode,
+              r_take_profit_execution_time,
+              r_take_profit_tiers: r_take_profit_enabled
+                ? parsedRTpTiers.tiers
+                : [],
               corr_filter,
               corr_window,
               corr_threshold,

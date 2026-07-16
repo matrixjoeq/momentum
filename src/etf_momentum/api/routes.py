@@ -2106,6 +2106,21 @@ def _rotation_inputs_from_payload(
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
+        r_take_profit_enabled=bool(getattr(payload, "r_take_profit_enabled", False)),
+        r_take_profit_reentry_mode=str(
+            getattr(payload, "r_take_profit_reentry_mode", "reenter") or "reenter"
+        ),
+        r_take_profit_execution_mode=str(
+            getattr(payload, "r_take_profit_execution_mode", "intraday") or "intraday"
+        ),
+        r_take_profit_execution_time=getattr(
+            payload, "r_take_profit_execution_time", None
+        ),
+        r_take_profit_tiers=(
+            [x.model_dump() for x in getattr(payload, "r_take_profit_tiers", [])]
+            if getattr(payload, "r_take_profit_tiers", None)
+            else None
+        ),
         group_enforce=payload.group_enforce,
         group_pick_policy=payload.group_pick_policy,
         asset_groups=payload.asset_groups,
