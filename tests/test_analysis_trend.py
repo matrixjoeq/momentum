@@ -838,6 +838,44 @@ def test_r_take_profit_intraday_retrace_trigger_and_gap_fill() -> None:
     assert float(ev_gap[0].get("fill_price")) == pytest.approx(106.0)
 
 
+def test_r_take_profit_retrace_ratio_one_maps_to_breakeven_line() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series(
+        [100.0, 100.0, 112.0, 110.0, 108.0, 108.0], index=idx, dtype=float
+    )
+    high = pd.Series([100.0, 101.0, 120.0, 120.0, 110.0, 109.0], index=idx, dtype=float)
+    low = pd.Series([100.0, 99.0, 105.0, 100.0, 100.0, 100.0], index=idx, dtype=float)
+    open_ = pd.Series(
+        [100.0, 100.0, 111.0, 105.0, 108.0, 108.0], index=idx, dtype=float
+    )
+
+    out, stats = _apply_r_multiple_take_profit(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.0, "retrace_ratio": 1.0}],
+        atr_stop_enabled=True,
+    )
+
+    assert float(out.iloc[3]) == 0.0
+    ev = list((stats or {}).get("trigger_events") or [])
+    assert ev
+    assert str(ev[0].get("trigger_source")) == "low_touch_tp_retrace"
+    assert float(ev[0].get("active_tier_r") or 0.0) == pytest.approx(1.0, abs=1e-12)
+    assert float(ev[0].get("active_tier_retrace") or 0.0) == pytest.approx(
+        1.0, abs=1e-12
+    )
+    assert float(ev[0].get("trigger_price") or 0.0) == pytest.approx(100.0, abs=1e-12)
+    assert float(ev[0].get("fill_price") or 0.0) == pytest.approx(100.0, abs=1e-12)
+
+
 def test_bias_v_take_profit_intraday_high_trigger_and_gap_fill() -> None:
     idx = pd.date_range("2024-01-01", periods=5, freq="B")
     base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)

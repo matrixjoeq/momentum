@@ -126,6 +126,116 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         label="中证全指通信",
         aliases=("931160", "515880"),
     ),
+    RegressionFactorSpec(
+        key="HSI",
+        label="恒生指数",
+        aliases=("HSI", "159920"),
+    ),
+    RegressionFactorSpec(
+        key="HSI_TECH",
+        label="港股科技",
+        aliases=("HSI_TECH", "513980"),
+    ),
+    RegressionFactorSpec(
+        key="HSI_DIVIDEND",
+        label="港股红利",
+        aliases=("HSI_DIVIDEND", "513690"),
+    ),
+    RegressionFactorSpec(
+        key="GOLD_SPOT",
+        label="黄金现货",
+        aliases=("XAU", "518880"),
+    ),
+    RegressionFactorSpec(
+        key="SILVER_FUTURES",
+        label="白银期货",
+        aliases=("SI", "161226"),
+    ),
+    RegressionFactorSpec(
+        key="METALS_FUTURES",
+        label="有色金属期货",
+        aliases=("HG", "159980"),
+    ),
+    RegressionFactorSpec(
+        key="OIL_FUTURES",
+        label="原油期货",
+        aliases=("CL", "501018"),
+    ),
+    RegressionFactorSpec(
+        key="ENERGY_CHEMICAL_FUTURES",
+        label="能源化工期货",
+        aliases=("TA", "159981"),
+    ),
+    RegressionFactorSpec(
+        key="SOYBEAN_MEAL_FUTURES",
+        label="豆粕期货",
+        aliases=("M", "159985"),
+    ),
+    RegressionFactorSpec(
+        key="SP500",
+        label="标普500",
+        aliases=("SPY", "513500"),
+    ),
+    RegressionFactorSpec(
+        key="NASDAQ100",
+        label="纳斯达克100",
+        aliases=("QQQ", "513100"),
+    ),
+    RegressionFactorSpec(
+        key="DOW_JONES_INDUSTRIAL_INDEX",
+        label="道琼斯工业指数",
+        aliases=("DJI", "513400"),
+    ),
+    RegressionFactorSpec(
+        key="DAX",
+        label="德国DAX指数",
+        aliases=("DAX", "513030"),
+    ),
+    RegressionFactorSpec(
+        key="CAC40",
+        label="法国CAC40指数",
+        aliases=("CAC40", "513080"),
+    ),
+    RegressionFactorSpec(
+        key="NIKKEI225",
+        label="日经225指数",
+        aliases=("N225", "513520"),
+    ),
+    RegressionFactorSpec(
+        key="TOPIX",
+        label="日本东证指数",
+        aliases=("TOPIX", "513800"),
+    ),
+    RegressionFactorSpec(
+        key="0-3Y_GOV_BOND",
+        label="0-3年期国债",
+        aliases=("0-3Y_GOV_BOND", "511580"),
+    ),
+    RegressionFactorSpec(
+        key="5Y_GOV_BOND",
+        label="5年国债",
+        aliases=("5Y_GOV_BOND", "511010"),
+    ),
+    RegressionFactorSpec(
+        key="10Y_GOV_BOND",
+        label="10年国债",
+        aliases=("10Y_GOV_BOND", "511260"),
+    ),
+    RegressionFactorSpec(
+        key="30Y_GOV_BOND",
+        label="30年国债",
+        aliases=("30Y_GOV_BOND", "511090"),
+    ),
+    RegressionFactorSpec(
+        key="CITY_DEBT",
+        label="城投债",
+        aliases=("CITY_DEBT", "511220"),
+    ),
+    RegressionFactorSpec(
+        key="MONEY_MARKET_FUND",
+        label="货币基金",
+        aliases=("MONEY_MARKET_FUND", "511880"),
+    ),
 )
 
 

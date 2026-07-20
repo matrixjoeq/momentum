@@ -2486,7 +2486,7 @@ def _normalize_r_take_profit_tiers(
         retrace = float(item.get("retrace_ratio"))
         if (not np.isfinite(r_mult)) or r_mult <= 0.0:
             continue
-        if (not np.isfinite(retrace)) or retrace <= 0.0 or retrace >= 1.0:
+        if (not np.isfinite(retrace)) or retrace <= 0.0 or retrace > 1.0:
             continue
         out.append({"r_multiple": float(r_mult), "retrace_ratio": float(retrace)})
     if not out:
@@ -3340,7 +3340,9 @@ def _validate_bt_single_inputs(inp: Any) -> None:
     ):
         raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
     risk_budget_rebalance_mode = (
-        str(getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative")
+        str(
+            getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative"
+        )
         .strip()
         .lower()
     )
@@ -3619,8 +3621,7 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
             getattr(inp, "risk_budget_max_leverage_multiple", 2.0) or 2.0
         ),
         "risk_budget_rebalance_mode": str(
-            getattr(inp, "risk_budget_rebalance_mode", "conservative")
-            or "conservative"
+            getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative"
         ),
         "initial_account_amount": (
             None
@@ -3897,16 +3898,22 @@ def _metrics_from_ret(ret: pd.Series, rf: float) -> dict[str, float]:
     if len(nav) > 0:
         nav.iloc[0] = 1.0
     ann_ret = float(_annualized_return(nav))
+    mdd = float(_max_drawdown(nav))
     ulcer = float(_ulcer_index(nav))
     mdd_dur = float(_max_drawdown_duration_days(nav))
     out = {
         "cumulative_return": float((1.0 + s).prod() - 1.0),
         "annualized_return": ann_ret,
         "annualized_volatility": float(_annualized_vol(s)),
-        "max_drawdown": float(_max_drawdown(nav)),
+        "max_drawdown": mdd,
         "max_drawdown_duration_days": mdd_dur,
         "max_drawdown_recovery_days": int(mdd_dur),
         "sharpe_ratio": float(_sharpe(s, rf=float(rf))),
+        "calmar_ratio": (
+            float(ann_ret / abs(mdd))
+            if np.isfinite(mdd) and mdd < 0.0
+            else float("nan")
+        ),
         "sortino_ratio": float(_sortino(s, rf=float(rf))),
         "ulcer_index": ulcer,
     }
@@ -6911,8 +6918,10 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             .lower()
         )
         rb_mode = (
-            str(getattr(inp, "risk_budget_rebalance_mode", "conservative")
-                or "conservative")
+            str(
+                getattr(inp, "risk_budget_rebalance_mode", "conservative")
+                or "conservative"
+            )
             .strip()
             .lower()
         )
@@ -7201,10 +7210,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                         desired_row.loc[c] = 0.0
                 desired_total = float(desired_row.sum())
                 overcap_now = bool(desired_total > 1.0 + eps)
-                if (
-                    prev_rb_overcap_state is not None
-                    and bool(prev_rb_overcap_state) != bool(overcap_now)
-                ):
+                if prev_rb_overcap_state is not None and bool(
+                    prev_rb_overcap_state
+                ) != bool(overcap_now):
                     if overcap_now:
                         pre_scale = desired_row.copy().astype(float)
                         w_row = (desired_row * (1.0 / desired_total)).astype(float)
@@ -9570,9 +9578,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "overcap_scale_count": int(overcap_scale_total),
                 "standard_event_rebalance_count": int(standard_event_rebalance_total),
                 "standard_event_scale_up_count": int(standard_event_scale_up_total),
-                "standard_event_scale_down_count": int(
-                    standard_event_scale_down_total
-                ),
+                "standard_event_scale_down_count": int(standard_event_scale_down_total),
                 "standard_transition_under_to_over_count": int(
                     standard_transition_under_to_over_total
                 ),

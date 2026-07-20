@@ -318,6 +318,13 @@ class OffFundResearchStateOut(BaseModel):
     meta: OffFundResearchStateMeta = Field(default_factory=OffFundResearchStateMeta)
 
 
+class OffFundRegressionPairUniverseItem(BaseModel):
+    key: str
+    label: str
+    aliases: list[str] = Field(default_factory=list)
+    etf_code: str
+
+
 class OffFundRegressionFactorRequest(BaseModel):
     key: str = Field(min_length=1, max_length=64)
     label: str | None = Field(default=None, max_length=128)
@@ -2340,8 +2347,8 @@ class RotationRTakeProfitTier(BaseModel):
     )
     retrace_ratio: float = Field(
         gt=0.0,
-        lt=1.0,
-        description="Allowed pullback ratio from peak floating profit once activated",
+        le=1.0,
+        description="Allowed pullback ratio from peak floating profit once activated (1.0 means breakeven-line stop after tier is armed)",
     )
 
 
@@ -2811,8 +2818,8 @@ class RTakeProfitTier(BaseModel):
     )
     retrace_ratio: float = Field(
         gt=0.0,
-        lt=1.0,
-        description="Allowed pullback ratio from peak floating profit once activated",
+        le=1.0,
+        description="Allowed pullback ratio from peak floating profit once activated (1.0 means breakeven-line stop after tier is armed)",
     )
 
 

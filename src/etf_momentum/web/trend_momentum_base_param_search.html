@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>趋势动量基础参数搜索</title>
+    <link rel="stylesheet" href="/static/terminal.css" />
+    <script
+      defer
+      src="https://cdn.plot.ly/plotly-cartesian-2.30.0.min.js"
+    ></script>
+    <style>
+      #scoreHeatmap,
+      #lookbackLine {
+        width: 100%;
+      }
+      #scoreHeatmap {
+        height: 540px;
+      }
+      #lookbackLine {
+        height: 340px;
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 960px) {
+        .grid-2 {
+          grid-template-columns: 1fr;
+        }
+      }
+      td,
+      th {
+        white-space: nowrap;
+      }
+      .mono {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>趋势动量基础参数搜索（3D）</h2>
+    <div class="muted">
+      展示 `trend_momentum_base_param_search.py` 的三维网格搜索结果（回看窗口 /
+      入场阈值 / 出场阈值）。
+    </div>
+    <div class="muted" style="margin-top: 6px">
+      <a href="/research">返回研究主页</a>
+    </div>
+
+    <div class="panel no-print" style="margin-top: 12px">
+      <div class="row">
+        <div style="min-width: 520px; flex: 1">
+          <label>结果 JSON URL</label>
+          <input
+            id="dataUrl"
+            value="/static/data/trend_momentum_base_param_search_results.json"
+          />
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 8px">
+          <button id="loadUrlBtn">加载 URL</button>
+        </div>
+        <div style="min-width: 320px">
+          <label>或上传本地 JSON 文件</label>
+          <input id="fileInput" type="file" accept=".json,application/json" />
+        </div>
+      </div>
+    </div>
+
+    <div class="panel no-print">
+      <div class="row">
+        <div>
+          <label>TopN</label>
+          <input id="topN" value="60" />
+        </div>
+        <div>
+          <label>Lookback 切片</label>
+          <select id="lookbackSlice"></select>
+        </div>
+        <div style="display: flex; align-items: flex-end">
+          <button id="refreshBtn">刷新图表与表格</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3 style="margin-top: 0">运行信息</h3>
+        <div id="metaInfo" class="mono"></div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-top: 0">最佳单一设置（综合评分最高）</h3>
+        <div id="bestInfo" class="mono"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">
+        Lookback 切片热力图（x=入场阈值%，y=出场阈值%）
+      </h3>
+      <div id="scoreHeatmap"></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">不同 Lookback 的最优曲线</h3>
+      <div id="lookbackLine"></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">网格结果明细</h3>
+      <div style="overflow: auto">
+        <table id="resultTable"></table>
+      </div>
+    </div>
+
+    <div id="status" class="muted" style="margin-top: 8px"></div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const metric = (r, k) => {
+        const v = Number(r?.metrics?.[k]);
+        return Number.isFinite(v) ? v : null;
+      };
+      const fmtNum = (v, d = 6) =>
+        Number.isFinite(Number(v)) ? Number(v).toFixed(d) : "-";
+      const fmtPct = (v, d = 2) =>
+        Number.isFinite(Number(v)) ? `${(Number(v) * 100).toFixed(d)}%` : "-";
+      const fmtPctInput = (v, d = 2) =>
+        Number.isFinite(Number(v)) ? `${Number(v).toFixed(d)}%` : "-";
+
+      function status(msg) {
+        $("status").textContent = msg || "";
+      }
+
+      const OBJECTIVE_COMPONENTS = [
+        { key: "sharpe_ratio", hb: true },
+        { key: "calmar_ratio", hb: true },
+        { key: "sortino_ratio", hb: true },
+        { key: "ulcer_index", hb: false },
+        { key: "ulcer_performance_index", hb: true },
+        { key: "sqn_recent_100", hb: true },
+      ];
+      const OBJECTIVE_GROUPS = [
+        {
+          key: "risk_adjusted_return",
+          weight: 0.45,
+          metrics: [
+            "sharpe_ratio",
+            "calmar_ratio",
+            "sortino_ratio",
+            "ulcer_performance_index",
+          ],
+        },
+        { key: "pain_control", weight: 0.25, metrics: ["ulcer_index"] },
+        { key: "system_quality", weight: 0.3, metrics: ["sqn_recent_100"] },
+      ];
+
+      const objectiveScore = (r) => {
+        const v = Number(r?.__compositeScore ?? r?.composite_score);
+        return Number.isFinite(v) ? v : null;
+      };
+      const objectiveEligible = (r) =>
+        typeof r?.__objectiveEligible === "boolean"
+          ? r.__objectiveEligible
+          : Boolean(r?.objective_eligible);
+
+      function objectiveConstraints(meta) {
+        const obj = meta?.objective || {};
+        const gate = obj?.eligibility_constraints || {};
+        const minAvgAnnualTrades = Number(gate.min_avg_annual_trade_count || 0);
+        const minAnnualizedReturn = Number(gate.min_annualized_return || 0);
+        return {
+          minAvgAnnualTrades: Number.isFinite(minAvgAnnualTrades)
+            ? minAvgAnnualTrades
+            : 0,
+          minAnnualizedReturn: Number.isFinite(minAnnualizedReturn)
+            ? minAnnualizedReturn
+            : 0,
+        };
+      }
+
+      function computeCompositeScores(rows, meta) {
+        const gate = objectiveConstraints(meta);
+        const eligible = [];
+        rows.forEach((r) => {
+          r.__compositeScore = null;
+          r.__objectiveEligible = false;
+          r.__objectiveReason = null;
+          if (String(r?.status || "") !== "ok") return;
+          const avgAnnualTrades = metric(r, "avg_annual_trade_count");
+          if (gate.minAvgAnnualTrades > 0) {
+            if (avgAnnualTrades == null) {
+              r.__objectiveReason = "avg_annual_trade_count_missing";
+              return;
+            }
+            if (avgAnnualTrades < gate.minAvgAnnualTrades) {
+              r.__objectiveReason =
+                `avg_annual_trade_count_lt_min:${avgAnnualTrades}<` +
+                `${gate.minAvgAnnualTrades}`;
+              return;
+            }
+          }
+          const annualizedReturn = metric(r, "annualized_return");
+          if (gate.minAnnualizedReturn > 0) {
+            if (annualizedReturn == null) {
+              r.__objectiveReason = "annualized_return_missing";
+              return;
+            }
+            if (annualizedReturn < gate.minAnnualizedReturn) {
+              r.__objectiveReason =
+                `annualized_return_lt_min:${annualizedReturn}<` +
+                `${gate.minAnnualizedReturn}`;
+              return;
+            }
+          }
+          const sqnMin = Number(r?.metrics?.sqn_min_trades ?? 30);
+          const sqnCount = Number(r?.metrics?.sqn_trade_count_total);
+          if (
+            Number.isFinite(sqnCount) &&
+            Number.isFinite(sqnMin) &&
+            sqnCount < sqnMin
+          ) {
+            r.__objectiveReason = `sqn_trade_count_lt_min:${sqnCount}<${sqnMin}`;
+            return;
+          }
+          const missing = OBJECTIVE_COMPONENTS.map((c) => c.key).filter(
+            (k) => metric(r, k) == null,
+          );
+          if (missing.length > 0) {
+            r.__objectiveReason = "missing_metrics:" + missing.join(",");
+            return;
+          }
+          r.__objectiveEligible = true;
+          eligible.push(r);
+        });
+        const bounds = {};
+        OBJECTIVE_COMPONENTS.forEach((c) => {
+          const vals = eligible
+            .map((r) => metric(r, c.key))
+            .filter((v) => Number.isFinite(v));
+          if (vals.length > 0)
+            bounds[c.key] = { min: Math.min(...vals), max: Math.max(...vals) };
+        });
+        eligible.forEach((r) => {
+          const comps = {};
+          OBJECTIVE_COMPONENTS.forEach((c) => {
+            const v = metric(r, c.key);
+            const b = bounds[c.key];
+            if (v == null || !b) return;
+            const range = b.max - b.min;
+            let s = 0.5;
+            if (Math.abs(range) > 1e-12) {
+              const base = (v - b.min) / range;
+              s = c.hb ? base : 1 - base;
+            }
+            comps[c.key] = Math.max(0, Math.min(1, s));
+          });
+          let ws = 0;
+          let wsum = 0;
+          OBJECTIVE_GROUPS.forEach((g) => {
+            const vals = g.metrics
+              .map((m) => comps[m])
+              .filter((x) => Number.isFinite(x));
+            if (vals.length === 0) return;
+            const gs = vals.reduce((a, b) => a + b, 0) / vals.length;
+            ws += gs * g.weight;
+            wsum += g.weight;
+          });
+          r.__compositeScore = wsum > 0 ? ws / wsum : null;
+          r.composite_score = r.__compositeScore;
+        });
+      }
+
+      function normalizeData(raw) {
+        const meta = raw && typeof raw === "object" ? raw.meta || {} : {};
+        const results =
+          raw && typeof raw === "object" && Array.isArray(raw.results)
+            ? raw.results
+            : [];
+        const best =
+          raw && typeof raw === "object" && raw.best_single_setting
+            ? raw.best_single_setting
+            : null;
+        return { meta, results, best };
+      }
+
+      function toSortedRows(rows) {
+        return rows
+          .filter(
+            (r) =>
+              Number.isFinite(Number(r?.mom_lookback)) &&
+              Number.isFinite(Number(r?.tsmom_entry_threshold_pct)) &&
+              Number.isFinite(Number(r?.tsmom_exit_threshold_pct)),
+          )
+          .sort((a, b) => {
+            const la = Number(a.mom_lookback);
+            const lb = Number(b.mom_lookback);
+            if (la !== lb) return la - lb;
+            const ea = Number(a.tsmom_entry_threshold_pct);
+            const eb = Number(b.tsmom_entry_threshold_pct);
+            if (ea !== eb) return ea - eb;
+            return (
+              Number(a.tsmom_exit_threshold_pct) -
+              Number(b.tsmom_exit_threshold_pct)
+            );
+          });
+      }
+
+      function pickBest(rows) {
+        let best = null;
+        let key = null;
+        rows.forEach((r) => {
+          if (String(r?.status || "") !== "ok" || !objectiveEligible(r)) return;
+          const comp = objectiveScore(r);
+          const sharpe = metric(r, "sharpe_ratio");
+          if (comp == null || sharpe == null) return;
+          const ann = metric(r, "annualized_return");
+          const mdd = metric(r, "max_drawdown");
+          const k = [
+            comp,
+            sharpe,
+            ann == null ? -1e18 : ann,
+            mdd == null ? -1e18 : -Math.abs(mdd),
+          ];
+          if (!key || k.join("|") > key.join("|")) {
+            key = k;
+            best = r;
+          }
+        });
+        return best;
+      }
+
+      function renderMeta(meta, rows) {
+        const ss = meta.search_space || {};
+        const cc = meta.concurrency || {};
+        const gate = objectiveConstraints(meta);
+        const lines = [
+          `生成时间: ${String(meta.generated_at || "-")}`,
+          `接口: ${String(meta.api_endpoint || "-")}`,
+          `样本: ${Number(meta.total_cases || rows.length || 0)} (成功 ${Number(meta.success_cases || 0)}, 失败 ${Number(meta.error_cases || 0)})`,
+          `维度规模: lookback=${(ss.lookback_values || []).length || "-"} × entry=${(ss.entry_threshold_pct_values || []).length || "-"} × exit=${(ss.exit_threshold_pct_values || []).length || "-"}`,
+          `并发: workers=${Number(cc.workers || "-")}, max_in_flight=${Number(cc.max_in_flight || "-")}, retry=${Number(cc.retry_times || 0)}`,
+          `评分门槛: 年均交易数 >= ${gate.minAvgAnnualTrades.toFixed(2)}，年化收益 >= ${(gate.minAnnualizedReturn * 100).toFixed(2)}%`,
+          `可比样本: ${rows.filter((r) => objectiveEligible(r)).length}`,
+        ];
+        $("metaInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+      }
+
+      function renderBest(best) {
+        if (!best) {
+          $("bestInfo").innerHTML = "<div>无可用结果</div>";
+          return;
+        }
+        const lines = [
+          `mom_lookback: ${fmtNum(best.mom_lookback, 0)}`,
+          `entry: ${fmtPctInput(best.tsmom_entry_threshold_pct, 2)}（${fmtNum(best.tsmom_entry_threshold, 4)}）`,
+          `exit: ${fmtPctInput(best.tsmom_exit_threshold_pct, 2)}（${fmtNum(best.tsmom_exit_threshold, 4)}）`,
+          `综合评分: ${fmtNum(objectiveScore(best), 6)}`,
+          `Sharpe: ${fmtNum(metric(best, "sharpe_ratio"), 6)}`,
+          `Calmar: ${fmtNum(metric(best, "calmar_ratio"), 6)}`,
+          `Sortino: ${fmtNum(metric(best, "sortino_ratio"), 6)}`,
+          `年化收益: ${fmtPct(metric(best, "annualized_return"), 2)}`,
+          `最大回撤: ${fmtPct(metric(best, "max_drawdown"), 2)}`,
+          `近100笔SQN: ${fmtNum(metric(best, "sqn_recent_100"), 6)}`,
+        ];
+        $("bestInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+      }
+
+      function syncLookbackOptions(rows, best) {
+        const sel = $("lookbackSlice");
+        const options = Array.from(
+          new Set(
+            rows
+              .map((r) => Number(r.mom_lookback))
+              .filter((v) => Number.isFinite(v)),
+          ),
+        ).sort((a, b) => a - b);
+        const old = Number(sel.value);
+        sel.innerHTML = options
+          .map((v) => `<option value="${v}">${v}</option>`)
+          .join("");
+        const bestLb = Number(best?.mom_lookback);
+        if (Number.isFinite(old) && options.includes(old))
+          sel.value = String(old);
+        else if (Number.isFinite(bestLb) && options.includes(bestLb))
+          sel.value = String(bestLb);
+        else if (options.length > 0) sel.value = String(options[0]);
+      }
+
+      function renderHeatmap(rows, best) {
+        const lb = Number($("lookbackSlice").value);
+        const rs = rows.filter(
+          (r) =>
+            String(r?.status || "") === "ok" &&
+            objectiveEligible(r) &&
+            Number(r.mom_lookback) === lb,
+        );
+        if (rs.length === 0) {
+          Plotly.newPlot(
+            "scoreHeatmap",
+            [],
+            { annotations: [{ text: "当前切片无数据", showarrow: false }] },
+            { responsive: true },
+          );
+          return;
+        }
+        const xVals = Array.from(
+          new Set(rs.map((r) => Number(r.tsmom_entry_threshold_pct))),
+        ).sort((a, b) => a - b);
+        const yVals = Array.from(
+          new Set(rs.map((r) => Number(r.tsmom_exit_threshold_pct))),
+        ).sort((a, b) => a - b);
+        const map = new Map();
+        rs.forEach((r) =>
+          map.set(
+            `${Number(r.tsmom_entry_threshold_pct).toFixed(6)}|${Number(r.tsmom_exit_threshold_pct).toFixed(6)}`,
+            r,
+          ),
+        );
+        const z = [];
+        const custom = [];
+        yVals.forEach((y) => {
+          const zr = [];
+          const cr = [];
+          xVals.forEach((x) => {
+            const r = map.get(`${x.toFixed(6)}|${y.toFixed(6)}`);
+            zr.push(r ? objectiveScore(r) : null);
+            cr.push(
+              r
+                ? [
+                    metric(r, "sharpe_ratio"),
+                    metric(r, "annualized_return"),
+                    metric(r, "max_drawdown"),
+                    metric(r, "sqn_recent_100"),
+                  ]
+                : [null, null, null, null],
+            );
+          });
+          z.push(zr);
+          custom.push(cr);
+        });
+        const traces = [
+          {
+            type: "heatmap",
+            x: xVals,
+            y: yVals,
+            z,
+            customdata: custom,
+            colorscale: "Viridis",
+            colorbar: { title: "综合评分" },
+            hovertemplate:
+              "entry=%{x:.2f}%<br>exit=%{y:.2f}%<br>综合评分=%{z:.4f}<br>Sharpe=%{customdata[0]:.4f}<br>年化收益=%{customdata[1]:.2%}<br>最大回撤=%{customdata[2]:.2%}<br>SQN=%{customdata[3]:.4f}<extra></extra>",
+          },
+        ];
+        if (
+          best &&
+          Number(best.mom_lookback) === lb &&
+          Number.isFinite(Number(best.tsmom_entry_threshold_pct)) &&
+          Number.isFinite(Number(best.tsmom_exit_threshold_pct))
+        ) {
+          traces.push({
+            type: "scatter",
+            mode: "markers",
+            x: [Number(best.tsmom_entry_threshold_pct)],
+            y: [Number(best.tsmom_exit_threshold_pct)],
+            marker: { size: 14, symbol: "star", color: "#ff4d4f" },
+            name: "最优参数",
+          });
+        }
+        Plotly.newPlot(
+          "scoreHeatmap",
+          traces,
+          {
+            margin: { t: 36, r: 42, b: 56, l: 64 },
+            title: `lookback=${lb} 切片热力图`,
+            xaxis: { title: "动量入场阈值（%）" },
+            yaxis: { title: "动量出场阈值（%）" },
+          },
+          { responsive: true },
+        );
+      }
+
+      function renderLookbackLine(rows) {
+        const okRows = rows.filter(
+          (r) => String(r?.status || "") === "ok" && objectiveEligible(r),
+        );
+        const bestByLb = new Map();
+        okRows.forEach((r) => {
+          const lb = Number(r.mom_lookback);
+          if (!Number.isFinite(lb)) return;
+          const old = bestByLb.get(lb);
+          if (
+            !old ||
+            (objectiveScore(r) ?? -1e18) > (objectiveScore(old) ?? -1e18)
+          )
+            bestByLb.set(lb, r);
+        });
+        const lbs = Array.from(bestByLb.keys()).sort((a, b) => a - b);
+        const bestRows = lbs.map((lb) => bestByLb.get(lb));
+        Plotly.newPlot(
+          "lookbackLine",
+          [
+            {
+              type: "scatter",
+              mode: "lines+markers",
+              x: lbs,
+              y: bestRows.map((r) => objectiveScore(r)),
+              name: "每个lookback最优综合评分",
+              yaxis: "y",
+            },
+            {
+              type: "scatter",
+              mode: "lines+markers",
+              x: lbs,
+              y: bestRows.map((r) => metric(r, "sharpe_ratio")),
+              name: "对应Sharpe",
+              yaxis: "y2",
+            },
+          ],
+          {
+            margin: { t: 30, r: 56, b: 50, l: 56 },
+            xaxis: { title: "动量回看窗口" },
+            yaxis: { title: "综合评分" },
+            yaxis2: { title: "Sharpe", overlaying: "y", side: "right" },
+            legend: { orientation: "h", y: 1.14 },
+          },
+          { responsive: true },
+        );
+      }
+
+      function renderTable(rows) {
+        const topN = Math.max(1, Math.floor(Number($("topN").value || "60")));
+        const sorted = rows.slice().sort((a, b) => {
+          const ae = objectiveEligible(a) ? 1 : 0;
+          const be = objectiveEligible(b) ? 1 : 0;
+          if (ae !== be) return be - ae;
+          const av = objectiveScore(a);
+          const bv = objectiveScore(b);
+          if (av == null && bv == null) return 0;
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          return bv - av;
+        });
+        const header = [
+          "回看窗口",
+          "入场阈值(%)",
+          "出场阈值(%)",
+          "综合评分",
+          "Sharpe",
+          "Calmar",
+          "Sortino",
+          "Ulcer",
+          "UPI",
+          "SQN",
+          "年化收益",
+          "最大回撤",
+          "可比",
+          "状态",
+          "错误",
+        ];
+        const head =
+          "<tr>" + header.map((x) => `<th>${x}</th>`).join("") + "</tr>";
+        const body = sorted
+          .slice(0, topN)
+          .map((r) => {
+            const reason =
+              r?.__objectiveReason ||
+              r?.objective_ineligible_reason ||
+              String(r?.error || "");
+            return `<tr>
+              <td>${fmtNum(r.mom_lookback, 0)}</td>
+              <td>${fmtPctInput(r.tsmom_entry_threshold_pct, 2)}</td>
+              <td>${fmtPctInput(r.tsmom_exit_threshold_pct, 2)}</td>
+              <td>${fmtNum(objectiveScore(r), 6)}</td>
+              <td>${fmtNum(metric(r, "sharpe_ratio"), 6)}</td>
+              <td>${fmtNum(metric(r, "calmar_ratio"), 6)}</td>
+              <td>${fmtNum(metric(r, "sortino_ratio"), 6)}</td>
+              <td>${fmtNum(metric(r, "ulcer_index"), 6)}</td>
+              <td>${fmtNum(metric(r, "ulcer_performance_index"), 6)}</td>
+              <td>${fmtNum(metric(r, "sqn_recent_100"), 6)}</td>
+              <td>${fmtPct(metric(r, "annualized_return"), 2)}</td>
+              <td>${fmtPct(metric(r, "max_drawdown"), 2)}</td>
+              <td>${objectiveEligible(r) ? "是" : `否 (${String(reason).slice(0, 48)})`}</td>
+              <td>${String(r.status || "-")}</td>
+              <td>${String(r.error || "").slice(0, 100)}</td>
+            </tr>`;
+          })
+          .join("");
+        $("resultTable").innerHTML =
+          head + (body || `<tr><td colspan="15">暂无数据</td></tr>`);
+      }
+
+      function refreshView() {
+        const s = window.__trendMomGrid;
+        if (!s) return;
+        const rows = toSortedRows(s.results);
+        computeCompositeScores(rows, s.meta);
+        const best = pickBest(rows) || s.best || null;
+        syncLookbackOptions(rows, best);
+        renderMeta(s.meta, rows);
+        renderBest(best);
+        renderHeatmap(rows, best);
+        renderLookbackLine(rows);
+        renderTable(rows);
+      }
+
+      async function loadFromUrl(url) {
+        status("正在加载数据...");
+        const resp = await fetch(url, { cache: "no-store" });
+        if (!resp.ok) throw new Error(`加载失败: HTTP ${resp.status}`);
+        const norm = normalizeData(await resp.json());
+        if (!Array.isArray(norm.results) || norm.results.length === 0) {
+          throw new Error("结果为空");
+        }
+        window.__trendMomGrid = norm;
+        refreshView();
+        status(`加载完成: ${url}`);
+      }
+
+      function bindEvents() {
+        $("loadUrlBtn").addEventListener("click", async () => {
+          try {
+            const url = String($("dataUrl").value || "").trim();
+            if (!url) throw new Error("请输入 JSON URL");
+            await loadFromUrl(url);
+          } catch (e) {
+            status(String(e));
+          }
+        });
+        $("fileInput").addEventListener("change", async (ev) => {
+          try {
+            const files = ev?.target?.files;
+            if (!files || files.length === 0) return;
+            const norm = normalizeData(JSON.parse(await files[0].text()));
+            if (!Array.isArray(norm.results) || norm.results.length === 0) {
+              throw new Error("结果为空");
+            }
+            window.__trendMomGrid = norm;
+            refreshView();
+            status(`已加载本地文件: ${files[0].name}`);
+          } catch (e) {
+            status(`读取本地文件失败: ${String(e)}`);
+          }
+        });
+        $("refreshBtn").addEventListener("click", () => {
+          try {
+            refreshView();
+            status("已刷新");
+          } catch (e) {
+            status(String(e));
+          }
+        });
+        $("topN").addEventListener("change", refreshView);
+        $("lookbackSlice").addEventListener("change", refreshView);
+      }
+
+      function init() {
+        bindEvents();
+        loadFromUrl(String($("dataUrl").value || "")).catch((e) => {
+          status(`自动加载失败: ${String(e)}`);
+        });
+      }
+
+      window.addEventListener("DOMContentLoaded", init);
+    </script>
+  </body>
+</html>

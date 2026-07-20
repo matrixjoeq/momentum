@@ -145,6 +145,8 @@ def test_trend_portfolio_all_active_candidates_and_outputs(session_factory):
     assert out["meta"]["type"] == "trend_portfolio_backtest"
     assert "weights" in out and "holdings" in out
     assert "avg_daily_turnover" in out["metrics"]["strategy"]
+    assert "calmar_ratio" in out["metrics"]["strategy"]
+    assert "calmar_ratio" in out["metrics"]["benchmark"]
     assert "avg_annual_turnover" in out["metrics"]["strategy"]
     assert "avg_daily_trade_count" in out["metrics"]["strategy"]
     assert "avg_annual_trade_count" in out["metrics"]["strategy"]

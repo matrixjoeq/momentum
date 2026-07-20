@@ -255,7 +255,7 @@
       <div class="muted" style="margin-top: 6px">本次回归实际生效因子</div>
       <table id="offClsActiveFactors"></table>
       <div class="muted" style="margin-top: 10px">
-        基准对比图（默认：CSI300 对其余 21 组，口径均为 hfq close）
+        基准对比图（默认：CSI300 对其余内置基准，口径均为 hfq close）
       </div>
       <div id="offClsPairCards" class="two" style="margin-top: 8px"></div>
       <table id="offClsTable"></table>
@@ -728,7 +728,7 @@
       const OFF_FUND_PAIR_PRICE_LIMIT = 8000;
       const OFF_FUND_PAIR_FETCH_TIMEOUT_MS = 10000;
       const OFF_FUND_PAIR_FETCH_CONCURRENCY = 4;
-      const OFF_FUND_PAIR_UNIVERSE = [
+      const OFF_FUND_PAIR_FALLBACK_UNIVERSE = [
         { key: "CSI300", label: "沪深300", etf_code: "510300" },
         { key: "CSI500", label: "中证500", etf_code: "510500" },
         { key: "CSI1000", label: "中证1000", etf_code: "512100" },
@@ -787,25 +787,101 @@
           label: "中证全指通信",
           etf_code: "515880",
         },
+        { key: "HSI", label: "恒生指数", etf_code: "159920" },
+        { key: "HSI_TECH", label: "港股科技", etf_code: "513980" },
+        { key: "HSI_DIVIDEND", label: "港股红利", etf_code: "513690" },
+        { key: "GOLD_SPOT", label: "黄金现货", etf_code: "518880" },
+        { key: "SILVER_FUTURES", label: "白银期货", etf_code: "161226" },
+        { key: "METALS_FUTURES", label: "有色金属期货", etf_code: "159980" },
+        { key: "OIL_FUTURES", label: "原油期货", etf_code: "501018" },
+        {
+          key: "ENERGY_CHEMICAL_FUTURES",
+          label: "能源化工期货",
+          etf_code: "159981",
+        },
+        {
+          key: "SOYBEAN_MEAL_FUTURES",
+          label: "豆粕期货",
+          etf_code: "159985",
+        },
+        { key: "SP500", label: "标普500", etf_code: "513500" },
+        { key: "NASDAQ100", label: "纳斯达克100", etf_code: "513100" },
+        {
+          key: "DOW_JONES_INDUSTRIAL_INDEX",
+          label: "道琼斯工业指数",
+          etf_code: "513400",
+        },
+        { key: "DAX", label: "德国DAX指数", etf_code: "513030" },
+        { key: "CAC40", label: "法国CAC40指数", etf_code: "513080" },
+        { key: "NIKKEI225", label: "日经225指数", etf_code: "513520" },
+        { key: "TOPIX", label: "日本东证指数", etf_code: "513800" },
+        { key: "5Y_GOV_BOND", label: "5年国债", etf_code: "511010" },
+        { key: "10Y_GOV_BOND", label: "10年国债", etf_code: "511260" },
+        { key: "30Y_GOV_BOND", label: "30年国债", etf_code: "511090" },
+        { key: "CITY_DEBT", label: "城投债", etf_code: "511220" },
+        {
+          key: "MONEY_MARKET_FUND",
+          label: "货币基金",
+          etf_code: "511880",
+        },
       ];
-      const OFF_FUND_PAIR_UNIVERSE_BY_KEY = Object.fromEntries(
-        OFF_FUND_PAIR_UNIVERSE.map((x) => [x.key, x]),
-      );
-      const OFF_FUND_PAIR_ETF_CODE_SET = new Set(
-        OFF_FUND_PAIR_UNIVERSE.map((x) => String(x.etf_code)),
-      );
-      const OFF_FUND_PAIR_DEFAULT_PEERS = OFF_FUND_PAIR_UNIVERSE.map(
-        (x) => x.key,
-      ).filter((k) => k !== "CSI300");
-      const OFF_FUND_PAIR_CARD_IDS = OFF_FUND_PAIR_DEFAULT_PEERS.map(
-        (_, i) => `pair_slot_${String(i + 1).padStart(2, "0")}`,
-      );
-      const OFF_FUND_PAIR_DEFAULT_PREFS = Object.fromEntries(
-        OFF_FUND_PAIR_CARD_IDS.map((cardId, idx) => [
-          cardId,
-          { base: "CSI300", peer: OFF_FUND_PAIR_DEFAULT_PEERS[idx] },
-        ]),
-      );
+      let OFF_FUND_PAIR_UNIVERSE = OFF_FUND_PAIR_FALLBACK_UNIVERSE.map((x) => ({
+        ...x,
+      }));
+      let OFF_FUND_PAIR_UNIVERSE_BY_KEY = {};
+      let OFF_FUND_PAIR_ETF_CODE_SET = new Set();
+      let OFF_FUND_PAIR_DEFAULT_PEERS = [];
+      let OFF_FUND_PAIR_CARD_IDS = [];
+      let OFF_FUND_PAIR_DEFAULT_PREFS = {};
+      const OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID = "pair_slot_extra_01";
+      function _rebuildOffFundPairUniverseDerived() {
+        OFF_FUND_PAIR_UNIVERSE_BY_KEY = Object.fromEntries(
+          OFF_FUND_PAIR_UNIVERSE.map((x) => [x.key, x]),
+        );
+        OFF_FUND_PAIR_ETF_CODE_SET = new Set(
+          OFF_FUND_PAIR_UNIVERSE.map((x) => String(x.etf_code)),
+        );
+        OFF_FUND_PAIR_DEFAULT_PEERS = OFF_FUND_PAIR_UNIVERSE.map(
+          (x) => x.key,
+        ).filter((k) => k !== "CSI300");
+        const autoCardIds = OFF_FUND_PAIR_DEFAULT_PEERS.map(
+          (_, i) => `pair_slot_${String(i + 1).padStart(2, "0")}`,
+        );
+        OFF_FUND_PAIR_CARD_IDS = [
+          ...autoCardIds,
+          OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID,
+        ];
+        OFF_FUND_PAIR_DEFAULT_PREFS = Object.fromEntries(
+          autoCardIds.map((cardId, idx) => [
+            cardId,
+            { base: "CSI300", peer: OFF_FUND_PAIR_DEFAULT_PEERS[idx] },
+          ]),
+        );
+        OFF_FUND_PAIR_DEFAULT_PREFS[OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID] = {
+          base: "",
+          peer: "",
+        };
+      }
+      function _normalizeOffFundPairUniverse(rows) {
+        const out = [];
+        const seen = new Set();
+        const src = Array.isArray(rows) ? rows : [];
+        for (const row of src) {
+          const key = String((row && row.key) || "")
+            .trim()
+            .toUpperCase();
+          const label = String((row && row.label) || key).trim();
+          const etfCode = String((row && row.etf_code) || "").trim();
+          if (!key || seen.has(key) || !/^\d{6}$/.test(etfCode)) continue;
+          out.push({ key, label, etf_code: etfCode });
+          seen.add(key);
+        }
+        if (!out.length || !out.some((x) => x.key === "CSI300")) {
+          return OFF_FUND_PAIR_FALLBACK_UNIVERSE.map((x) => ({ ...x }));
+        }
+        return out;
+      }
+      _rebuildOffFundPairUniverseDerived();
       let offPairPrefsByCard = {};
       let offPairFactorEtfByKey = {};
       const offPairPriceCache = new Map();
@@ -900,12 +976,23 @@
         for (const cardId of OFF_FUND_PAIR_CARD_IDS) {
           const it =
             obj[cardId] && typeof obj[cardId] === "object" ? obj[cardId] : {};
-          const baseKey = String(
-            it.base || base[cardId].base || "CSI300",
+          const baseDefault = String(
+            (base[cardId] && base[cardId].base) || "CSI300",
           ).trim();
-          const peerKey = String(
-            it.peer || base[cardId].peer || "CSI500",
+          const peerDefault = String(
+            (base[cardId] && base[cardId].peer) || "CSI500",
           ).trim();
+          const hasBase = it.base != null && String(it.base).trim().length > 0;
+          const hasPeer = it.peer != null && String(it.peer).trim().length > 0;
+          const baseKey = String(hasBase ? it.base : baseDefault).trim();
+          const peerKey = String(hasPeer ? it.peer : peerDefault).trim();
+          if (!baseKey || !peerKey) {
+            base[cardId] = {
+              base: String(baseKey || ""),
+              peer: String(peerKey || ""),
+            };
+            continue;
+          }
           const invalidPairInput =
             !OFF_FUND_PAIR_UNIVERSE_BY_KEY[baseKey] ||
             !OFF_FUND_PAIR_UNIVERSE_BY_KEY[peerKey] ||
@@ -976,15 +1063,18 @@
         host.innerHTML = OFF_FUND_PAIR_CARD_IDS.map((cardId, idx) => {
           const pref =
             offPairPrefsByCard[cardId] || OFF_FUND_PAIR_DEFAULT_PREFS[cardId];
-          const baseKey = String(pref.base || "CSI300");
+          const baseKey = String(pref.base != null ? pref.base : "CSI300");
           const peerKey = String(
-            pref.peer || OFF_FUND_PAIR_DEFAULT_PEERS[idx] || "CSI500",
+            pref.peer != null
+              ? pref.peer
+              : OFF_FUND_PAIR_DEFAULT_PEERS[idx] || "CSI500",
           );
+          const emptyOpt = '<option value="">（空白）</option>';
           const options = OFF_FUND_PAIR_UNIVERSE.map((x) => {
             const label = `${x.key} - ${x.label}`;
             return `<option value="${esc(x.key)}">${esc(label)}</option>`;
           }).join("");
-          return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center;"><strong>${esc(cardId)}</strong><span id="${esc(cardId)}_status" class="muted">等待计算</span></div><div class="row" style="margin-top:6px;"><div><label>基准</label><select id="${esc(cardId)}_base">${options}</select></div><div><label>对比</label><select id="${esc(cardId)}_peer">${options}</select></div></div><div id="${esc(cardId)}_plot" style="width:100%;height:780px;margin-top:6px;"></div></div>`;
+          return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center;"><strong>${esc(cardId)}</strong><span id="${esc(cardId)}_status" class="muted">等待计算</span></div><div class="row" style="margin-top:6px;"><div><label>基准</label><select id="${esc(cardId)}_base">${emptyOpt}${options}</select></div><div><label>对比</label><select id="${esc(cardId)}_peer">${emptyOpt}${options}</select></div></div><div id="${esc(cardId)}_plot" style="width:100%;height:780px;margin-top:6px;"></div></div>`;
         }).join("");
         for (const cardId of OFF_FUND_PAIR_CARD_IDS) {
           const baseSel = $(`${cardId}_base`);
@@ -1006,11 +1096,24 @@
         const baseSel = $(`${cardId}_base`);
         const peerSel = $(`${cardId}_peer`);
         const baseRaw = String(
-          (baseSel && baseSel.value) || pref.base || "CSI300",
+          baseSel ? (baseSel.value ?? "") : (pref.base ?? "CSI300"),
         ).trim();
         const peerRaw = String(
-          (peerSel && peerSel.value) || pref.peer || "CSI500",
+          peerSel ? (peerSel.value ?? "") : (pref.peer ?? "CSI500"),
         ).trim();
+        if (!baseRaw || !peerRaw) {
+          offPairInvalidInputByCard[cardId] = false;
+          offPairPrefsByCard[cardId] = {
+            base: String(baseRaw || ""),
+            peer: String(peerRaw || ""),
+          };
+          applyOffFundPairPrefs(offPairPrefsByCard, { saveLocal: true });
+          scheduleSaveOffParamState(120);
+          renderOffFundPairCard(cardId, {
+            snapshot: _offFundPairDateWindow(),
+          }).catch((e) => _handleOffFundPairRenderError(cardId, e));
+          return;
+        }
         const invalidPairInput =
           !OFF_FUND_PAIR_UNIVERSE_BY_KEY[baseRaw] ||
           !OFF_FUND_PAIR_UNIVERSE_BY_KEY[peerRaw] ||
@@ -1660,14 +1763,40 @@
       async function renderOffFundPairCard(cardId, { snapshot = null } = {}) {
         const pref =
           offPairPrefsByCard[cardId] || OFF_FUND_PAIR_DEFAULT_PREFS[cardId];
-        const baseKey = String(pref.base || "CSI300");
-        const peerKey = String(pref.peer || "CSI500");
+        const baseKey = String(pref.base ?? "");
+        const peerKey = String(pref.peer ?? "");
         const baseInfo = OFF_FUND_PAIR_UNIVERSE_BY_KEY[baseKey];
         const peerInfo = OFF_FUND_PAIR_UNIVERSE_BY_KEY[peerKey];
         const statusEl = $(`${cardId}_status`);
         const plotElId = `${cardId}_plot`;
         const plotEl = $(plotElId);
-        if (!plotEl || !baseInfo || !peerInfo) return;
+        if (!plotEl) return;
+        if (!baseInfo || !peerInfo) {
+          if (statusEl) statusEl.textContent = "请先选择基准与对比";
+          plotEl.innerHTML =
+            "<div class='muted' style='padding-top:8px;'>当前 slot 为空，请先选择基准和对比。</div>";
+          offPairSnapshotsByCard[cardId] = {
+            version: Number(offPairRequestVersionByCard[cardId] || 0),
+            pair: {
+              base_key: String(baseKey || ""),
+              peer_key: String(peerKey || ""),
+            },
+            status: {
+              status_code: "data_unavailable",
+              status_message_key: "pair.data_unavailable",
+              status_message: _pairMessageByKey("pair.data_unavailable"),
+            },
+            warnings: [],
+            metrics: {
+              sample_count: 0,
+              common_dates_hash: OFF_FUND_PAIR_EMPTY_DATES_HASH,
+              key_series_hash: OFF_FUND_PAIR_EMPTY_KEY_SERIES_HASH,
+            },
+            error: "blank_slot",
+          };
+          window.__offFundPairSnapshots = offPairSnapshotsByCard;
+          return;
+        }
         const version = (Number(offPairRequestVersionByCard[cardId]) || 0) + 1;
         offPairRequestVersionByCard[cardId] = version;
         const invalidPairInput = Boolean(offPairInvalidInputByCard[cardId]);
@@ -3194,6 +3323,17 @@
         $("offClsCfgName").value = String(cfg.name || "");
         refreshClsFactorInputState();
       }
+      async function loadOffFundPairUniverseFromBackend() {
+        const resp = await api("/off-fund/regression/pair-universe", {
+          method: "GET",
+        });
+        const txt = await resp.text();
+        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+        const rows = txt ? JSON.parse(txt) : [];
+        OFF_FUND_PAIR_UNIVERSE = _normalizeOffFundPairUniverse(rows);
+        _rebuildOffFundPairUniverseDerived();
+        renderOffFundPairCardShell();
+      }
       async function loadClsConfigsFromBackend() {
         const resp = await api("/off-fund/regression/factor-configs", {
           method: "GET",
@@ -4123,6 +4263,15 @@
       });
       offPairPrefsByCard = loadOffFundPairPrefsLocal();
       renderOffFundPairCardShell();
+      loadOffFundPairUniverseFromBackend()
+        .then(() => {
+          scheduleRenderAllOffFundPairCards(20);
+        })
+        .catch((e) => {
+          setMsg(
+            `比值基准池加载失败（使用本地回退池）：${String((e && e.message) || e)}`,
+          );
+        });
       wireOffPeriodControls("weekly");
       wireOffPeriodControls("monthly");
       wireOffPeriodControls("quarterly");

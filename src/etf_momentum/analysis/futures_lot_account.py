@@ -157,6 +157,8 @@ def simulate_discrete_lot_portfolio(
     reserve_attempted_by_direction: dict[str, int] = {"long": 0, "short": 0}
     reserve_blocked_by_direction: dict[str, int] = {"long": 0, "short": 0}
     closed_trades: list[dict[str, Any]] = []
+    insolvency_forced_liquidation = False
+    insolvency_first_date: str | None = None
 
     def apply_lot_change(
         *,
@@ -258,6 +260,41 @@ def simulate_discrete_lot_portfolio(
             float(b.get("basis_notional_cny", 0.0)) + float(qty) * float(px) * mult
         )
 
+    def _flatten_on_insolvency(
+        *,
+        current_date: pd.Timestamp,
+        settle_snapshot: dict[str, float],
+        exec_snapshot: dict[str, float],
+    ) -> None:
+        nonlocal equity, insolvency_forced_liquidation, insolvency_first_date
+        if equity > 0.0:
+            return
+        equity = 0.0
+        if not insolvency_forced_liquidation:
+            insolvency_forced_liquidation = True
+            insolvency_first_date = pd.Timestamp(current_date).date().isoformat()
+        for c in codes:
+            old = int(lots[c])
+            if old == 0:
+                continue
+            px_exec = float(exec_snapshot.get(c, float("nan")))
+            px_settle = float(settle_snapshot.get(c, float("nan")))
+            px = (
+                px_exec
+                if np.isfinite(px_exec) and px_exec > 0.0
+                else (
+                    px_settle
+                    if np.isfinite(px_settle) and px_settle > 0.0
+                    else float("nan")
+                )
+            )
+            if np.isfinite(px) and px > 0.0:
+                _close_trade(
+                    code=c, qty=abs(old), px=float(px), dt=pd.Timestamp(current_date)
+                )
+            lots[c] = 0
+            books[c] = _empty_trade_book()
+
     for i, d in enumerate(common_idx):
         settle_m: dict[str, float] = {}
         exec_m: dict[str, float] = {}
@@ -339,6 +376,17 @@ def simulate_discrete_lot_portfolio(
                 equity -= rt
                 meta_roll_fees += rt
                 meta_roll_events += 1
+        if equity <= 0.0:
+            _flatten_on_insolvency(
+                current_date=pd.Timestamp(d),
+                settle_snapshot=settle_m,
+                exec_snapshot=exec_m,
+            )
+            eq_list.append(equity)
+            for c in codes:
+                prev_settle[c] = settle_m[c]
+                prev_suf[c] = suf_m[c]
+            continue
 
         # Targets from w_eff
         try:
@@ -385,7 +433,15 @@ def simulate_discrete_lot_portfolio(
                 reserve_attempted_by_direction[side_name] = int(
                     reserve_attempted_by_direction.get(side_name, 0) + 1
                 )
-            mpl = _margin_per_lot(settle_m[c], float(mults[c]), mrate)
+            # Open execution cannot use same-day settle for pre-trade sizing
+            # (that would be look-ahead at the open). Use execution price.
+            if ep_mode == "open":
+                margin_px = float(exec_m.get(c, float("nan")))
+            else:
+                margin_px = float(settle_m.get(c, float("nan")))
+                if (not np.isfinite(margin_px)) or margin_px <= 0.0:
+                    margin_px = float(exec_m.get(c, float("nan")))
+            mpl = _margin_per_lot(margin_px, float(mults[c]), mrate)
             if not np.isfinite(mpl) or mpl <= 0:
                 if is_new_entry_try:
                     reserve_blocked_entries += 1
@@ -494,6 +550,12 @@ def simulate_discrete_lot_portfolio(
                     and np.isfinite(float(mults[c]))
                 ):
                     equity += float(lc) * float(mults[c]) * (ps1 - opx)
+        if equity <= 0.0:
+            _flatten_on_insolvency(
+                current_date=pd.Timestamp(d),
+                settle_snapshot=settle_m,
+                exec_snapshot=exec_m,
+            )
 
         eq_list.append(equity)
         for c in codes:
@@ -516,6 +578,9 @@ def simulate_discrete_lot_portfolio(
         "initial_equity_cny": float(initial_equity_cny),
         "margin_rate_frac": float(mrate),
         "reserve_margin_ratio": float(res),
+        "margin_reference_price": (
+            "exec_open_when_exec_price_open_else_settle_with_exec_fallback"
+        ),
         "roll_fees_cny": float(meta_roll_fees),
         "roll_events": int(meta_roll_events),
         "trade_fees_cny": float(meta_trade_fees),
@@ -541,6 +606,8 @@ def simulate_discrete_lot_portfolio(
         "reserve_margin_blocked_entry_count_by_direction": {
             str(k): int(v) for k, v in reserve_blocked_by_direction.items()
         },
+        "insolvency_forced_liquidation": bool(insolvency_forced_liquidation),
+        "insolvency_first_date": insolvency_first_date,
         "closed_trades": closed_trades,
         "engine": "lot_account",
     }

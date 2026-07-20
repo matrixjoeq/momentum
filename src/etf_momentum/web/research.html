@@ -43,8 +43,7 @@
       #distMonthDomStats,
       #distYearWeekStats,
       #distYearMonthStats,
-      #distCalTable,
-      #distRollingAnnVolQuantiles {
+      #distCalTable {
         min-height: 168px;
       }
       @media print {
@@ -781,21 +780,6 @@
           <button id="distApplyRange">应用区间</button>
         </div>
         <div>
-          <label>滚动年化波动窗口</label>
-          <select id="distRollVolWindow" style="min-width: 180px">
-            <option value="1D">1D</option>
-            <option value="1W">1W</option>
-            <option value="1M" selected>1M</option>
-            <option value="3M">3M</option>
-            <option value="6M">6M</option>
-            <option value="1Y">1Y</option>
-            <option value="2Y">2Y</option>
-            <option value="5Y">5Y</option>
-            <option value="10Y">10Y</option>
-            <option value="ALL">ALL</option>
-          </select>
-        </div>
-        <div>
           <label
             >未来收益预测窗口 n（日）
             <span class="muted"
@@ -1299,14 +1283,6 @@
       <table id="distMomentumTsTable" style="margin-top: 8px"></table>
       <table id="distMomentumCsTable" style="margin-top: 8px"></table>
       <div class="muted" style="margin-top: 10px">
-        滚动年化波动率分位数（基于日收益滚动 std 年化）
-      </div>
-      <table id="distRollingAnnVolQuantiles" style="margin-top: 8px"></table>
-      <div
-        id="distRollingAnnVol"
-        style="width: 100%; height: 320px; margin-top: 12px"
-      ></div>
-      <div class="muted" style="margin-top: 10px">
         GJR-GARCH(1,1)-t 条件波动率拟合（价格与波动同图）
       </div>
       <div id="distGarchHint" class="muted" style="margin-top: 6px"></div>
@@ -1326,10 +1302,43 @@
       <div class="muted" style="margin-top: 10px">
         后视镜综合偏离指标（跟随“选择标的”展示；仅客观展示时序）
       </div>
+      <div id="distMirrorMethod" class="muted" style="margin-top: 6px">
+        计算口径：在所选周期（daily/weekly/monthly/quarterly/yearly）下，先分别计算
+        <b>对数收益偏离</b
+        >（log(1+r)-MA20）、<b>对数波动偏离</b>（log(vol)-MA20） 与
+        <b>成交活跃度偏离</b
+        >（log(activity)-MA20，周期内取均值）；再对三项偏离分别做 expanding
+        percentile rank，三者等权平均得到综合分数，最后再次做 expanding
+        percentile rank 得到后视镜值（0%~100%）。
+        含义：值越高表示当前处在历史更高的“偏离/拥挤”分位，值越低表示更偏冷；该指标是后视镜统计刻画，不直接代表未来涨跌方向。
+      </div>
+      <div id="distMirrorState" class="muted" style="margin-top: 6px"></div>
       <div
         id="distMirrorTs"
         style="width: 100%; height: 260px; margin-top: 8px"
       ></div>
+      <div class="muted" style="margin-top: 10px">
+        后视镜分位分桶有效性检验（前瞻收益）
+      </div>
+      <div
+        id="distMirrorBucketHint"
+        class="muted"
+        style="margin-top: 6px"
+      ></div>
+      <div
+        id="distMirrorBucketChart"
+        style="width: 100%; height: 320px; margin-top: 8px"
+      ></div>
+      <table id="distMirrorBucketTable" style="margin-top: 8px"></table>
+      <div
+        id="distMirrorBucketConclusion"
+        class="muted"
+        style="margin-top: 8px"
+      ></div>
+      <div class="muted" style="margin-top: 10px">
+        后视镜滚动样本外检验（Walk-Forward）
+      </div>
+      <table id="distMirrorWalkForwardTable" style="margin-top: 8px"></table>
     </div>
 
     <div class="panel">
@@ -5843,6 +5852,37 @@
             ></select>
           </div>
         </div>
+        <div class="muted" style="margin-top: 10px">
+          近100次交易SQN滚动统计（仅策略整体；每个点严格使用完整100笔窗口）
+        </div>
+        <div
+          id="trendSqnRollingRecent100Chart"
+          style="width: 100%; height: 300px; margin-top: 8px"
+        ></div>
+        <div
+          class="two"
+          style="grid-template-columns: 1fr 1fr; margin-top: 10px"
+        >
+          <div>
+            <div class="muted">滚动100次SQN分布直方图（全历史）</div>
+            <div
+              id="trendSqnRollingRecent100Hist"
+              style="width: 100%; height: 280px; margin-top: 8px"
+            ></div>
+          </div>
+          <div>
+            <div class="muted">滚动100次SQN分布统计（全历史）</div>
+            <table
+              id="trendSqnRollingRecent100StatsTable"
+              style="margin-top: 8px"
+            ></table>
+          </div>
+        </div>
+        <div
+          id="trendSqnRollingRecent100StabilityNote"
+          class="muted"
+          style="margin-top: 8px"
+        ></div>
         <div
           class="two"
           style="grid-template-columns: 1fr 1fr; margin-top: 8px"
@@ -8165,7 +8205,6 @@
           "distRangeQuick",
           "distStart",
           "distEnd",
-          "distRollVolWindow",
           "distFutureN",
           "distFutureFitOn",
           "distCalDay",
@@ -11356,8 +11395,8 @@
           const ratio = Number(kv[1]);
           if (!Number.isFinite(r) || r <= 0)
             return { __error: `R阈值需为>0数字：${p}`, tiers: [] };
-          if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1)
-            return { __error: `回落比例需在(0,1)之间：${p}`, tiers: [] };
+          if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1)
+            return { __error: `回落比例需在(0,1]之间：${p}`, tiers: [] };
           tiers.push({ r_multiple: r, retrace_ratio: ratio });
         }
         tiers.sort((a, b) => Number(a.r_multiple) - Number(b.r_multiple));
@@ -12075,7 +12114,7 @@
           trendRTpExec:
             "R止盈执行：日内执行=入场后下一交易日开始生效；次日执行=当日收盘触发后下一交易日按策略执行价离场。",
           trendRTpTiers:
-            "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
+            "分层参数：格式 r:ratio（如 2:0.5；也支持 1:1，表示达到1R后保本线触发离场）。",
           trendRScaleEnable:
             "浮盈分档降仓：按浮盈阈值直接分批卖出，不等待回落；每档减仓比例都按建仓初始仓位计算。若ATR止损关闭，分层R仍由「ATR周期」与「止损倍数n」定义的基准计量。",
           trendRScaleExec:
@@ -18161,8 +18200,6 @@
         const adjustHint = $("distAdjustHint");
         const typeSelect = $("distTypeSelect");
         const periodSelect = $("distPeriodSelect");
-        const rollWinSelect = $("distRollVolWindow");
-        const rollQTable = $("distRollingAnnVolQuantiles");
         const garchHintEl = $("distGarchHint");
         const garchChartEl = $("distGarchChart");
         const garchTableEl = $("distGarchTable");
@@ -18214,8 +18251,43 @@
         const rangeStateRefreshBtn = $("distRangeStateRefresh");
         const rangeStateHint = $("distRangeStateHint");
         const rangeStateStats = $("distRangeStateStats");
-        if (!codeSelect || !typeSelect || !periodSelect || !rollWinSelect)
-          return;
+        if (!codeSelect || !typeSelect || !periodSelect) return;
+        const mirrorStateEl = $("distMirrorState");
+        const mirrorBucketHintEl = $("distMirrorBucketHint");
+        const mirrorBucketChartEl = $("distMirrorBucketChart");
+        const mirrorBucketTableEl = $("distMirrorBucketTable");
+        const mirrorBucketConclusionEl = $("distMirrorBucketConclusion");
+        const mirrorWalkForwardTableEl = $("distMirrorWalkForwardTable");
+        const _setMirrorState = (msg, asHtml = false) => {
+          if (!mirrorStateEl) return;
+          const txt = String(msg || "");
+          if (asHtml) mirrorStateEl.innerHTML = txt;
+          else mirrorStateEl.textContent = txt;
+        };
+        const _setMirrorBucket = (
+          hintMsg,
+          chartMsg = "无数据",
+          tableHtml = "",
+          asHtml = false,
+          conclusionHtml = "",
+          walkForwardHtml = "",
+        ) => {
+          if (mirrorBucketHintEl)
+            mirrorBucketHintEl.textContent = String(hintMsg || "");
+          if (mirrorBucketChartEl) {
+            mirrorBucketChartEl.innerHTML = `<div class='muted'>${esc(String(chartMsg || "无数据"))}</div>`;
+          }
+          if (mirrorBucketTableEl) {
+            if (asHtml) mirrorBucketTableEl.innerHTML = String(tableHtml || "");
+            else mirrorBucketTableEl.innerHTML = String(tableHtml || "");
+          }
+          if (mirrorBucketConclusionEl) {
+            mirrorBucketConclusionEl.innerHTML = String(conclusionHtml || "");
+          }
+          if (mirrorWalkForwardTableEl) {
+            mirrorWalkForwardTableEl.innerHTML = String(walkForwardHtml || "");
+          }
+        };
         const acfPlotEl = $("distLogRetAcf");
         const acfTableEl = $("distLogRetAcfTable");
         const acfExplainEl = $("distLogRetAcfExplain");
@@ -18332,8 +18404,6 @@
           if ($("distFutureScatter"))
             $("distFutureScatter").innerHTML =
               "<div class='muted'>无数据</div>";
-          $("distRollingAnnVol").innerHTML = "<div class='muted'>无数据</div>";
-          if (rollQTable) rollQTable.innerHTML = "";
           if (futProbTable) futProbTable.innerHTML = "";
           if (futCausalTable) futCausalTable.innerHTML = "";
           if (momTsTable) momTsTable.innerHTML = "";
@@ -18412,22 +18482,6 @@
           return _distClampRange(code, cand, base.end);
         };
 
-        const _winToDays = (w) => {
-          const x = String(w || "")
-            .trim()
-            .toUpperCase();
-          if (x === "1D") return 1;
-          if (x === "1W") return 5;
-          if (x === "1M") return 21;
-          if (x === "3M") return 63;
-          if (x === "6M") return 126;
-          if (x === "1Y") return 252;
-          if (x === "2Y") return 504;
-          if (x === "5Y") return 1260;
-          if (x === "10Y") return 2520;
-          if (x === "ALL") return 0;
-          return 21; // default 1M
-        };
         const _std = (arr) => {
           const xs = arr.filter((v) => Number.isFinite(v));
           if (xs.length < 2) return NaN;
@@ -18436,221 +18490,6 @@
             xs.reduce((s, v) => s + (v - m) * (v - m), 0) / (xs.length - 1);
           return Math.sqrt(vv);
         };
-        const _plotRollingAnnVol = () => {
-          const code = codeSelect.value;
-          const wKey = rollWinSelect.value;
-          const w = _winToDays(wKey);
-          const boxId = "distRollingAnnVol";
-          const b = (window.__distBaselineByCode || {})[code];
-          if (!b || !b.nav || !b.nav.series || !b.nav.dates) {
-            $(boxId).innerHTML =
-              "<div class='muted'>该标的当前区间无可用NAV序列，请调整时间范围后重试。</div>";
-            if (rollQTable) rollQTable.innerHTML = "";
-            return;
-          }
-          const dates = b.nav.dates || [];
-          const nav =
-            b.nav.series && b.nav.series[code] ? b.nav.series[code] : [];
-          if (
-            !Array.isArray(dates) ||
-            !Array.isArray(nav) ||
-            dates.length < 5 ||
-            nav.length !== dates.length
-          ) {
-            $(boxId).innerHTML =
-              "<div class='muted'>无可用NAV序列，无法计算滚动年化波动率。</div>";
-            if (rollQTable) rollQTable.innerHTML = "";
-            return;
-          }
-          if (typeof Plotly === "undefined") {
-            $(boxId).innerHTML =
-              "<div class='muted'>Plotly 未加载，无法绘图。</div>";
-            if (rollQTable) rollQTable.innerHTML = "";
-            return;
-          }
-          const rets = nav.map((v, i) =>
-            i === 0 ? NaN : Number(v) / Number(nav[i - 1]) - 1,
-          );
-          const ann = 252;
-          const vols = [];
-          for (let i = 0; i < rets.length; i++) {
-            if (i < 1) {
-              vols.push(NaN);
-              continue;
-            }
-            const start = w <= 0 ? 1 : Math.max(1, i - w + 1);
-            const slice = rets.slice(start, i + 1);
-            const s = _std(slice);
-            vols.push(Number.isFinite(s) ? s * Math.sqrt(ann) : NaN);
-          }
-
-          // quantiles for rolling ann vol
-          if (rollQTable) {
-            const xs = vols.filter((v) => Number.isFinite(v));
-            const cur = (() => {
-              for (let i = vols.length - 1; i >= 0; i--) {
-                const v = Number(vols[i]);
-                if (Number.isFinite(v)) return { v, date: dates[i] };
-              }
-              return null;
-            })();
-            if (xs.length >= 5 && typeof _percentile === "function") {
-              const q = {
-                q01: _percentile(xs, 1),
-                q05: _percentile(xs, 5),
-                q10: _percentile(xs, 10),
-                q25: _percentile(xs, 25),
-                q50: _percentile(xs, 50),
-                q75: _percentile(xs, 75),
-                q90: _percentile(xs, 90),
-                q95: _percentile(xs, 95),
-                q99: _percentile(xs, 99),
-              };
-              const rows = [
-                [
-                  "分位数",
-                  "1%",
-                  "5%",
-                  "10%",
-                  "25%",
-                  "50%",
-                  "75%",
-                  "90%",
-                  "95%",
-                  "99%",
-                ],
-                [
-                  "数值",
-                  fmtPct(q.q01),
-                  fmtPct(q.q05),
-                  fmtPct(q.q10),
-                  fmtPct(q.q25),
-                  fmtPct(q.q50),
-                  fmtPct(q.q75),
-                  fmtPct(q.q90),
-                  fmtPct(q.q95),
-                  fmtPct(q.q99),
-                ],
-              ];
-              if (cur && Number.isFinite(cur.v)) {
-                rows.push([
-                  `当前值（${esc(String(cur.date || ""))}）`,
-                  fmtPct(cur.v),
-                  "",
-                  "",
-                  "",
-                  "",
-                  "",
-                  "",
-                  "",
-                  "",
-                ]);
-              }
-              rollQTable.innerHTML = rows
-                .map((row, i) => {
-                  const tag = i === 0 ? "th" : "td";
-                  return `<tr>${row.map((c) => `<${tag}>${c}</${tag}>`).join("")}</tr>`;
-                })
-                .join("");
-            } else {
-              rollQTable.innerHTML =
-                "<tr><td class='muted'>样本不足，无法计算分位数</td></tr>";
-            }
-          }
-
-          const title = `${codeLabel(code)} - 滚动年化波动率（window=${wKey || "1M"}）`;
-          const xsOk = vols.filter((v) => Number.isFinite(v));
-          const qRef =
-            xsOk.length >= 5 && typeof _percentile === "function"
-              ? {
-                  q01: _percentile(xsOk, 1),
-                  q05: _percentile(xsOk, 5),
-                  q10: _percentile(xsOk, 10),
-                  q25: _percentile(xsOk, 25),
-                  q50: _percentile(xsOk, 50),
-                  q75: _percentile(xsOk, 75),
-                  q90: _percentile(xsOk, 90),
-                  q95: _percentile(xsOk, 95),
-                  q99: _percentile(xsOk, 99),
-                }
-              : null;
-          const curPt = (() => {
-            for (let i = vols.length - 1; i >= 0; i--) {
-              const v = Number(vols[i]);
-              if (Number.isFinite(v)) return { v, date: dates[i] };
-            }
-            return null;
-          })();
-          Plotly.newPlot(
-            boxId,
-            [
-              {
-                x: dates,
-                y: vols,
-                type: "scatter",
-                mode: "lines",
-                name: "ann_vol",
-                hovertemplate: "%{x}<br>年化波动率=%{y:.2%}<extra></extra>",
-              },
-              ...(curPt && Number.isFinite(curPt.v)
-                ? [
-                    {
-                      x: [curPt.date],
-                      y: [curPt.v],
-                      type: "scatter",
-                      mode: "markers",
-                      name: "当前值",
-                      marker: { color: "rgba(214,39,40,0.95)", size: 7 },
-                      hovertemplate: "%{x}<br>current=%{y:.2%}<extra></extra>",
-                    },
-                  ]
-                : []),
-            ],
-            {
-              margin: { t: 40 },
-              title: { text: title, font: { size: 14 } },
-              yaxis: {
-                type: "log",
-                tickformat: ".0%",
-                title: "年化波动率（对数坐标）",
-              },
-              shapes: (() => {
-                const out = [];
-                const mk = (y, color, dash = "dot", width = 1.5) => {
-                  const v = Number(y);
-                  if (!Number.isFinite(v)) return;
-                  out.push({
-                    type: "line",
-                    xref: "paper",
-                    yref: "y",
-                    x0: 0,
-                    x1: 1,
-                    y0: v,
-                    y1: v,
-                    line: { color, width, dash },
-                  });
-                };
-                if (qRef) {
-                  mk(qRef.q01, "rgba(214,39,40,0.85)");
-                  mk(qRef.q99, "rgba(214,39,40,0.85)");
-                  mk(qRef.q05, "rgba(255,127,14,0.85)");
-                  mk(qRef.q95, "rgba(255,127,14,0.85)");
-                  mk(qRef.q10, "rgba(255,215,0,0.95)");
-                  mk(qRef.q90, "rgba(255,215,0,0.95)");
-                  mk(qRef.q25, "rgba(44,160,44,0.85)");
-                  mk(qRef.q75, "rgba(44,160,44,0.85)");
-                  mk(qRef.q50, "rgba(31,119,180,0.95)", "solid", 2.0);
-                }
-                if (curPt && Number.isFinite(curPt.v)) {
-                  mk(curPt.v, "rgba(214,39,40,0.95)", "solid", 2.4);
-                }
-                return out;
-              })(),
-            },
-            { responsive: true },
-          );
-        };
-
         const _distGarchErrorLabel = (errCode) => {
           const e = String(errCode || "")
             .trim()
@@ -19223,6 +19062,7 @@
           if (!b || !b.mirror_timeseries) {
             $(boxId).innerHTML =
               "<div class='muted'>后视镜指标未加载：请先为该标的加载时间范围数据。</div>";
+            _setMirrorState("当前状态：暂无可用后视镜数据。");
             return;
           }
           const node =
@@ -19250,6 +19090,7 @@
           ) {
             $(boxId).innerHTML =
               "<div class='muted'>无可用后视镜指标序列。</div>";
+            _setMirrorState("当前状态：样本不足，无法解读。");
             return;
           }
           const sma = (arr, w) => {
@@ -19282,6 +19123,7 @@
           if (typeof Plotly === "undefined") {
             $(boxId).innerHTML =
               "<div class='muted'>Plotly 未加载，无法绘图。</div>";
+            _setMirrorState("当前状态：Plotly 未加载，无法生成解读。");
             return;
           }
           Plotly.newPlot(
@@ -19324,6 +19166,675 @@
             },
             { responsive: true, displayModeBar: false },
           );
+
+          const _latestFinite = (arr, xs, endIdx = null) => {
+            const hi =
+              endIdx == null
+                ? Math.min(arr.length, xs.length) - 1
+                : Math.min(endIdx, Math.min(arr.length, xs.length) - 1);
+            for (let i = hi; i >= 0; i--) {
+              const v = Number(arr[i]);
+              if (!Number.isFinite(v)) continue;
+              return { idx: i, value: v, date: String(xs[i] || "") };
+            }
+            return null;
+          };
+          const _mirrorBand = (x) => {
+            const v = Number(x);
+            if (!Number.isFinite(v)) {
+              return {
+                band: "未知",
+                explain: "缺少有效分位样本",
+              };
+            }
+            if (v >= 0.95) {
+              return {
+                band: "极高分位（>=95%）",
+                explain: "历史偏离/拥挤处于极端高位，需防范波动放大",
+              };
+            }
+            if (v >= 0.8) {
+              return {
+                band: "偏高分位（80%~95%）",
+                explain: "历史偏离处于较高区间，市场较拥挤",
+              };
+            }
+            if (v <= 0.05) {
+              return {
+                band: "极低分位（<=5%）",
+                explain: "历史偏离处于极端低位，市场较冷",
+              };
+            }
+            if (v <= 0.2) {
+              return {
+                band: "偏低分位（5%~20%）",
+                explain: "历史偏离处于较低区间，拥挤度偏弱",
+              };
+            }
+            return {
+              band: "中性区间（20%~80%）",
+              explain: "历史分位居中，偏离程度未到极端",
+            };
+          };
+          const cur = _latestFinite(vals, dates);
+          if (!cur) {
+            _setMirrorState("当前状态：暂无有效后视镜值。");
+            return;
+          }
+          const prev = _latestFinite(vals, dates, cur.idx - 1);
+          const maCur = _latestFinite(ma5, dates);
+          const maPrev = maCur
+            ? _latestFinite(ma5, dates, maCur.idx - 1)
+            : null;
+          const delta = prev ? cur.value - prev.value : NaN;
+          const maDelta =
+            maCur && maPrev ? Number(maCur.value) - Number(maPrev.value) : NaN;
+          const stepTxt = Number.isFinite(delta)
+            ? delta > 0
+              ? `较上一期上行 ${fmtPct(Math.abs(delta))}`
+              : delta < 0
+                ? `较上一期下行 ${fmtPct(Math.abs(delta))}`
+                : "与上一期基本持平"
+            : "缺少上一期可比样本";
+          const trendTxt = Number.isFinite(maDelta)
+            ? maDelta > 0
+              ? "MA(5) 斜率向上"
+              : maDelta < 0
+                ? "MA(5) 斜率向下"
+                : "MA(5) 斜率走平"
+            : "MA(5) 斜率样本不足";
+          const band = _mirrorBand(cur.value);
+          _setMirrorState(
+            `<b>当前状态解读：</b>${esc(cur.date)} 最新值 <b>${fmtPct(cur.value)}</b>，处于<b>${esc(band.band)}</b>；${esc(band.explain)}。${stepTxt}，${trendTxt}。<span class="muted">该指标用于历史分位刻画，不直接代表未来涨跌。</span>`,
+            true,
+          );
+        };
+
+        const _renderMirrorBucketEffect = () => {
+          if (
+            !mirrorBucketHintEl ||
+            !mirrorBucketChartEl ||
+            !mirrorBucketTableEl
+          ) {
+            return;
+          }
+          const code = String(codeSelect.value || "").trim();
+          const period = String(periodSelect.value || "daily").trim();
+          const nRaw = Number(
+            futNInput && futNInput.value != null ? futNInput.value : 5,
+          );
+          const horizon = Number.isFinite(nRaw)
+            ? Math.max(5, Math.floor(nRaw))
+            : 5;
+          const bucketCount = 10;
+          const _quantileLinear = (arr, q) => {
+            const xs = (Array.isArray(arr) ? arr : [])
+              .map(Number)
+              .filter(Number.isFinite)
+              .sort((a, b) => a - b);
+            if (!xs.length) return NaN;
+            const qq = Math.max(0, Math.min(1, Number(q)));
+            const pos = (xs.length - 1) * qq;
+            const lo = Math.floor(pos);
+            const hi = Math.ceil(pos);
+            if (lo === hi) return xs[lo];
+            const w = pos - lo;
+            return xs[lo] * (1 - w) + xs[hi] * w;
+          };
+          const _mean = (arr) => {
+            const xs = (Array.isArray(arr) ? arr : []).filter((x) =>
+              Number.isFinite(x),
+            );
+            return xs.length
+              ? xs.reduce((a, b) => a + Number(b), 0) / xs.length
+              : NaN;
+          };
+          const _bootstrapMeanCI = (arr, reps = 1200, alpha = 0.05) => {
+            const xs = (Array.isArray(arr) ? arr : [])
+              .map(Number)
+              .filter(Number.isFinite);
+            const n = xs.length;
+            if (n < 5) return { mean: _mean(xs), lo: NaN, hi: NaN };
+            const b = Math.max(300, Math.floor(Number(reps) || 1200));
+            const means = new Array(b).fill(NaN);
+            for (let i = 0; i < b; i++) {
+              let s = 0.0;
+              for (let j = 0; j < n; j++) {
+                const k = Math.floor(Math.random() * n);
+                s += Number(xs[k]);
+              }
+              means[i] = s / n;
+            }
+            means.sort((a, b2) => a - b2);
+            const loQ = Math.max(0.0, Math.min(0.5, alpha / 2.0));
+            const hiQ = 1.0 - loQ;
+            return {
+              mean: _mean(xs),
+              lo: _quantileLinear(means, loQ),
+              hi: _quantileLinear(means, hiQ),
+            };
+          };
+          const _permPValueDiffMeans = (aRaw, bRaw, reps = 2000) => {
+            const a = (Array.isArray(aRaw) ? aRaw : [])
+              .map(Number)
+              .filter(Number.isFinite);
+            const b = (Array.isArray(bRaw) ? bRaw : [])
+              .map(Number)
+              .filter(Number.isFinite);
+            const nA = a.length;
+            const nB = b.length;
+            if (nA < 5 || nB < 5) {
+              return { diff: NaN, p: NaN, reps: 0 };
+            }
+            const obs = _mean(b) - _mean(a);
+            const all = a.concat(b);
+            const n = all.length;
+            const total = all.reduce((s, v) => s + Number(v), 0.0);
+            const rr = Math.max(500, Math.floor(Number(reps) || 2000));
+            let extreme = 0;
+            for (let r = 0; r < rr; r++) {
+              const pool = all.slice();
+              let sumA = 0.0;
+              for (let i = 0; i < nA; i++) {
+                const j = i + Math.floor(Math.random() * (n - i));
+                const tmp = pool[i];
+                pool[i] = pool[j];
+                pool[j] = tmp;
+                sumA += Number(pool[i]);
+              }
+              const meanA = sumA / nA;
+              const meanB = (total - sumA) / nB;
+              const d = meanB - meanA;
+              if (Math.abs(d) >= Math.abs(obs)) extreme += 1;
+            }
+            const p = (extreme + 1.0) / (rr + 1.0);
+            return { diff: obs, p, reps: rr };
+          };
+          const _erf = (x) => {
+            const xx = Number(x);
+            if (!Number.isFinite(xx)) return NaN;
+            const sign = xx < 0 ? -1 : 1;
+            const ax = Math.abs(xx);
+            const t = 1.0 / (1.0 + 0.3275911 * ax);
+            const y =
+              1.0 -
+              ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t -
+                0.284496736) *
+                t +
+                0.254829592) *
+                t *
+                Math.exp(-ax * ax);
+            return sign * y;
+          };
+          const _normCdf = (z) => 0.5 * (1.0 + _erf(Number(z) / Math.SQRT2));
+          const _rankAverage = (arr) => {
+            const xs = (Array.isArray(arr) ? arr : []).map(Number);
+            const n = xs.length;
+            const out = new Array(n).fill(NaN);
+            const items = [];
+            for (let i = 0; i < n; i++) {
+              const v = xs[i];
+              if (Number.isFinite(v)) items.push({ i, v });
+            }
+            items.sort((a, b) => a.v - b.v);
+            let k = 0;
+            while (k < items.length) {
+              let j = k + 1;
+              while (j < items.length && items[j].v === items[k].v) j += 1;
+              const rankAvg = (k + 1 + j) / 2.0;
+              for (let t = k; t < j; t++) out[items[t].i] = rankAvg;
+              k = j;
+            }
+            return out;
+          };
+          const _spearmanWithP = (xRaw, yRaw) => {
+            const x = Array.isArray(xRaw) ? xRaw.map(Number) : [];
+            const y = Array.isArray(yRaw) ? yRaw.map(Number) : [];
+            const n0 = Math.min(x.length, y.length);
+            const xx = [];
+            const yy = [];
+            for (let i = 0; i < n0; i++) {
+              if (!Number.isFinite(x[i]) || !Number.isFinite(y[i])) continue;
+              xx.push(x[i]);
+              yy.push(y[i]);
+            }
+            const n = xx.length;
+            if (n < 12) return { rho: NaN, p: NaN, n };
+            const rx = _rankAverage(xx);
+            const ry = _rankAverage(yy);
+            const mx = _mean(rx);
+            const my = _mean(ry);
+            let cov = 0.0;
+            let vx = 0.0;
+            let vy = 0.0;
+            for (let i = 0; i < n; i++) {
+              const dx = Number(rx[i]) - mx;
+              const dy = Number(ry[i]) - my;
+              cov += dx * dy;
+              vx += dx * dx;
+              vy += dy * dy;
+            }
+            if (!(vx > 0 && vy > 0)) return { rho: NaN, p: NaN, n };
+            const rho = cov / Math.sqrt(vx * vy);
+            const rr = Math.max(-0.999999, Math.min(0.999999, Number(rho)));
+            const z = 0.5 * Math.log((1 + rr) / (1 - rr)) * Math.sqrt(n - 3);
+            const pRaw = 2.0 * (1.0 - _normCdf(Math.abs(z)));
+            const p = Number.isFinite(pRaw)
+              ? Math.max(0.0, Math.min(1.0, pRaw))
+              : NaN;
+            return { rho: rr, p, n };
+          };
+          const _bucketRowsFromSamples = (sampleRows, withCi = true) => {
+            const buckets = Array.from({ length: bucketCount }, (_, i) => ({
+              idx: i,
+              lo: i / bucketCount,
+              hi: (i + 1) / bucketCount,
+              returns: [],
+            }));
+            for (const it of sampleRows || []) {
+              const x = Math.max(0, Math.min(0.999999999, Number(it.mirror)));
+              const bi = Math.min(bucketCount - 1, Math.floor(x * bucketCount));
+              buckets[bi].returns.push(Number(it.future));
+            }
+            return buckets.map((bkt) => {
+              const xs = bkt.returns.filter((x) => Number.isFinite(x));
+              const n = xs.length;
+              const mean = n > 0 ? _mean(xs) : NaN;
+              const med = n > 0 ? _quantileLinear(xs, 0.5) : NaN;
+              const win = n > 0 ? xs.filter((x) => x > 0).length / n : NaN;
+              const std = n >= 2 ? _std(xs) : NaN;
+              const sharpe =
+                Number.isFinite(mean) && Number.isFinite(std) && std > 0
+                  ? mean / std
+                  : NaN;
+              const ci = withCi
+                ? _bootstrapMeanCI(xs, 1000, 0.05)
+                : { lo: NaN, hi: NaN };
+              const label = `[${Math.round(bkt.lo * 100)}%, ${Math.round(bkt.hi * 100)}%)`;
+              return {
+                ...bkt,
+                n,
+                mean,
+                med,
+                win,
+                std,
+                sharpe,
+                ci_lo: ci.lo,
+                ci_hi: ci.hi,
+                label,
+                mid: (bkt.lo + bkt.hi) / 2,
+              };
+            });
+          };
+          if (!code) {
+            _setMirrorBucket("当前状态：请选择标的。", "请选择标的", "");
+            return;
+          }
+          const b = (window.__distBaselineByCode || {})[code];
+          if (!b || !b.mirror_timeseries) {
+            _setMirrorBucket(
+              "当前状态：暂无可用后视镜数据。",
+              "后视镜指标未加载",
+              "",
+            );
+            return;
+          }
+          const node =
+            b.mirror_timeseries && b.mirror_timeseries[code]
+              ? b.mirror_timeseries[code]
+              : null;
+          const ts =
+            node && node.dates && node.values
+              ? node
+              : node && node[period]
+                ? node[period]
+                : node && node.daily
+                  ? node.daily
+                  : null;
+          const mirrorDates = Array.isArray(ts && ts.dates) ? ts.dates : [];
+          const mirrorVals = Array.isArray(ts && ts.values) ? ts.values : [];
+          if (
+            mirrorDates.length < 10 ||
+            mirrorVals.length !== mirrorDates.length
+          ) {
+            _setMirrorBucket(
+              "当前状态：样本不足。",
+              "样本不足，无法做分桶检验",
+              "",
+            );
+            return;
+          }
+          const s = (window.__distOpenByCode || {})[code];
+          const closeDates =
+            s && Array.isArray(s.dates) && Array.isArray(s.close)
+              ? s.dates
+              : [];
+          const closeVals =
+            s && Array.isArray(s.dates) && Array.isArray(s.close)
+              ? s.close
+              : [];
+          if (
+            !Array.isArray(closeDates) ||
+            !Array.isArray(closeVals) ||
+            closeDates.length < horizon + 2 ||
+            closeVals.length !== closeDates.length
+          ) {
+            _setMirrorBucket(
+              "当前状态：缺少价格序列。",
+              "无可用收盘价序列，无法计算前瞻收益",
+              "",
+            );
+            return;
+          }
+          const dateToIdx = new Map();
+          for (let i = 0; i < closeDates.length; i++) {
+            const d = String(closeDates[i] || "").trim();
+            if (d) dateToIdx.set(d, i);
+          }
+          const samples = [];
+          for (let i = 0; i < mirrorDates.length; i++) {
+            const d = String(mirrorDates[i] || "").trim();
+            const mvRaw = Number(mirrorVals[i]);
+            if (!d || !Number.isFinite(mvRaw)) continue;
+            const idx = dateToIdx.get(d);
+            if (idx == null) continue;
+            const j = idx + horizon;
+            if (j >= closeVals.length) continue;
+            const c0 = Number(closeVals[idx]);
+            const c1 = Number(closeVals[j]);
+            if (!Number.isFinite(c0) || !Number.isFinite(c1) || c0 <= 0)
+              continue;
+            const fr = c1 / c0 - 1.0;
+            if (!Number.isFinite(fr)) continue;
+            const mv = Math.max(0, Math.min(1, mvRaw));
+            samples.push({ date: d, mirror: mv, future: fr });
+          }
+          if (samples.length < 30) {
+            _setMirrorBucket(
+              `样本=${samples.length}，不足以稳定评估。`,
+              "样本不足，无法做分桶检验（建议至少 30）",
+              "",
+            );
+            return;
+          }
+          const rows = _bucketRowsFromSamples(samples, true);
+          const rowsNonEmpty = rows.filter((r) => r.n > 0);
+          if (!rowsNonEmpty.length) {
+            _setMirrorBucket("当前状态：无有效样本。", "无有效分桶样本", "");
+            return;
+          }
+          const _latestFinite = (arr, xs) => {
+            const hi = Math.min(arr.length, xs.length) - 1;
+            for (let i = hi; i >= 0; i--) {
+              const v = Number(arr[i]);
+              if (!Number.isFinite(v)) continue;
+              return { idx: i, value: v, date: String(xs[i] || "") };
+            }
+            return null;
+          };
+          const cur = _latestFinite(mirrorVals, mirrorDates);
+          const curBucketIdx = cur
+            ? Math.min(
+                bucketCount - 1,
+                Math.floor(
+                  Math.max(0, Math.min(0.999999999, Number(cur.value))) *
+                    bucketCount,
+                ),
+              )
+            : -1;
+          const loMean = rows.find((r) => r.idx === 0);
+          const hiMean = rows.find((r) => r.idx === bucketCount - 1);
+          const loRet =
+            loMean && Array.isArray(loMean.returns) ? loMean.returns : [];
+          const hiRet =
+            hiMean && Array.isArray(hiMean.returns) ? hiMean.returns : [];
+          const edge =
+            loMean &&
+            hiMean &&
+            Number.isFinite(loMean.mean) &&
+            Number.isFinite(hiMean.mean)
+              ? hiMean.mean - loMean.mean
+              : NaN;
+          const edgeTest = _permPValueDiffMeans(loRet, hiRet, 2000);
+          const sp = _spearmanWithP(
+            samples.map((x) => Number(x.mirror)),
+            samples.map((x) => Number(x.future)),
+          );
+          const edgeTxt = Number.isFinite(edge)
+            ? `${fmtPct(edge)}（${edge >= 0 ? "高分位偏强" : "高分位偏弱"}）`
+            : "-";
+          mirrorBucketHintEl.textContent = `${codeLabel(code)} · ${period} 后视镜 ${bucketCount} 分位桶 · 前瞻 ${horizon} 交易日 close-to-close · 样本 ${samples.length}。高(90-100%) vs 低(0-10%) 均值差=${edgeTxt} · p=${Number.isFinite(edgeTest.p) ? Number(edgeTest.p).toFixed(4) : "-"} · Spearman rho=${Number.isFinite(sp.rho) ? Number(sp.rho).toFixed(3) : "-"} (p=${Number.isFinite(sp.p) ? Number(sp.p).toFixed(4) : "-"})${cur ? ` · 当前值=${fmtPct(cur.value)}（桶 ${curBucketIdx + 1}）` : ""}`;
+
+          if (typeof Plotly !== "undefined") {
+            const x = rows.map((r) => r.label);
+            const yMean = rows.map((r) => (r.n > 0 ? r.mean : null));
+            const errUp = rows.map((r) =>
+              Number.isFinite(r.mean) &&
+              Number.isFinite(r.ci_hi) &&
+              r.ci_hi >= r.mean
+                ? r.ci_hi - r.mean
+                : 0,
+            );
+            const errDn = rows.map((r) =>
+              Number.isFinite(r.mean) &&
+              Number.isFinite(r.ci_lo) &&
+              r.mean >= r.ci_lo
+                ? r.mean - r.ci_lo
+                : 0,
+            );
+            const yWin = rows.map((r) => (r.n > 0 ? r.win : null));
+            const colors = rows.map((r) =>
+              r.idx === curBucketIdx
+                ? "rgba(214,39,40,0.85)"
+                : "rgba(76,120,168,0.82)",
+            );
+            const countsTxt = rows.map((r) => (r.n > 0 ? `n=${r.n}` : ""));
+            const customCi = rows.map((r) => [
+              Number.isFinite(r.ci_lo) ? fmtPct(r.ci_lo) : "-",
+              Number.isFinite(r.ci_hi) ? fmtPct(r.ci_hi) : "-",
+            ]);
+            Plotly.newPlot(
+              mirrorBucketChartEl.id,
+              [
+                {
+                  x,
+                  y: yMean,
+                  type: "bar",
+                  name: `未来${horizon}日均值`,
+                  marker: { color: colors },
+                  text: countsTxt,
+                  textposition: "outside",
+                  error_y: {
+                    type: "data",
+                    symmetric: false,
+                    array: errUp,
+                    arrayminus: errDn,
+                    visible: true,
+                    color: "rgba(33,33,33,0.72)",
+                    thickness: 1.0,
+                    width: 3,
+                  },
+                  customdata: customCi,
+                  hovertemplate:
+                    "桶=%{x}<br>未来收益均值=%{y:.2%}<br>95%CI=[%{customdata[0]}, %{customdata[1]}]<br>%{text}<extra></extra>",
+                },
+                {
+                  x,
+                  y: yWin,
+                  type: "scatter",
+                  mode: "lines+markers",
+                  name: "胜率",
+                  yaxis: "y2",
+                  line: { color: "rgba(255,127,14,0.92)", width: 2 },
+                  marker: { size: 6 },
+                  hovertemplate: "桶=%{x}<br>胜率=%{y:.1%}<extra></extra>",
+                },
+              ],
+              {
+                margin: { t: 38, l: 58, r: 62, b: 90 },
+                title: {
+                  text: `后视镜分位分桶有效性（前瞻 ${horizon} 日）`,
+                  font: { size: 13 },
+                },
+                xaxis: { title: "后视镜分位桶", tickangle: -35 },
+                yaxis: { title: "未来收益均值", tickformat: ".1%" },
+                yaxis2: {
+                  title: "胜率",
+                  tickformat: ".0%",
+                  overlaying: "y",
+                  side: "right",
+                  range: [0, 1],
+                },
+                showlegend: true,
+                legend: { orientation: "h", y: 1.16 },
+              },
+              { responsive: true, displayModeBar: false },
+            );
+          } else {
+            mirrorBucketChartEl.innerHTML =
+              "<div class='muted'>Plotly 未加载</div>";
+          }
+          mirrorBucketTableEl.innerHTML =
+            "<tr><th>桶序</th><th>分位范围</th><th>样本数</th><th>未来均值</th><th>95%CI下界</th><th>95%CI上界</th><th>中位数</th><th>胜率</th><th>标准差</th><th>夏普(非年化)</th></tr>" +
+            rows
+              .map(
+                (r) =>
+                  `<tr>
+                    <td>${r.idx + 1}</td>
+                    <td>${esc(r.label)}</td>
+                    <td>${r.n}</td>
+                    <td>${fmtPct(r.mean)}</td>
+                    <td>${fmtPct(r.ci_lo)}</td>
+                    <td>${fmtPct(r.ci_hi)}</td>
+                    <td>${fmtPct(r.med)}</td>
+                    <td>${fmtPct(r.win)}</td>
+                    <td>${fmtPct(r.std)}</td>
+                    <td>${Number.isFinite(r.sharpe) ? Number(r.sharpe).toFixed(3) : "-"}</td>
+                  </tr>`,
+              )
+              .join("");
+          const minTrain = Math.max(80, Math.floor(samples.length * 0.5));
+          const foldStep = Math.max(
+            20,
+            Math.floor((samples.length - minTrain) / 5),
+          );
+          const wfRows = [];
+          if (samples.length - minTrain >= 20) {
+            for (
+              let split = minTrain;
+              split + foldStep <= samples.length;
+              split += foldStep
+            ) {
+              const end = Math.min(samples.length, split + foldStep);
+              const train = samples.slice(0, split);
+              const test = samples.slice(split, end);
+              if (train.length < 40 || test.length < 20) continue;
+              const tr = _bucketRowsFromSamples(train, false);
+              const te = _bucketRowsFromSamples(test, false);
+              const trLo = tr.find((r) => r.idx === 0);
+              const trHi = tr.find((r) => r.idx === bucketCount - 1);
+              const teLo = te.find((r) => r.idx === 0);
+              const teHi = te.find((r) => r.idx === bucketCount - 1);
+              const trDiff =
+                trLo &&
+                trHi &&
+                Number.isFinite(trLo.mean) &&
+                Number.isFinite(trHi.mean)
+                  ? trHi.mean - trLo.mean
+                  : NaN;
+              const teDiff =
+                teLo &&
+                teHi &&
+                Number.isFinite(teLo.mean) &&
+                Number.isFinite(teHi.mean)
+                  ? teHi.mean - teLo.mean
+                  : NaN;
+              const signMatch =
+                Number.isFinite(trDiff) &&
+                Number.isFinite(teDiff) &&
+                Math.sign(trDiff) !== 0 &&
+                Math.sign(teDiff) !== 0
+                  ? Math.sign(trDiff) === Math.sign(teDiff)
+                  : null;
+              const teSp = _spearmanWithP(
+                test.map((x) => Number(x.mirror)),
+                test.map((x) => Number(x.future)),
+              );
+              wfRows.push({
+                trainStart: String(
+                  train[0] && train[0].date ? train[0].date : "-",
+                ),
+                trainEnd: String(
+                  train[train.length - 1] && train[train.length - 1].date
+                    ? train[train.length - 1].date
+                    : "-",
+                ),
+                testStart: String(test[0] && test[0].date ? test[0].date : "-"),
+                testEnd: String(
+                  test[test.length - 1] && test[test.length - 1].date
+                    ? test[test.length - 1].date
+                    : "-",
+                ),
+                trainN: train.length,
+                testN: test.length,
+                trainDiff: trDiff,
+                testDiff: teDiff,
+                signMatch,
+                testRho: teSp.rho,
+                testP: teSp.p,
+              });
+            }
+          }
+          if (mirrorWalkForwardTableEl) {
+            mirrorWalkForwardTableEl.innerHTML = wfRows.length
+              ? "<tr><th>折次</th><th>训练区间</th><th>测试区间</th><th>训练样本</th><th>测试样本</th><th>训练Top-Bottom</th><th>测试Top-Bottom</th><th>方向一致</th><th>测试Spearman rho</th><th>测试Spearman p</th></tr>" +
+                wfRows
+                  .map(
+                    (r, i) =>
+                      `<tr>
+                        <td>${i + 1}</td>
+                        <td>${esc(`${r.trainStart}~${r.trainEnd}`)}</td>
+                        <td>${esc(`${r.testStart}~${r.testEnd}`)}</td>
+                        <td>${r.trainN}</td>
+                        <td>${r.testN}</td>
+                        <td>${fmtPct(r.trainDiff)}</td>
+                        <td>${fmtPct(r.testDiff)}</td>
+                        <td>${r.signMatch == null ? "-" : r.signMatch ? "是" : "否"}</td>
+                        <td>${Number.isFinite(r.testRho) ? Number(r.testRho).toFixed(3) : "-"}</td>
+                        <td>${Number.isFinite(r.testP) ? Number(r.testP).toFixed(4) : "-"}</td>
+                      </tr>`,
+                  )
+                  .join("")
+              : "<tr><td class='muted'>样本不足，无法生成 walk-forward 结果（至少需要 1 个测试折）。</td></tr>";
+          }
+          const validMatch = wfRows.filter((r) => r.signMatch != null);
+          const matchRate = validMatch.length
+            ? validMatch.filter((r) => r.signMatch).length / validMatch.length
+            : NaN;
+          const passDiff = Number.isFinite(edgeTest.p) && edgeTest.p <= 0.1;
+          const passMono =
+            Number.isFinite(sp.p) &&
+            sp.p <= 0.1 &&
+            Number.isFinite(sp.rho) &&
+            Math.abs(sp.rho) >= 0.06;
+          const passWf =
+            Number.isFinite(matchRate) &&
+            validMatch.length >= 3 &&
+            matchRate >= 0.6;
+          const level =
+            passDiff && passMono && passWf
+              ? "较强"
+              : passDiff || passMono || passWf
+                ? "中等"
+                : "偏弱";
+          if (mirrorBucketConclusionEl) {
+            mirrorBucketConclusionEl.innerHTML =
+              `<b>结论说明：</b>当前证据强度=<b>${level}</b>。` +
+              `Top-Bottom 差值 p=${Number.isFinite(edgeTest.p) ? Number(edgeTest.p).toFixed(4) : "-"}（阈值 0.10）；` +
+              `Spearman rho=${Number.isFinite(sp.rho) ? Number(sp.rho).toFixed(3) : "-"}，p=${Number.isFinite(sp.p) ? Number(sp.p).toFixed(4) : "-"}；` +
+              `Walk-forward 方向一致率=${Number.isFinite(matchRate) ? fmtPct(matchRate) : "-"}（有效折数=${validMatch.length}）。` +
+              `<span class="muted">统计显著不等于可交易，仍需结合交易成本、滑点与样本外回测。</span>`;
+          }
         };
 
         const _distSafeQuantile = (arr, q) => {
@@ -23259,11 +23770,11 @@
                 "<div class='muted'>请选择标的</div>";
             if (calTable) calTable.innerHTML = "";
             if (calHint) calHint.textContent = "";
-            $("distRollingAnnVol").innerHTML =
-              "<div class='muted'>请选择标的</div>";
             if ($("distMirrorTs"))
               $("distMirrorTs").innerHTML =
                 "<div class='muted'>请选择标的</div>";
+            _setMirrorState("当前状态：请选择标的。");
+            _setMirrorBucket("当前状态：请选择标的。", "请选择标的", "");
             $("distQuantiles").innerHTML = "";
             try {
               _renderWeekdayDowEffect("");
@@ -23309,6 +23820,15 @@
           } catch (e) {
             /* ignore */
           }
+          try {
+            _renderMirrorBucketEffect();
+          } catch (eMirrorBucket) {
+            _setMirrorBucket(
+              "当前状态：分桶检验失败。",
+              `分桶检验失败：${String(eMirrorBucket && eMirrorBucket.message ? eMirrorBucket.message : eMirrorBucket)}`,
+              "",
+            );
+          }
           _renderDailyLogReturnAcf(code);
 
           if (type === "lppl") {
@@ -23326,12 +23846,15 @@
               if ($("distFutureScatter"))
                 $("distFutureScatter").innerHTML =
                   "<div class='muted'>LPPL模式不展示未来收益散点</div>";
-              if ($("distRollingAnnVol"))
-                $("distRollingAnnVol").innerHTML =
-                  "<div class='muted'>LPPL模式不展示滚动年化波动</div>";
               if ($("distMirrorTs"))
                 $("distMirrorTs").innerHTML =
                   "<div class='muted'>LPPL模式不展示镜像指标</div>";
+              _setMirrorState("当前状态：LPPL 模式下不展示后视镜指标。");
+              _setMirrorBucket(
+                "当前状态：LPPL 模式下不展示后视镜指标。",
+                "LPPL 模式下不展示分桶检验",
+                "",
+              );
               if (futProbTable) futProbTable.innerHTML = "";
               if (futCausalTable) futCausalTable.innerHTML = "";
               if (momTsTable) momTsTable.innerHTML = "";
@@ -23441,12 +23964,15 @@
             if ($("distFutureScatter"))
               $("distFutureScatter").innerHTML =
                 "<div class='muted'>LPPL模式不展示未来收益散点</div>";
-            if ($("distRollingAnnVol"))
-              $("distRollingAnnVol").innerHTML =
-                "<div class='muted'>LPPL模式不展示滚动年化波动</div>";
             if ($("distMirrorTs"))
               $("distMirrorTs").innerHTML =
                 "<div class='muted'>LPPL模式不展示镜像指标</div>";
+            _setMirrorState("当前状态：LPPL 模式下不展示后视镜指标。");
+            _setMirrorBucket(
+              "当前状态：LPPL 模式下不展示后视镜指标。",
+              "LPPL 模式下不展示分桶检验",
+              "",
+            );
             if (futProbTable) futProbTable.innerHTML = "";
             if (futCausalTable) futCausalTable.innerHTML = "";
             if (momTsTable) momTsTable.innerHTML = "";
@@ -23879,8 +24405,6 @@
             if (calHint) calHint.textContent = "";
           }
 
-          // Rolling annualized volatility chart (always based on daily NAV returns)
-          _plotRollingAnnVol();
           try {
             _renderWeekdayDowEffect(code);
           } catch (_ewk) {
@@ -23956,11 +24480,15 @@
                 $("distHistogram").innerHTML =
                   "<div class='muted'>该区间无可用统计数据</div>";
                 $("distQuantiles").innerHTML = "";
-                $("distRollingAnnVol").innerHTML =
-                  "<div class='muted'>无数据</div>";
                 if ($("distMirrorTs"))
                   $("distMirrorTs").innerHTML =
                     "<div class='muted'>无数据</div>";
+                _setMirrorState("当前状态：当前区间无后视镜指标数据。");
+                _setMirrorBucket(
+                  "当前状态：当前区间无后视镜指标数据。",
+                  "无数据",
+                  "",
+                );
                 if ($("distFutureScatter"))
                   $("distFutureScatter").innerHTML =
                     "<div class='muted'>无散点数据</div>";
@@ -24154,7 +24682,6 @@
             }
           });
           periodSelect.addEventListener("change", updateDisplay);
-          rollWinSelect.addEventListener("change", updateDisplay);
           if (futFitOn) futFitOn.addEventListener("change", updateDisplay);
           if (futNInput) {
             futNInput.addEventListener("change", updateDisplay);
@@ -25706,6 +26233,332 @@
         return xs.reduce((acc, x) => acc + x, 0) / xs.length;
       }
 
+      function _tradeDateMsForSort(tr) {
+        const de = Date.parse(String((tr && tr.exit_date) || ""));
+        if (Number.isFinite(de)) return de;
+        const dn = Date.parse(String((tr && tr.entry_date) || ""));
+        return Number.isFinite(dn) ? dn : -8640000000000000;
+      }
+
+      function _tradeDateLabel(tr, fallbackIdx) {
+        const dExit = String((tr && tr.exit_date) || "").trim();
+        if (dExit) return dExit;
+        const dEntry = String((tr && tr.entry_date) || "").trim();
+        if (dEntry) return dEntry;
+        return `T${Math.max(1, Number(fallbackIdx) + 1)}`;
+      }
+
+      function _buildRollingSqnSeriesFromTrades(trades, options) {
+        const opts = options && typeof options === "object" ? options : {};
+        const windowN = Number(opts.windowN);
+        const minTrades = Number(opts.minTrades);
+        const code = String(opts.code || "");
+        const fullWindowOnly = Boolean(opts.fullWindowOnly);
+        const rows = Array.isArray(trades) ? trades : [];
+        const cc = String(code || "").trim();
+        const ordered = rows
+          .map((tr, idx) => ({
+            tr,
+            idx,
+            t: _tradeDateMsForSort(tr),
+            r: Number(tr && tr.r_multiple),
+            code: String((tr && tr.code) || "").trim(),
+          }))
+          .filter(
+            (x) =>
+              Number.isFinite(x.r) && (!cc || x.code === cc) && x.t > -Infinity,
+          )
+          .sort((a, b) => a.t - b.t || a.idx - b.idx);
+        const x = [];
+        const y = [];
+        const customdata = [];
+        const rs = ordered.map((one) => Number(one.r));
+        const win = Math.max(1, Math.round(Number(windowN) || 100));
+        const minN = fullWindowOnly
+          ? win
+          : Math.max(2, Math.round(Number(minTrades) || 30));
+        for (let i = 0; i < ordered.length; i += 1) {
+          const start = Math.max(0, i - win + 1);
+          const sample = rs.slice(start, i + 1);
+          const n = sample.length;
+          if (n < minN) continue;
+          const mean = sample.reduce((acc, v) => acc + v, 0) / n;
+          const std = _std(sample);
+          if (!Number.isFinite(mean) || !Number.isFinite(std) || std <= 0) {
+            continue;
+          }
+          const sqn = (mean / std) * Math.sqrt(n);
+          if (!Number.isFinite(sqn)) continue;
+          x.push(_tradeDateLabel(ordered[i].tr, i));
+          y.push(sqn);
+          customdata.push([n, mean, std, i + 1]);
+        }
+        return { x, y, customdata };
+      }
+
+      function _renderRollingSqnRecent100Chart(divId, overallSeries, options) {
+        const opts = options && typeof options === "object" ? options : {};
+        const scopeSuffix = String(opts.scopeSuffix || "");
+        const windowN = Number(opts.windowN);
+        const div = $(divId);
+        if (!div) return;
+        const hasSeries = Boolean(
+          overallSeries &&
+          Array.isArray(overallSeries.x) &&
+          overallSeries.x.length &&
+          Array.isArray(overallSeries.y) &&
+          overallSeries.y.length,
+        );
+        if (!hasSeries) {
+          div.innerHTML = `<div class='muted'>暂无可用样本（至少需要完整 ${Math.max(1, Math.round(Number(windowN) || 100))} 笔有效交易窗口，且窗口标准差&gt;0）</div>`;
+          return;
+        }
+        Plotly.newPlot(
+          divId,
+          [
+            {
+              type: "scatter",
+              mode: "lines+markers",
+              name: "整体",
+              x: overallSeries.x,
+              y: overallSeries.y,
+              customdata: Array.isArray(overallSeries.customdata)
+                ? overallSeries.customdata
+                : [],
+              line: { color: "#1f77b4", width: 2 },
+              marker: { size: 4 },
+              hovertemplate:
+                "日期=%{x}<br>SQN=%{y:.3f}<br>窗口样本n=%{customdata[0]}<br>窗口均值E(R)=%{customdata[1]:.3f}<br>窗口标准差Std(R)=%{customdata[2]:.3f}<extra>整体</extra>",
+            },
+          ],
+          {
+            margin: { t: 36, b: 46 },
+            title: `近${Math.max(1, Math.round(Number(windowN) || 100))}次交易 SQN 滚动统计${scopeSuffix || ""}`,
+            xaxis: { title: "交易平仓日期（若缺失则回退入场日期）" },
+            yaxis: { title: "SQN（R乘数口径）" },
+            legend: { orientation: "h" },
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function _buildRollingSqnDistributionStats(series, options) {
+        const opts = options && typeof options === "object" ? options : {};
+        const windowN = Math.max(1, Math.round(Number(opts.windowN) || 100));
+        const xs =
+          series && Array.isArray(series.y)
+            ? series.y.map((v) => Number(v)).filter(Number.isFinite)
+            : [];
+        const dateLabels =
+          series && Array.isArray(series.x)
+            ? series.x.map((d) => String(d))
+            : [];
+        if (!xs.length) {
+          return {
+            window_n: windowN,
+            sample_size: 0,
+          };
+        }
+        const mean = _meanOrNaN(xs);
+        const std = _std(xs);
+        const minV = Math.min(...xs);
+        const maxV = Math.max(...xs);
+        const q05 = _percentile(xs, 5);
+        const q10 = _percentile(xs, 10);
+        const q25 = _percentile(xs, 25);
+        const q50 = _percentile(xs, 50);
+        const q75 = _percentile(xs, 75);
+        const q90 = _percentile(xs, 90);
+        const q95 = _percentile(xs, 95);
+        const cv =
+          Number.isFinite(mean) &&
+          Math.abs(mean) > 1e-12 &&
+          Number.isFinite(std)
+            ? std / Math.abs(mean)
+            : NaN;
+        const negRatio = xs.filter((v) => v < 0).length / xs.length;
+        const ge16Ratio = xs.filter((v) => v >= 1.6).length / xs.length;
+        const ge20Ratio = xs.filter((v) => v >= 2.0).length / xs.length;
+        const iqr =
+          Number.isFinite(q75) && Number.isFinite(q25) ? q75 - q25 : NaN;
+        const p90p10 =
+          Number.isFinite(q90) && Number.isFinite(q10) ? q90 - q10 : NaN;
+        return {
+          window_n: windowN,
+          sample_size: xs.length,
+          start_label: dateLabels.length ? String(dateLabels[0]) : "",
+          end_label: dateLabels.length
+            ? String(dateLabels[dateLabels.length - 1])
+            : "",
+          mean,
+          std,
+          cv,
+          min: minV,
+          max: maxV,
+          q05,
+          q10,
+          q25,
+          q50,
+          q75,
+          q90,
+          q95,
+          iqr,
+          p90p10,
+          skewness: _skewness(xs),
+          kurtosis_excess: _kurtosisExcess(xs),
+          neg_ratio: negRatio,
+          ge_16_ratio: ge16Ratio,
+          ge_20_ratio: ge20Ratio,
+        };
+      }
+
+      function _renderRollingSqnDistributionHist(divId, values, options) {
+        const opts = options && typeof options === "object" ? options : {};
+        const windowN = Math.max(1, Math.round(Number(opts.windowN) || 100));
+        const div = $(divId);
+        if (!div) return;
+        const xs = Array.isArray(values)
+          ? values.map((v) => Number(v)).filter(Number.isFinite)
+          : [];
+        if (!xs.length) {
+          div.innerHTML = "<div class='muted'>暂无可用滚动SQN样本</div>";
+          return;
+        }
+        Plotly.newPlot(
+          divId,
+          [
+            {
+              x: xs,
+              type: "histogram",
+              nbinsx: Math.max(12, Math.round(Math.sqrt(xs.length) * 3)),
+              marker: { color: "#4c78a8" },
+              hovertemplate: "滚动SQN=%{x:.3f}<br>频数=%{y}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 30, b: 42 },
+            title: `滚动${windowN}次SQN分布（全历史）`,
+            xaxis: { title: "滚动SQN" },
+            yaxis: { title: "频数", rangemode: "tozero" },
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function _renderRollingSqnDistributionTable(tableId, stats) {
+        const t = $(tableId);
+        if (!t) return;
+        const s = stats && typeof stats === "object" ? stats : {};
+        const n = (x) => (Number.isFinite(Number(x)) ? fmtNum(Number(x)) : "-");
+        const p = (x) => (Number.isFinite(Number(x)) ? fmtPct(Number(x)) : "-");
+        const asInt = (x) =>
+          Number.isFinite(Number(x)) ? String(Math.round(Number(x))) : "-";
+        if (!(Number(s.sample_size) > 0)) {
+          t.innerHTML =
+            "<tr><th>指标</th><th>值</th></tr><tr><td colspan='2' class='muted'>暂无可用滚动SQN样本</td></tr>";
+          return;
+        }
+        t.innerHTML =
+          `<tr><th>指标</th><th>值</th></tr>` +
+          `<tr><td>窗口长度</td><td>${asInt(s.window_n)}</td></tr>` +
+          `<tr><td>滚动样本点数</td><td>${asInt(s.sample_size)}</td></tr>` +
+          `<tr><td>覆盖区间</td><td>${esc(String(s.start_label || "-"))} ~ ${esc(String(s.end_label || "-"))}</td></tr>` +
+          `<tr><td>最小 / 最大</td><td>${n(s.min)} / ${n(s.max)}</td></tr>` +
+          `<tr><td>均值 / 标准差</td><td>${n(s.mean)} / ${n(s.std)}</td></tr>` +
+          `<tr><td>偏度 / 峰度(超额)</td><td>${n(s.skewness)} / ${n(s.kurtosis_excess)}</td></tr>` +
+          `<tr><td>P05 / P10 / P25</td><td>${n(s.q05)} / ${n(s.q10)} / ${n(s.q25)}</td></tr>` +
+          `<tr><td>P50 / P75 / P90 / P95</td><td>${n(s.q50)} / ${n(s.q75)} / ${n(s.q90)} / ${n(s.q95)}</td></tr>` +
+          `<tr><td>IQR(P75-P25) / P90-P10</td><td>${n(s.iqr)} / ${n(s.p90p10)}</td></tr>` +
+          `<tr><td>负SQN占比 / SQN≥1.6占比 / SQN≥2.0占比</td><td>${p(s.neg_ratio)} / ${p(s.ge_16_ratio)} / ${p(s.ge_20_ratio)}</td></tr>` +
+          `<tr><td>变异系数CV(Std/|Mean|)</td><td>${n(s.cv)}</td></tr>`;
+      }
+
+      function _renderRollingSqnStabilityNote(noteId, stats) {
+        const box = $(noteId);
+        if (!box) return;
+        const s = stats && typeof stats === "object" ? stats : {};
+        if (!(Number(s.sample_size) > 0)) {
+          box.textContent = "稳定性分析：暂无可用滚动SQN样本。";
+          return;
+        }
+        const median = Number(s.q50);
+        const q25 = Number(s.q25);
+        const q75 = Number(s.q75);
+        const cv = Number(s.cv);
+        const negRatio = Number(s.neg_ratio);
+        const ge20 = Number(s.ge_20_ratio);
+        const regimeSpread =
+          Number.isFinite(q75) && Number.isFinite(q25) ? q75 - q25 : NaN;
+        const centerScore = Number.isFinite(median)
+          ? median >= 2.0
+            ? 1.0
+            : median >= 1.6
+              ? 0.85
+              : median >= 1.2
+                ? 0.65
+                : median >= 0.8
+                  ? 0.45
+                  : 0.2
+          : 0.0;
+        const tailScore = Number.isFinite(q25)
+          ? q25 >= 1.0
+            ? 1.0
+            : q25 >= 0.5
+              ? 0.7
+              : q25 >= 0.0
+                ? 0.45
+                : 0.2
+          : 0.0;
+        const volScore = Number.isFinite(cv)
+          ? cv <= 0.35
+            ? 1.0
+            : cv <= 0.6
+              ? 0.8
+              : cv <= 1.0
+                ? 0.55
+                : 0.25
+          : 0.0;
+        const downScore = Number.isFinite(negRatio)
+          ? negRatio <= 0.15
+            ? 1.0
+            : negRatio <= 0.3
+              ? 0.75
+              : negRatio <= 0.45
+                ? 0.5
+                : 0.2
+          : 0.0;
+        const longTermScore =
+          0.35 * centerScore +
+          0.25 * tailScore +
+          0.2 * volScore +
+          0.2 * downScore;
+        const longTermGrade =
+          longTermScore >= 0.75
+            ? "长期稳定性高"
+            : longTermScore >= 0.55
+              ? "长期稳定性中等"
+              : "长期稳定性偏弱";
+        const regimeText = Number.isFinite(regimeSpread)
+          ? regimeSpread <= 0.6
+            ? "跨市场状态差异较小（趋势/震荡切换下波动较可控）"
+            : regimeSpread <= 1.2
+              ? "跨市场状态差异中等（在趋势与震荡阶段存在可见性能摆动）"
+              : "跨市场状态差异较大（策略对市场状态较敏感）"
+          : "市场状态敏感性暂无法判定";
+        const robustnessText =
+          Number.isFinite(ge20) && ge20 >= 0.35
+            ? "高质量区间占比较高（SQN≥2窗口较多）"
+            : Number.isFinite(ge20) && ge20 >= 0.2
+              ? "高质量区间占比中等"
+              : "高质量区间占比较低（需关注状态切换期回撤控制）";
+        box.innerHTML =
+          `稳定性诊断（全历史滚动窗口）：<b>${esc(longTermGrade)}</b>。` +
+          `综合稳定性分=${esc(fmtNum(longTermScore))}（0-1）。` +
+          `中位数SQN=${esc(fmtNum(median))}，Q1=${esc(fmtNum(q25))}，CV=${esc(fmtNum(cv))}，负值占比=${esc(fmtPct(negRatio))}。` +
+          `${regimeText}；${robustnessText}。` +
+          "建议把该分布与回撤阶段时间轴联合观察，用于判断策略是否具备跨状态的长期有效性。";
+      }
+
       function _buildRTradeRiskSummary(trades) {
         const rows = Array.isArray(trades) ? trades : [];
         const initVals = rows
@@ -25847,6 +26700,10 @@
         const mfePullbackOverallHist = `${p}MfeRPullbackOverallHist`;
         const mfePullbackByCodeTable = `${p}MfeRPullbackByCodeTable`;
         const mfePullbackByCodeHist = `${p}MfeRPullbackByCodeHist`;
+        const sqnRollingRecent100Chart = `${p}SqnRollingRecent100Chart`;
+        const sqnRollingRecent100Hist = `${p}SqnRollingRecent100Hist`;
+        const sqnRollingRecent100StatsTable = `${p}SqnRollingRecent100StatsTable`;
+        const sqnRollingRecent100StabilityNote = `${p}SqnRollingRecent100StabilityNote`;
         const rtpSuggestionSummary = `${p}RTpSuggestionSummary`;
         const rtpSuggestionTable = `${p}RTpSuggestionTable`;
         const rBudgetSummary = `${p}RBudgetSummary`;
@@ -25941,6 +26798,7 @@
                 ? mfePack.thresholds
                 : [];
           const scopeSuffix = useRecent ? "（近100次交易）" : "（全部交易）";
+          const sqnRollingScopeSuffix = "（全部交易）";
 
           const overallInit =
             activeOverall.initial_r_pct_nav_stats &&
@@ -26059,6 +26917,39 @@
           );
           const tCode = activeTrades.filter(
             (x) => String((x && x.code) || "") === c,
+          );
+          const rollingSqnOverall = _buildRollingSqnSeriesFromTrades(trades, {
+            windowN: 100,
+            minTrades: 100,
+            fullWindowOnly: true,
+          });
+          _renderRollingSqnRecent100Chart(
+            sqnRollingRecent100Chart,
+            rollingSqnOverall,
+            {
+              scopeSuffix: sqnRollingScopeSuffix,
+              windowN: 100,
+            },
+          );
+          const rollingSqnValues = Array.isArray(rollingSqnOverall.y)
+            ? rollingSqnOverall.y
+            : [];
+          _renderRollingSqnDistributionHist(
+            sqnRollingRecent100Hist,
+            rollingSqnValues,
+            { windowN: 100 },
+          );
+          const rollingSqnDistStats = _buildRollingSqnDistributionStats(
+            rollingSqnOverall,
+            { windowN: 100 },
+          );
+          _renderRollingSqnDistributionTable(
+            sqnRollingRecent100StatsTable,
+            rollingSqnDistStats,
+          );
+          _renderRollingSqnStabilityNote(
+            sqnRollingRecent100StabilityNote,
+            rollingSqnDistStats,
           );
           const oneRiskSummary = _buildRTradeRiskSummary(tCode);
           _renderRTradeRiskSummary(

@@ -5,6 +5,7 @@ import json
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, text
 
+from etf_momentum.analysis.off_fund_regression import DEFAULT_CN_STOCK_FACTORS
 from etf_momentum.db.schema import ensure_runtime_schema
 
 
@@ -114,8 +115,10 @@ def test_off_fund_research_state_rejects_invalid_payload(
 
 def test_off_fund_research_state_trim_and_order(api_client: TestClient) -> None:
     client = api_client
+    slot_count = max(0, len(DEFAULT_CN_STOCK_FACTORS) - 1)
     too_many = {
-        f"pair_slot_{i:02d}": {"base": "CSI300", "peer": "CSI500"} for i in range(1, 23)
+        f"pair_slot_{i:02d}": {"base": "CSI300", "peer": "CSI500"}
+        for i in range(1, slot_count + 2)
     }
     r = client.put(
         "/api/off-fund/research/state",
@@ -128,17 +131,9 @@ def test_off_fund_research_state_trim_and_order(api_client: TestClient) -> None:
     prefs = out["pair_chart_prefs_json"]
     assert isinstance(prefs, str)
     assert '"pair_slot_01"' in prefs
-    assert '"pair_slot_03"' in prefs
-    assert '"pair_slot_13"' in prefs
-    assert '"pair_slot_17"' in prefs
-    assert '"pair_slot_18"' in prefs
-    assert '"pair_slot_21"' in prefs
-    assert '"pair_slot_22"' not in prefs
-    assert prefs.index('"pair_slot_01"') < prefs.index('"pair_slot_03"')
-    assert prefs.index('"pair_slot_03"') < prefs.index('"pair_slot_13"')
-    assert prefs.index('"pair_slot_13"') < prefs.index('"pair_slot_17"')
-    assert prefs.index('"pair_slot_17"') < prefs.index('"pair_slot_18"')
-    assert prefs.index('"pair_slot_18"') < prefs.index('"pair_slot_21"')
+    assert f'"pair_slot_{slot_count:02d}"' in prefs
+    assert f'"pair_slot_{slot_count + 1:02d}"' not in prefs
+    assert prefs.index('"pair_slot_01"') < prefs.index(f'"pair_slot_{slot_count:02d}"')
 
 
 def test_off_fund_state_put_legacy_body_keeps_pair_prefs(

@@ -252,8 +252,10 @@ def test_bt_single_semantic_parity_keys_and_metrics(engine):
         "metrics.strategy.annualized_return",
         "metrics.strategy.max_drawdown",
         "metrics.strategy.sharpe_ratio",
+        "metrics.strategy.calmar_ratio",
         "metrics.strategy.sortino_ratio",
         "metrics.benchmark.cumulative_return",
+        "metrics.benchmark.calmar_ratio",
         "metrics.excess.cumulative_return",
         "metrics.excess.information_ratio",
     ]
@@ -349,6 +351,11 @@ def test_bt_portfolio_semantic_parity_keys_and_core_metrics(engine):
         assert isinstance(lv, (int, float)) and isinstance(bv, (int, float))
         if math.isfinite(float(lv)) and math.isfinite(float(bv)):
             assert abs(float(lv) - float(bv)) <= float(tol)
+
+    for p in ("metrics.strategy.calmar_ratio", "metrics.benchmark.calmar_ratio"):
+        lv = _get(legacy, p)
+        bv = _get(bt, p)
+        assert isinstance(lv, (int, float)) and isinstance(bv, (int, float))
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>趋势 ER 入场过滤参数搜索</title>
+    <link rel="stylesheet" href="/static/terminal.css" />
+    <script
+      defer
+      src="https://cdn.plot.ly/plotly-cartesian-2.30.0.min.js"
+    ></script>
+    <style>
+      #scoreLine {
+        width: 100%;
+        height: 540px;
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 960px) {
+        .grid-2 {
+          grid-template-columns: 1fr;
+        }
+      }
+      td,
+      th {
+        white-space: nowrap;
+      }
+      .mono {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>趋势 ER 入场过滤参数搜索</h2>
+    <div class="muted">
+      展示 `trend_er_entry_param_search.py`
+      的网格搜索结果，并支持按“综合评分”或“最小凯利标准差”两种标准查看最佳参数。
+    </div>
+    <div class="muted" style="margin-top: 6px">
+      <a href="/research">返回研究主页</a>
+    </div>
+
+    <div class="panel no-print" style="margin-top: 12px">
+      <div class="row">
+        <div style="min-width: 520px; flex: 1">
+          <label>结果 JSON URL</label>
+          <input
+            id="dataUrl"
+            value="/static/data/trend_er_entry_param_search_results.json"
+          />
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 8px">
+          <button id="loadUrlBtn">加载 URL</button>
+        </div>
+        <div style="min-width: 320px">
+          <label>或上传本地 JSON 文件</label>
+          <input id="fileInput" type="file" accept=".json,application/json" />
+        </div>
+      </div>
+    </div>
+
+    <div class="panel no-print">
+      <div class="row">
+        <div>
+          <label>TopN（按当前标准）</label>
+          <input id="topN" value="30" />
+        </div>
+        <div>
+          <label>展示标准</label>
+          <select id="objectiveMethod" style="min-width: 220px">
+            <option value="composite_score">综合评分（默认）</option>
+            <option value="kelly_std_min">最小凯利标准差</option>
+          </select>
+        </div>
+        <div style="display: flex; align-items: flex-end">
+          <button id="refreshBtn">刷新图表与表格</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3 style="margin-top: 0">运行信息</h3>
+        <div id="metaInfo" class="mono"></div>
+      </div>
+      <div class="panel">
+        <h3 id="bestTitle" style="margin-top: 0">
+          最佳单一设置（综合评分最高）
+        </h3>
+        <div id="bestInfo" class="mono"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">ER 阈值对绩效的影响</h3>
+      <div id="scoreLine"></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">网格结果明细</h3>
+      <div style="overflow: auto">
+        <table id="resultTable"></table>
+      </div>
+    </div>
+
+    <div id="status" class="muted" style="margin-top: 8px"></div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      function status(msg) {
+        $("status").textContent = msg || "";
+      }
+
+      function fmtNum(v, digits = 6) {
+        const x = Number(v);
+        return Number.isFinite(x) ? x.toFixed(digits) : "-";
+      }
+
+      function fmtPct(v, digits = 2) {
+        const x = Number(v);
+        return Number.isFinite(x) ? `${(x * 100).toFixed(digits)}%` : "-";
+      }
+
+      function fmtThr(v, digits = 2) {
+        const x = Number(v);
+        return Number.isFinite(x) ? x.toFixed(digits) : "-";
+      }
+
+      function normalizeData(raw) {
+        const meta = raw && typeof raw === "object" ? raw.meta || {} : {};
+        const results =
+          raw && typeof raw === "object" && Array.isArray(raw.results)
+            ? raw.results
+            : [];
+        const best =
+          raw && typeof raw === "object" && raw.best_single_setting
+            ? raw.best_single_setting
+            : null;
+        const bestByMethod =
+          raw &&
+          typeof raw === "object" &&
+          raw.best_by_method &&
+          typeof raw.best_by_method === "object"
+            ? raw.best_by_method
+            : {};
+        return { meta, results, best, bestByMethod };
+      }
+
+      function metric(row, key) {
+        const v = Number(row?.metrics?.[key]);
+        return Number.isFinite(v) ? v : null;
+      }
+
+      const OBJECTIVE_COMPONENTS = [
+        { key: "sharpe_ratio", label: "夏普", higherBetter: true },
+        { key: "calmar_ratio", label: "卡玛", higherBetter: true },
+        { key: "sortino_ratio", label: "索提诺", higherBetter: true },
+        { key: "ulcer_index", label: "溃疡指标", higherBetter: false },
+        {
+          key: "ulcer_performance_index",
+          label: "溃疡绩效",
+          higherBetter: true,
+        },
+        {
+          key: "sqn_recent_100",
+          label: "滚动100次SQN中位数",
+          higherBetter: true,
+        },
+      ];
+      const OBJECTIVE_GROUPS = [
+        {
+          key: "risk_adjusted_return",
+          label: "收益效率组",
+          weight: 0.45,
+          metrics: [
+            "sharpe_ratio",
+            "calmar_ratio",
+            "sortino_ratio",
+            "ulcer_performance_index",
+          ],
+        },
+        {
+          key: "pain_control",
+          label: "持有痛苦组",
+          weight: 0.25,
+          metrics: ["ulcer_index"],
+        },
+        {
+          key: "system_quality",
+          label: "系统质量组",
+          weight: 0.3,
+          metrics: ["sqn_recent_100"],
+        },
+      ];
+
+      const METHOD_META = {
+        composite_score: {
+          label: "综合评分（越大越好）",
+          bestTitle: "最佳单一设置（综合评分最高）",
+        },
+        kelly_std_min: {
+          label: "最小凯利标准差（越小越好）",
+          bestTitle: "最佳单一设置（组内凯利标准差最小）",
+        },
+      };
+
+      function selectedMethod() {
+        const v = String($("objectiveMethod")?.value || "composite_score");
+        return Object.prototype.hasOwnProperty.call(METHOD_META, v)
+          ? v
+          : "composite_score";
+      }
+
+      function methodLabel(method) {
+        const m =
+          METHOD_META[String(method || "")] || METHOD_META.composite_score;
+        return String(m.label || "");
+      }
+
+      function objectiveScore(row) {
+        const v = Number(row?.__compositeScore ?? row?.composite_score);
+        return Number.isFinite(v) ? v : null;
+      }
+
+      function objectiveEligible(row) {
+        if (typeof row?.__objectiveEligible === "boolean")
+          return row.__objectiveEligible;
+        return Boolean(row?.objective_eligible);
+      }
+
+      function computeCompositeScores(rows) {
+        const eligibleRows = [];
+        rows.forEach((r) => {
+          r.__compositeScore = null;
+          r.__compositeComponents = {};
+          r.__compositeGroupScores = {};
+          r.__objectiveEligible = false;
+          r.__objectiveMissingMetrics = [];
+          r.__objectiveReason = null;
+          if (String(r?.status || "") !== "ok") return;
+          const sqnMin = Number(r?.metrics?.sqn_min_trades ?? 30);
+          const sqnTradeCountTotal = Number(r?.metrics?.sqn_trade_count_total);
+          if (
+            Number.isFinite(sqnTradeCountTotal) &&
+            Number.isFinite(sqnMin) &&
+            sqnTradeCountTotal < sqnMin
+          ) {
+            const sqnReason = r?.metrics?.sqn_reason;
+            r.__objectiveReason =
+              `sqn_trade_count_lt_min:${sqnTradeCountTotal}<${sqnMin}` +
+              (sqnReason ? ` (sqn_reason=${sqnReason})` : "");
+            return;
+          }
+          const missing = OBJECTIVE_COMPONENTS.map((c) => c.key).filter(
+            (k) => metric(r, k) == null,
+          );
+          if (missing.length > 0) {
+            const sqnReason = r?.metrics?.sqn_reason;
+            r.__objectiveMissingMetrics = missing;
+            r.__objectiveReason =
+              "missing_metrics:" +
+              missing.join(",") +
+              (missing.includes("sqn_recent_100") && sqnReason
+                ? ` (sqn_reason=${sqnReason})`
+                : "");
+            return;
+          }
+          r.__objectiveEligible = true;
+          eligibleRows.push(r);
+        });
+
+        const bounds = {};
+        OBJECTIVE_COMPONENTS.forEach((c) => {
+          const vals = eligibleRows
+            .map((r) => metric(r, c.key))
+            .filter((v) => Number.isFinite(v));
+          if (vals.length > 0) {
+            bounds[c.key] = { min: Math.min(...vals), max: Math.max(...vals) };
+          }
+        });
+
+        eligibleRows.forEach((r) => {
+          const comps = {};
+          OBJECTIVE_COMPONENTS.forEach((c) => {
+            const v = metric(r, c.key);
+            const b = bounds[c.key];
+            if (v == null || !b) return;
+            const range = b.max - b.min;
+            let s = 0.5;
+            if (Math.abs(range) > 1e-12) {
+              const base = (v - b.min) / range;
+              s = c.higherBetter ? base : 1 - base;
+            }
+            comps[c.key] = Math.max(0, Math.min(1, s));
+          });
+          let weightedSum = 0;
+          let weightSum = 0;
+          const groupScores = {};
+          OBJECTIVE_GROUPS.forEach((g) => {
+            const vals = g.metrics
+              .map((m) => comps[m])
+              .filter((v) => Number.isFinite(v));
+            const hasBounds = g.metrics.some((m) =>
+              Object.prototype.hasOwnProperty.call(bounds, m),
+            );
+            let groupScore = null;
+            if (vals.length > 0) {
+              groupScore = vals.reduce((a, b) => a + b, 0) / vals.length;
+            } else if (hasBounds) {
+              groupScore = 0;
+            } else {
+              return;
+            }
+            groupScores[g.key] = groupScore;
+            weightedSum += groupScore * Number(g.weight || 0);
+            weightSum += Number(g.weight || 0);
+          });
+          if (weightSum > 0) {
+            r.__compositeScore = weightedSum / weightSum;
+          }
+          r.__compositeComponents = comps;
+          r.__compositeGroupScores = groupScores;
+          if (r.__compositeScore == null) {
+            r.__objectiveEligible = false;
+            r.__objectiveReason = "composite_score_unavailable";
+          }
+          r.composite_score = r.__compositeScore;
+        });
+      }
+
+      function kellyStdValue(row) {
+        return metric(row, "kelly_by_code_std");
+      }
+
+      function kellyStdEligible(row) {
+        if (typeof row?.kelly_std_objective_eligible === "boolean")
+          return row.kelly_std_objective_eligible;
+        if (String(row?.status || "") !== "ok") return false;
+        const std = kellyStdValue(row);
+        const valid = metric(row, "kelly_by_code_valid_count");
+        const required = metric(row, "kelly_by_code_required_count");
+        return (
+          std != null &&
+          valid != null &&
+          required != null &&
+          required > 0 &&
+          valid >= required
+        );
+      }
+
+      function kellyStdReason(row) {
+        const explicit = row?.kelly_std_objective_ineligible_reason;
+        if (String(explicit || "").trim()) return String(explicit);
+        const valid = metric(row, "kelly_by_code_valid_count");
+        const required = metric(row, "kelly_by_code_required_count");
+        if (required == null || required <= 0)
+          return "required_code_count_invalid";
+        if (valid == null || valid < required) {
+          return `missing_kelly_codes:${Math.round(Number(valid || 0))}/${Math.round(Number(required || 0))}`;
+        }
+        if (kellyStdValue(row) == null) return "kelly_std_unavailable";
+        return "-";
+      }
+
+      function toSortedRows(rows) {
+        const out = rows
+          .filter((x) => Number.isFinite(Number(x?.er_threshold)))
+          .slice();
+        out.sort((a, b) => Number(a.er_threshold) - Number(b.er_threshold));
+        return out;
+      }
+
+      function pickBestFromRows(rows, method) {
+        const m = String(method || "composite_score");
+        if (m === "kelly_std_min") {
+          let best = null;
+          let bestKey = null;
+          rows.forEach((r) => {
+            if (String(r?.status || "") !== "ok") return;
+            if (!kellyStdEligible(r)) return;
+            const std = kellyStdValue(r);
+            if (std == null) return;
+            const meanKelly = metric(r, "kelly_by_code_mean");
+            const sharpe = metric(r, "sharpe_ratio");
+            const ann = metric(r, "annualized_return");
+            const mdd = metric(r, "max_drawdown");
+            const comp = objectiveScore(r);
+            const k = [
+              std,
+              meanKelly == null ? 1e18 : -meanKelly,
+              sharpe == null ? 1e18 : -sharpe,
+              ann == null ? 1e18 : -ann,
+              mdd == null ? 1e18 : Math.abs(mdd),
+              comp == null ? 1e18 : -comp,
+            ];
+            if (!bestKey || k.join("|") < bestKey.join("|")) {
+              bestKey = k;
+              best = r;
+            }
+          });
+          return best;
+        }
+        let best = null;
+        let bestKey = null;
+        rows.forEach((r) => {
+          if (String(r?.status || "") !== "ok") return;
+          if (!objectiveEligible(r)) return;
+          const comp = objectiveScore(r);
+          const sharpe = metric(r, "sharpe_ratio");
+          if (comp == null || sharpe == null) return;
+          const ann = metric(r, "annualized_return");
+          const cum = metric(r, "cumulative_return");
+          const mdd = metric(r, "max_drawdown");
+          const k = [
+            comp,
+            sharpe,
+            ann == null ? -1e18 : ann,
+            cum == null ? -1e18 : cum,
+            mdd == null ? -1e18 : -Math.abs(mdd),
+          ];
+          if (!bestKey || k.join("|") > bestKey.join("|")) {
+            bestKey = k;
+            best = r;
+          }
+        });
+        return best;
+      }
+
+      function renderMeta(meta, rows, method) {
+        const lines = [];
+        const mm = String(method || "composite_score");
+        lines.push(`生成时间: ${String(meta.generated_at || "-")}`);
+        lines.push(`后端地址: ${String(meta.api_base_url || "-")}`);
+        lines.push(`接口: ${String(meta.api_endpoint || "-")}`);
+        lines.push(
+          `样本总数: ${Number(meta.total_cases || rows.length || 0)} (成功 ${Number(meta.success_cases || 0)}, 失败 ${Number(meta.error_cases || 0)})`,
+        );
+        const ss = meta.search_space || {};
+        lines.push(
+          `遍历区间: [${fmtThr(ss.start)}, ${fmtThr(ss.end)}]，步长 ${fmtThr(ss.step)}`,
+        );
+        const boundary = Array.isArray(meta.boundary_support_check)
+          ? meta.boundary_support_check
+          : [];
+        const bDesc =
+          boundary.length > 0
+            ? boundary
+                .map(
+                  (x) =>
+                    `ER=${fmtThr(x.er_threshold, 2)}:${String(x.status || "-")}`,
+                )
+                .join(", ")
+            : "-";
+        lines.push(`边界检查: ${bDesc}`);
+        const ineligibleRows = rows.filter(
+          (r) => String(r?.status || "") === "ok" && !objectiveEligible(r),
+        );
+        const sqnLt100Rows = rows.filter((r) => {
+          if (String(r?.status || "") !== "ok") return false;
+          const n = metric(r, "sqn_trade_count_total");
+          return n != null && n >= 30 && n < 100;
+        });
+        lines.push(
+          `可比样本: ${rows.filter((r) => objectiveEligible(r)).length}，不可比样本: ${ineligibleRows.length}`,
+        );
+        const kellyEligible = rows.filter((r) => kellyStdEligible(r)).length;
+        lines.push(
+          `凯利标准差可比样本: ${kellyEligible}，不可比样本: ${rows.filter((r) => String(r?.status || "") === "ok").length - kellyEligible}`,
+        );
+        lines.push(
+          `滚动SQN窗口缩短样本（总交易30~99）: ${sqnLt100Rows.length}`,
+        );
+        lines.push(`当前展示标准: ${methodLabel(mm)}`);
+        lines.push(
+          "综合评分口径: 分组加权Min-Max，系统质量使用滚动100次SQN中位数；总交易<30不参与排序",
+        );
+        lines.push(
+          "最小凯利标准差口径: 目标是最小化 by_code.kelly_ex_zero 的组内样本标准差（要求组内标的都有可用凯利值）",
+        );
+        $("metaInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+      }
+
+      function renderBest(bestFromFile, bestFromRows, method) {
+        const m = String(method || "composite_score");
+        const best = bestFromRows || bestFromFile || null;
+        $("bestTitle").textContent =
+          (METHOD_META[m] || METHOD_META.composite_score).bestTitle ||
+          "最佳单一设置";
+        if (!best) {
+          $("bestInfo").innerHTML = "<div>无可用结果</div>";
+          return;
+        }
+        const lines = [];
+        lines.push(`ER 入场阈值: ${fmtThr(best.er_threshold, 2)}`);
+        if (m === "kelly_std_min") {
+          lines.push(`凯利标准差(组内): ${fmtNum(kellyStdValue(best), 6)}`);
+          lines.push(
+            `凯利均值(组内): ${fmtNum(metric(best, "kelly_by_code_mean"), 6)}`,
+          );
+          lines.push(
+            `凯利可用标的数: ${fmtNum(metric(best, "kelly_by_code_valid_count"), 0)}/${fmtNum(metric(best, "kelly_by_code_required_count"), 0)}`,
+          );
+        } else {
+          lines.push(`综合评分: ${fmtNum(objectiveScore(best), 6)}`);
+        }
+        lines.push(`夏普: ${fmtNum(metric(best, "sharpe_ratio"), 6)}`);
+        lines.push(`卡玛: ${fmtNum(metric(best, "calmar_ratio"), 6)}`);
+        lines.push(`索提诺: ${fmtNum(metric(best, "sortino_ratio"), 6)}`);
+        lines.push(`溃疡指标: ${fmtNum(metric(best, "ulcer_index"), 6)}`);
+        lines.push(
+          `溃疡绩效: ${fmtNum(metric(best, "ulcer_performance_index"), 6)}`,
+        );
+        lines.push(
+          `滚动100次SQN中位数: ${fmtNum(metric(best, "sqn_recent_100"), 6)}`,
+        );
+        const bestTradeCount = metric(best, "sqn_trade_count_total");
+        if (bestTradeCount != null && bestTradeCount < 100) {
+          lines.push(
+            `滚动窗口状态: 总交易<100，使用缩短窗口（当前 ${fmtNum(bestTradeCount, 0)}）`,
+          );
+        }
+        lines.push(`年化收益: ${fmtPct(metric(best, "annualized_return"), 2)}`);
+        lines.push(`最大回撤: ${fmtPct(metric(best, "max_drawdown"), 2)}`);
+        $("bestInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+      }
+
+      function renderLine(rows, best, method) {
+        const m = String(method || "composite_score");
+        const okRows = rows.filter((r) => String(r?.status || "") === "ok");
+        const x = okRows.map((r) => Number(r.er_threshold));
+        if (x.length === 0) {
+          Plotly.newPlot("scoreLine", [], {
+            annotations: [{ text: "无可绘制数据" }],
+          });
+          return;
+        }
+        const ann = okRows.map((r) => metric(r, "annualized_return"));
+        const sharpe = okRows.map((r) => metric(r, "sharpe_ratio"));
+        const calmar = okRows.map((r) => metric(r, "calmar_ratio"));
+        const sortino = okRows.map((r) => metric(r, "sortino_ratio"));
+        const ulcer = okRows.map((r) => metric(r, "ulcer_index"));
+        const upi = okRows.map((r) => metric(r, "ulcer_performance_index"));
+        const sqnRecent100 = okRows.map((r) => metric(r, "sqn_recent_100"));
+        const kellyStd = okRows.map((r) => kellyStdValue(r));
+        const comp = okRows.map((r) => objectiveScore(r));
+        const traces = [
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "年化收益",
+            x,
+            y: ann,
+            yaxis: "y",
+            line: { color: "#1f77b4", width: 2 },
+            hovertemplate:
+              "ER=%{x:.2f}<br>年化收益=%{y:.2%}<extra>年化收益</extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "Sharpe",
+            x,
+            y: sharpe,
+            yaxis: "y2",
+            line: { color: "#ff7f0e", width: 2 },
+            hovertemplate:
+              "ER=%{x:.2f}<br>Sharpe=%{y:.4f}<extra>Sharpe</extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "Calmar",
+            x,
+            y: calmar,
+            yaxis: "y2",
+            line: { color: "#d62728", width: 2 },
+            hovertemplate:
+              "ER=%{x:.2f}<br>Calmar=%{y:.4f}<extra>Calmar</extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "Sortino",
+            x,
+            y: sortino,
+            yaxis: "y2",
+            line: { color: "#9467bd", width: 2 },
+            hovertemplate:
+              "ER=%{x:.2f}<br>Sortino=%{y:.4f}<extra>Sortino</extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "Ulcer",
+            x,
+            y: ulcer,
+            yaxis: "y2",
+            line: { color: "#8c564b", width: 2 },
+            hovertemplate: "ER=%{x:.2f}<br>Ulcer=%{y:.4f}<extra>Ulcer</extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "UPI",
+            x,
+            y: upi,
+            yaxis: "y2",
+            line: { color: "#e377c2", width: 2 },
+            hovertemplate: "ER=%{x:.2f}<br>UPI=%{y:.4f}<extra>UPI</extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "滚动100次SQN中位数",
+            x,
+            y: sqnRecent100,
+            yaxis: "y2",
+            line: { color: "#17becf", width: 2 },
+            hovertemplate:
+              "ER=%{x:.2f}<br>滚动100次SQN中位数=%{y:.4f}<extra>滚动100次SQN中位数</extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "综合评分",
+            x,
+            y: comp,
+            yaxis: "y2",
+            line: { color: "#2ca02c", width: 2 },
+            hovertemplate:
+              "ER=%{x:.2f}<br>综合评分=%{y:.4f}<extra>综合评分</extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "凯利标准差(组内,越小越好)",
+            x,
+            y: kellyStd,
+            yaxis: "y2",
+            line: { color: "#111111", width: 2, dash: "dot" },
+            hovertemplate:
+              "ER=%{x:.2f}<br>凯利标准差=%{y:.4f}<extra>凯利标准差</extra>",
+          },
+        ];
+        if (best) {
+          const bestYIsComposite = m !== "kelly_std_min";
+          const bestY = bestYIsComposite
+            ? metric(best, "annualized_return")
+            : kellyStdValue(best);
+          traces.push({
+            type: "scatter",
+            mode: "markers",
+            name: "最佳参数",
+            x: [Number(best.er_threshold)],
+            y: [bestY],
+            yaxis: bestYIsComposite ? "y" : "y2",
+            marker: { size: 14, symbol: "star", color: "#9467bd" },
+            hovertemplate:
+              (bestYIsComposite
+                ? "最佳 ER=%{x:.2f}<br>年化收益=%{y:.2%}"
+                : "最佳 ER=%{x:.2f}<br>凯利标准差=%{y:.4f}") +
+              "<extra>最佳参数</extra>",
+          });
+        }
+        Plotly.newPlot(
+          "scoreLine",
+          traces,
+          {
+            margin: { t: 30, r: 80, b: 60, l: 70 },
+            xaxis: { title: "ER 入场阈值" },
+            yaxis: { title: "年化收益", tickformat: ".2%" },
+            yaxis2: {
+              title: "风险与质量指标 / 综合评分 / 凯利标准差",
+              overlaying: "y",
+              side: "right",
+            },
+            legend: { orientation: "h", y: 1.14 },
+          },
+          { responsive: true },
+        );
+      }
+
+      function renderTable(rows, method) {
+        const m = String(method || "composite_score");
+        const topN = Math.max(1, Math.floor(Number($("topN").value || "30")));
+        const sorted = rows.slice().sort((a, b) => {
+          const ae =
+            m === "kelly_std_min"
+              ? kellyStdEligible(a)
+                ? 1
+                : 0
+              : objectiveEligible(a)
+                ? 1
+                : 0;
+          const be =
+            m === "kelly_std_min"
+              ? kellyStdEligible(b)
+                ? 1
+                : 0
+              : objectiveEligible(b)
+                ? 1
+                : 0;
+          if (ae !== be) return be - ae;
+          if (m === "kelly_std_min") {
+            const av = kellyStdValue(a);
+            const bv = kellyStdValue(b);
+            if (av == null && bv == null) return 0;
+            if (av == null) return 1;
+            if (bv == null) return -1;
+            if (Math.abs(av - bv) > 1e-12) return av - bv;
+            const am = metric(a, "kelly_by_code_mean");
+            const bm = metric(b, "kelly_by_code_mean");
+            if (am == null && bm == null) return 0;
+            if (am == null) return 1;
+            if (bm == null) return -1;
+            return bm - am;
+          } else {
+            const av = objectiveScore(a);
+            const bv = objectiveScore(b);
+            if (av == null && bv == null) return 0;
+            if (av == null) return 1;
+            if (bv == null) return -1;
+            return bv - av;
+          }
+        });
+        const cols = [
+          "er_threshold",
+          "objective_eligible",
+          "objective_ineligible_reason",
+          "composite_score",
+          "kelly_std_objective_eligible",
+          "kelly_std_objective_ineligible_reason",
+          "kelly_by_code_std",
+          "kelly_by_code_mean",
+          "kelly_by_code_valid_count",
+          "kelly_by_code_required_count",
+          "sharpe_ratio",
+          "calmar_ratio",
+          "sortino_ratio",
+          "ulcer_index",
+          "ulcer_performance_index",
+          "sqn_recent_100",
+          "sqn_trade_count_total",
+          "sqn_recent_100_note",
+          "annualized_return",
+          "max_drawdown",
+          "status",
+          "error",
+        ];
+        const head =
+          "<tr>" +
+          [
+            "ER 阈值",
+            "可比",
+            "不可比原因",
+            "综合评分",
+            "凯利可比",
+            "凯利不可比原因",
+            "凯利标准差(组内)",
+            "凯利均值(组内)",
+            "凯利可用标的数",
+            "凯利应有标的数",
+            "Sharpe",
+            "Calmar",
+            "Sortino",
+            "Ulcer",
+            "UPI",
+            "滚动100次SQN中位数",
+            "总交易数",
+            "滚动窗口状态",
+            "年化收益",
+            "最大回撤",
+            "状态",
+            "错误",
+          ]
+            .map((x) => `<th>${x}</th>`)
+            .join("") +
+          "</tr>";
+        const body = sorted
+          .slice(0, topN)
+          .map((r) => {
+            const cells = cols.map((c) => {
+              if (c === "er_threshold") return `<td>${fmtThr(r[c], 2)}</td>`;
+              if (c === "objective_eligible")
+                return `<td>${objectiveEligible(r) ? "是" : "否"}</td>`;
+              if (c === "objective_ineligible_reason") {
+                const reason =
+                  r?.__objectiveReason ||
+                  r?.objective_ineligible_reason ||
+                  String(r?.error || "");
+                return `<td>${String(reason || "-").slice(0, 160)}</td>`;
+              }
+              if (c === "composite_score")
+                return `<td>${fmtNum(objectiveScore(r), 6)}</td>`;
+              if (c === "kelly_std_objective_eligible")
+                return `<td>${kellyStdEligible(r) ? "是" : "否"}</td>`;
+              if (c === "kelly_std_objective_ineligible_reason")
+                return `<td>${String(kellyStdReason(r) || "-").slice(0, 160)}</td>`;
+              if (c === "kelly_by_code_std" || c === "kelly_by_code_mean")
+                return `<td>${fmtNum(metric(r, c), 6)}</td>`;
+              if (
+                c === "kelly_by_code_valid_count" ||
+                c === "kelly_by_code_required_count"
+              )
+                return `<td>${fmtNum(metric(r, c), 0)}</td>`;
+              if (
+                c === "sharpe_ratio" ||
+                c === "calmar_ratio" ||
+                c === "sortino_ratio" ||
+                c === "ulcer_index" ||
+                c === "ulcer_performance_index" ||
+                c === "sqn_recent_100"
+              )
+                return `<td>${fmtNum(metric(r, c), 6)}</td>`;
+              if (c === "sqn_trade_count_total")
+                return `<td>${fmtNum(metric(r, c), 0)}</td>`;
+              if (c === "sqn_recent_100_note") {
+                const n = metric(r, "sqn_trade_count_total");
+                if (n == null) return "<td>-</td>";
+                if (n < 30) return `<td>不足30（不参与排序）</td>`;
+                if (n < 100) return `<td>不足100（当前 ${fmtNum(n, 0)}）</td>`;
+                return "<td>满100+</td>";
+              }
+              if (c === "annualized_return" || c === "max_drawdown")
+                return `<td>${fmtPct(metric(r, c), 2)}</td>`;
+              if (c === "status") return `<td>${String(r.status || "-")}</td>`;
+              if (c === "error")
+                return `<td>${String(r.error || "").slice(0, 120)}</td>`;
+              return "<td>-</td>";
+            });
+            return `<tr>${cells.join("")}</tr>`;
+          })
+          .join("");
+        $("resultTable").innerHTML =
+          head + (body || `<tr><td colspan="22">暂无数据</td></tr>`);
+      }
+
+      function refreshView() {
+        const state = window.__trendErGrid;
+        if (!state) return;
+        const method = selectedMethod();
+        const rows = toSortedRows(state.results);
+        computeCompositeScores(rows);
+        const best = pickBestFromRows(rows, method);
+        const bestFromFile =
+          state?.bestByMethod && state.bestByMethod[method]
+            ? state.bestByMethod[method]
+            : state.best;
+        renderMeta(state.meta, rows, method);
+        renderBest(bestFromFile, best, method);
+        renderLine(rows, best, method);
+        renderTable(rows, method);
+      }
+
+      async function loadFromUrl(url) {
+        status("正在加载数据...");
+        const resp = await fetch(url, { cache: "no-store" });
+        if (!resp.ok) throw new Error(`加载失败: HTTP ${resp.status}`);
+        const data = await resp.json();
+        const norm = normalizeData(data);
+        if (!Array.isArray(norm.results) || norm.results.length === 0) {
+          throw new Error("结果为空");
+        }
+        window.__trendErGrid = norm;
+        const selectedFromMeta = String(
+          ((norm.meta || {}).objective || {}).selected_method || "",
+        );
+        if (
+          selectedFromMeta &&
+          $("objectiveMethod") &&
+          Array.from($("objectiveMethod").options).some(
+            (o) => String(o.value) === selectedFromMeta,
+          )
+        ) {
+          $("objectiveMethod").value = selectedFromMeta;
+        }
+        refreshView();
+        status(`加载完成: ${url}`);
+      }
+
+      function bindEvents() {
+        $("loadUrlBtn").addEventListener("click", async () => {
+          try {
+            const url = String($("dataUrl").value || "").trim();
+            if (!url) throw new Error("请输入 JSON URL");
+            await loadFromUrl(url);
+          } catch (e) {
+            status(String(e));
+          }
+        });
+        $("fileInput").addEventListener("change", async (ev) => {
+          try {
+            const files = ev?.target?.files;
+            if (!files || files.length === 0) return;
+            const txt = await files[0].text();
+            const data = JSON.parse(txt);
+            const norm = normalizeData(data);
+            if (!Array.isArray(norm.results) || norm.results.length === 0) {
+              throw new Error("结果为空");
+            }
+            window.__trendErGrid = norm;
+            const selectedFromMeta = String(
+              ((norm.meta || {}).objective || {}).selected_method || "",
+            );
+            if (
+              selectedFromMeta &&
+              $("objectiveMethod") &&
+              Array.from($("objectiveMethod").options).some(
+                (o) => String(o.value) === selectedFromMeta,
+              )
+            ) {
+              $("objectiveMethod").value = selectedFromMeta;
+            }
+            refreshView();
+            status(`已加载本地文件: ${files[0].name}`);
+          } catch (e) {
+            status(`读取本地文件失败: ${String(e)}`);
+          }
+        });
+        $("refreshBtn").addEventListener("click", () => {
+          try {
+            refreshView();
+            status("已刷新");
+          } catch (e) {
+            status(String(e));
+          }
+        });
+        $("topN").addEventListener("change", refreshView);
+        $("objectiveMethod").addEventListener("change", refreshView);
+      }
+
+      function init() {
+        bindEvents();
+        loadFromUrl(String($("dataUrl").value || "")).catch((e) => {
+          status(`自动加载失败: ${String(e)}`);
+        });
+      }
+
+      window.addEventListener("DOMContentLoaded", init);
+    </script>
+  </body>
+</html>

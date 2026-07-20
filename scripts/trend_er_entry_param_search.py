@@ -19,7 +19,7 @@ from typing import Any
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_ENDPOINT = "/api/analysis/trend/portfolio"
 DEFAULT_OUTPUT_JSON = (
-    "src/etf_momentum/web/data/trend_risk_budget_param_search_results.json"
+    "src/etf_momentum/web/data/trend_er_entry_param_search_results.json"
 )
 OBJECTIVE_METRICS: tuple[tuple[str, bool], ...] = (
     ("sharpe_ratio", True),
@@ -39,33 +39,25 @@ OBJECTIVE_GROUPS: tuple[tuple[str, tuple[str, ...], float], ...] = (
     ("system_quality", ("sqn_recent_100",), 0.30),
 )
 
-# User-provided payload baseline. Script only sweeps risk_budget_pct.
 RAW_BASE_PAYLOAD: dict[str, Any] = {
     "codes": [
-        "518800",
-        "161226",
-        "159980",
-        "501018",
-        "159981",
-        "159985",
-        "513500",
-        "513100",
-        "513030",
-        "513080",
-        "164824",
-        "513520",
-        "513310",
-        "510300",
-        "159907",
-        "159915",
-        "588000",
-        "515180",
-        "159920",
-        "513690",
+        "159570",
+        "159792",
+        "513070",
+        "513090",
+        "159928",
+        "515220",
+        "560280",
+        "159870",
+        "162411",
+        "515880",
+        "517520",
+        "512480",
+        "512010",
     ],
     "position_sizing": "risk_budget",
     "dynamic_universe": True,
-    "start": "20110810",
+    "start": "20120608",
     "end": "20260717",
     "initial_account_amount": None,
     "cost_bps": 2,
@@ -95,7 +87,7 @@ RAW_BASE_PAYLOAD: dict[str, Any] = {
     "impulse_allow_neutral": False,
     "er_filter": True,
     "er_window": 10,
-    "er_threshold": 0.25,
+    "er_threshold": 0.1,
     "ma_entry_filter_enabled": False,
     "ma_entry_filter_type": "sma",
     "ma_entry_filter_fast": 100,
@@ -174,7 +166,7 @@ RAW_BASE_PAYLOAD: dict[str, Any] = {
     "fixed_overcap_policy": "skip",
     "fixed_max_holdings": 20,
     "risk_budget_atr_window": 20,
-    "risk_budget_pct": 0.25,
+    "risk_budget_pct": 0.35,
     "risk_budget_overcap_policy": "scale",
     "risk_budget_rebalance_mode": "standard",
     "risk_budget_max_leverage_multiple": 10,
@@ -195,12 +187,12 @@ RAW_BASE_PAYLOAD: dict[str, Any] = {
 }
 
 SEARCH_CONTEXT: dict[str, Any] = {
-    "group_name": "宽基",
-    "backtest_range": {"start": "20110810", "end": "20260717"},
+    "group_name": "行业",
+    "backtest_range": {"start": "20120608", "end": "20260717"},
     "dynamic_universe": True,
     "mode": "portfolio",
     "selected_codes": RAW_BASE_PAYLOAD["codes"],
-    "single_code": "518800",
+    "single_code": "159570",
     "position_sizing": "risk_budget",
     "asset_groups_text": "",
     "asset_groups_parse_error": None,
@@ -210,7 +202,7 @@ SEARCH_CONTEXT: dict[str, Any] = {
     "r_profit_scaleout_tiers_parse_error": None,
     "bias_v_take_profit_tiers_text": "3:0.33,5:0.33",
     "bias_v_take_profit_tiers_parse_error": None,
-    "exported_at": "2026-07-19T09:42:08.381Z",
+    "exported_at": "2026-07-19T11:49:14.182Z",
 }
 
 
@@ -234,12 +226,7 @@ def _join_url(base_url: str, endpoint: str) -> str:
     return f"{base}{ep}"
 
 
-def _http_post_json(
-    *,
-    url: str,
-    payload: dict[str, Any],
-    timeout: float,
-) -> Any:
+def _http_post_json(*, url: str, payload: dict[str, Any], timeout: float) -> Any:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url=url, data=data, method="POST")
     req.add_header("Accept", "application/json")
@@ -273,11 +260,148 @@ def _normalize_percent_or_ratio(
     return float(x / 100.0)
 
 
-def _percent_to_ratio(v: Any) -> float:
-    x = _to_float(v)
-    if x is None:
-        raise ValueError("percent value is invalid")
-    return float(x / 100.0)
+def _percentile_sorted(vals: list[float], q: float) -> float | None:
+    if not vals:
+        return None
+    p = float(max(0.0, min(1.0, q)))
+    pos = p * float(len(vals) - 1)
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+    if lo == hi:
+        return float(vals[lo])
+    w = float(pos - lo)
+    return float(vals[lo] + (vals[hi] - vals[lo]) * w)
+
+
+def _sample_std(values: list[float]) -> float | None:
+    n = len(values)
+    if n < 2:
+        return None
+    mean = float(sum(values) / n)
+    var = float(sum((v - mean) ** 2 for v in values) / (n - 1))
+    if not math.isfinite(var) or var < 0.0:
+        return None
+    std = math.sqrt(var)
+    return float(std) if math.isfinite(std) else None
+
+
+def _trade_sort_ts(tr: dict[str, Any], idx: int) -> tuple[int, int]:
+    def _parse_date_to_ord(x: Any) -> int | None:
+        s = str(x or "").strip()
+        if not s:
+            return None
+        for fmt in ("%Y-%m-%d", "%Y%m%d"):
+            try:
+                return dt.datetime.strptime(s, fmt).date().toordinal()
+            except ValueError:
+                continue
+        return None
+
+    t_exit = _parse_date_to_ord(tr.get("exit_date")) if isinstance(tr, dict) else None
+    t_entry = _parse_date_to_ord(tr.get("entry_date")) if isinstance(tr, dict) else None
+    if t_exit is not None:
+        return (t_exit, idx)
+    if t_entry is not None:
+        return (t_entry, idx)
+    return (idx, idx)
+
+
+def _rolling_100_sqn_median_from_trades(
+    trades: Any, *, fallback_trade_count_total: float | None
+) -> dict[str, Any]:
+    rows = trades if isinstance(trades, list) else []
+    rs_with_idx: list[tuple[int, float]] = []
+    for i, tr in enumerate(rows):
+        if not isinstance(tr, dict):
+            continue
+        r = _to_float(tr.get("r_multiple"))
+        if r is None:
+            continue
+        rs_with_idx.append((i, float(r)))
+    if rs_with_idx:
+        ordered = sorted(
+            rs_with_idx,
+            key=lambda p: _trade_sort_ts(rows[p[0]], p[0]),
+        )
+        r_values = [float(x[1]) for x in ordered]
+    else:
+        r_values = []
+
+    n = len(r_values)
+    trade_count_total = (
+        float(n)
+        if n > 0
+        else (float(fallback_trade_count_total) if fallback_trade_count_total else None)
+    )
+    if n < 2:
+        return {
+            "sqn_recent_100": None,
+            "sqn_recent_100_window": None,
+            "sqn_recent_100_roll_points": 0.0,
+            "sqn_recent_100_median_note": "insufficient_r_samples",
+            "sqn_recent_100_trade_count_total": trade_count_total,
+        }
+
+    win = 100 if n >= 100 else n
+    sqn_points: list[float] = []
+    for end_idx in range(win - 1, n):
+        seg = r_values[end_idx - win + 1 : end_idx + 1]
+        std = _sample_std(seg)
+        if std is None or std <= 1e-12:
+            continue
+        mean = float(sum(seg) / len(seg))
+        sqn = float((mean / std) * math.sqrt(len(seg)))
+        if math.isfinite(sqn):
+            sqn_points.append(sqn)
+    sqn_points_sorted = sorted(sqn_points)
+    median = _percentile_sorted(sqn_points_sorted, 0.5)
+    return {
+        "sqn_recent_100": median,
+        "sqn_recent_100_window": float(win),
+        "sqn_recent_100_roll_points": float(len(sqn_points_sorted)),
+        "sqn_recent_100_median_note": (
+            "rolling_100_median" if n >= 100 else f"rolling_{win}_median_due_to_lt_100"
+        ),
+        "sqn_recent_100_trade_count_total": trade_count_total,
+    }
+
+
+def _extract_kelly_by_code_stats(
+    resp: dict[str, Any], *, expected_codes: list[str]
+) -> dict[str, Any]:
+    trade_stats = resp.get("trade_statistics") if isinstance(resp, dict) else None
+    by_code = trade_stats.get("by_code") if isinstance(trade_stats, dict) else None
+    by_code_dict = by_code if isinstance(by_code, dict) else {}
+    required_codes = [str(c) for c in expected_codes]
+    kelly_values: list[float] = []
+    missing_codes: list[str] = []
+    for code in required_codes:
+        node = by_code_dict.get(code)
+        if not isinstance(node, dict):
+            missing_codes.append(code)
+            continue
+        kelly = _to_float(node.get("kelly_ex_zero"))
+        if kelly is None:
+            missing_codes.append(code)
+            continue
+        kelly_values.append(float(kelly))
+    valid_count = len(kelly_values)
+    required_count = len(required_codes)
+    kelly_mean = float(sum(kelly_values) / valid_count) if valid_count > 0 else None
+    kelly_std = _sample_std(kelly_values)
+    return {
+        "kelly_by_code_std": kelly_std,
+        "kelly_by_code_mean": kelly_mean,
+        "kelly_by_code_min": float(min(kelly_values)) if kelly_values else None,
+        "kelly_by_code_max": float(max(kelly_values)) if kelly_values else None,
+        "kelly_by_code_valid_count": float(valid_count),
+        "kelly_by_code_required_count": float(required_count),
+        "kelly_by_code_complete": bool(
+            valid_count == required_count and required_count > 0
+        ),
+        "kelly_by_code_missing_codes": missing_codes,
+        "kelly_by_code_missing_count": float(len(missing_codes)),
+    }
 
 
 def _build_base_payload(raw_payload: dict[str, Any]) -> dict[str, Any]:
@@ -289,19 +413,18 @@ def _build_base_payload(raw_payload: dict[str, Any]) -> dict[str, Any]:
         out.get("risk_of_ruin_maxrisk"), default=0.30
     )
     out["risk_budget_pct"] = _normalize_percent_or_ratio(
-        out.get("risk_budget_pct"),
-        default=0.01,
-        ratio_ceiling=0.03,
+        out.get("risk_budget_pct"), default=0.01, ratio_ceiling=0.03
     )
     out["vol_periodic_rebalance_threshold_pct"] = _normalize_percent_or_ratio(
-        out.get("vol_periodic_rebalance_threshold_pct"),
-        default=0.05,
-        ratio_ceiling=1.0,
+        out.get("vol_periodic_rebalance_threshold_pct"), default=0.05, ratio_ceiling=1.0
     )
+    out["er_filter"] = bool(out.get("er_filter", True))
     return out
 
 
-def _extract_metrics(resp: dict[str, Any]) -> dict[str, Any]:
+def _extract_metrics(
+    resp: dict[str, Any], *, expected_codes: list[str]
+) -> dict[str, Any]:
     metrics_block = resp.get("metrics") if isinstance(resp, dict) else None
     strategy = metrics_block.get("strategy") if isinstance(metrics_block, dict) else {}
     avg_annual_trade_count = _to_float(strategy.get("avg_annual_trade_count"))
@@ -309,7 +432,6 @@ def _extract_metrics(resp: dict[str, Any]) -> dict[str, Any]:
     r_overall = r_stats.get("overall") if isinstance(r_stats, dict) else None
     sqn_block = r_overall.get("sqn") if isinstance(r_overall, dict) else None
 
-    sqn_raw = _to_float(sqn_block.get("sqn")) if isinstance(sqn_block, dict) else None
     sqn_reason = (
         str(sqn_block.get("reason"))
         if isinstance(sqn_block, dict) and sqn_block.get("reason") is not None
@@ -323,23 +445,46 @@ def _extract_metrics(resp: dict[str, Any]) -> dict[str, Any]:
         if isinstance(sqn_block, dict)
         else None
     )
-    sqn_trade_count_used = (
-        _to_float(sqn_block.get("trade_count_used"))
-        if isinstance(sqn_block, dict)
-        else None
-    )
     sqn_min_trades = (
         _to_float(sqn_block.get("min_trades")) if isinstance(sqn_block, dict) else None
     )
-    sqn_recent_100 = sqn_raw
+    trade_stats = resp.get("trade_statistics") if isinstance(resp, dict) else None
+    overall_trade = (
+        trade_stats.get("overall") if isinstance(trade_stats, dict) else None
+    )
+    trades_list = trade_stats.get("trades") if isinstance(trade_stats, dict) else None
+    sqn_roll_pack = _rolling_100_sqn_median_from_trades(
+        trades_list,
+        fallback_trade_count_total=sqn_trade_count_total,
+    )
+    sqn_recent_100 = _to_float(sqn_roll_pack.get("sqn_recent_100"))
+    sqn_trade_count_total_final = _to_float(
+        sqn_roll_pack.get("sqn_recent_100_trade_count_total")
+    )
+    if sqn_trade_count_total_final is None:
+        sqn_trade_count_total_final = sqn_trade_count_total
     sqn_recent_100_insufficient_100 = (
-        bool(sqn_trade_count_total < 100.0)
-        if sqn_trade_count_total is not None
+        bool(sqn_trade_count_total_final < 100.0)
+        if sqn_trade_count_total_final is not None
         else None
     )
     sqn_recent_100_note = (
-        "trades_lt_100" if sqn_recent_100_insufficient_100 is True else None
+        str(sqn_roll_pack.get("sqn_recent_100_median_note") or "").strip() or None
     )
+    sqn_trade_count_used_final = _to_float(sqn_roll_pack.get("sqn_recent_100_window"))
+    sqn_roll_points = _to_float(sqn_roll_pack.get("sqn_recent_100_roll_points"))
+    if sqn_recent_100 is None and sqn_reason:
+        if sqn_recent_100_note:
+            sqn_recent_100_note = f"{sqn_recent_100_note}|backend:{sqn_reason}"
+        else:
+            sqn_recent_100_note = f"backend:{sqn_reason}"
+
+    kelly_overall = (
+        _to_float(overall_trade.get("kelly_ex_zero"))
+        if isinstance(overall_trade, dict)
+        else None
+    )
+    by_code_kelly = _extract_kelly_by_code_stats(resp, expected_codes=expected_codes)
 
     return {
         "cumulative_return": _to_float(strategy.get("cumulative_return")),
@@ -358,11 +503,14 @@ def _extract_metrics(resp: dict[str, Any]) -> dict[str, Any]:
         "sqn_recent_100": sqn_recent_100,
         "sqn_applicable": sqn_applicable,
         "sqn_reason": sqn_reason,
-        "sqn_trade_count_used": sqn_trade_count_used,
-        "sqn_trade_count_total": sqn_trade_count_total,
+        "sqn_trade_count_used": sqn_trade_count_used_final,
+        "sqn_trade_count_total": sqn_trade_count_total_final,
         "sqn_min_trades": sqn_min_trades,
         "sqn_recent_100_insufficient_100": sqn_recent_100_insufficient_100,
         "sqn_recent_100_note": sqn_recent_100_note,
+        "sqn_recent_100_roll_points": sqn_roll_points,
+        "kelly_overall": kelly_overall,
+        **by_code_kelly,
     }
 
 
@@ -419,8 +567,11 @@ def _assign_composite_scores(rows: list[dict[str, Any]]) -> dict[str, dict[str, 
             reason = f"missing_metrics:{','.join(missing)}"
             if "sqn_recent_100" in missing and isinstance(metrics, dict):
                 sqn_reason = metrics.get("sqn_reason")
+                sqn_roll_note = metrics.get("sqn_recent_100_note")
                 if sqn_reason:
                     reason = f"{reason} (sqn_reason={sqn_reason})"
+                if sqn_roll_note:
+                    reason = f"{reason} (sqn_roll_note={sqn_roll_note})"
             row["objective_ineligible_reason"] = reason
             continue
         row["objective_eligible"] = True
@@ -435,7 +586,6 @@ def _assign_composite_scores(rows: list[dict[str, Any]]) -> dict[str, dict[str, 
                 vals.append(float(v))
         if vals:
             metric_bounds[metric] = {"min": float(min(vals)), "max": float(max(vals))}
-
     for row in eligible_rows:
         parts: dict[str, float] = {}
         for metric, higher_better in OBJECTIVE_METRICS:
@@ -502,43 +652,27 @@ def _grid_decimal_values(*, start: float, end: float, step: float) -> list[float
     return out
 
 
-def _risk_budget_pct_percent(value: float) -> float:
-    v = _to_float(value)
-    if v is None:
-        raise ValueError("risk_budget_pct percent is invalid")
-    return float(v)
-
-
-def _risk_budget_pct_decimal(value: float) -> float:
-    return float(_percent_to_ratio(value))
-
-
-def _search_space_percent_values(values: list[float]) -> list[float]:
-    return [float(v) for v in values]
-
-
 def _run_single_case(
     *,
     base_url: str,
     endpoint: str,
     base_payload: dict[str, Any],
-    risk_budget_pct_input: float,
+    er_threshold: float,
+    expected_codes: list[str],
     timeout: float,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
-    risk_budget_pct = _risk_budget_pct_decimal(risk_budget_pct_input)
     payload = copy.deepcopy(base_payload)
-    payload["risk_budget_pct"] = float(risk_budget_pct)
-    risk_budget_pct_percent = _risk_budget_pct_percent(risk_budget_pct_input)
+    payload["er_filter"] = True
+    payload["er_threshold"] = float(er_threshold)
     url = _join_url(base_url, endpoint)
     try:
         resp = _http_post_json(url=url, payload=payload, timeout=timeout)
         if not isinstance(resp, dict):
             raise RuntimeError("unexpected response schema")
-        metrics = _extract_metrics(resp)
+        metrics = _extract_metrics(resp, expected_codes=expected_codes)
         return {
-            "risk_budget_pct_percent": float(risk_budget_pct_percent),
-            "risk_budget_pct": float(risk_budget_pct),
+            "er_threshold": float(er_threshold),
             "status": "ok",
             "elapsed_ms": int((time.perf_counter() - t0) * 1000.0),
             "metrics": metrics,
@@ -546,13 +680,34 @@ def _run_single_case(
         }
     except Exception as e:  # noqa: BLE001  # pylint: disable=broad-exception-caught
         return {
-            "risk_budget_pct_percent": float(risk_budget_pct_percent),
-            "risk_budget_pct": float(risk_budget_pct),
+            "er_threshold": float(er_threshold),
             "status": "error",
             "elapsed_ms": int((time.perf_counter() - t0) * 1000.0),
             "metrics": {},
             "error": str(e),
         }
+
+
+def _verify_er_boundary_support(
+    *,
+    base_url: str,
+    endpoint: str,
+    base_payload: dict[str, Any],
+    expected_codes: list[str],
+    timeout: float,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for threshold in (0.0, 1.0):
+        row = _run_single_case(
+            base_url=base_url,
+            endpoint=endpoint,
+            base_payload=base_payload,
+            er_threshold=threshold,
+            expected_codes=expected_codes,
+            timeout=timeout,
+        )
+        out.append(row)
+    return out
 
 
 def _pick_best_by_composite(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -590,14 +745,74 @@ def _pick_best_by_composite(rows: list[dict[str, Any]]) -> dict[str, Any] | None
     return best[1]
 
 
+def _assign_kelly_std_objective_flags(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        row["kelly_std_objective_eligible"] = False
+        row["kelly_std_objective_ineligible_reason"] = None
+        if str(row.get("status") or "") != "ok":
+            row["kelly_std_objective_ineligible_reason"] = "status_not_ok"
+            continue
+        valid_count = _metric_value(row, "kelly_by_code_valid_count")
+        required_count = _metric_value(row, "kelly_by_code_required_count")
+        std = _metric_value(row, "kelly_by_code_std")
+        if required_count is None or required_count <= 0:
+            row["kelly_std_objective_ineligible_reason"] = "required_code_count_invalid"
+            continue
+        if valid_count is None or valid_count < required_count:
+            row["kelly_std_objective_ineligible_reason"] = (
+                f"missing_kelly_codes:{int(valid_count or 0)}/{int(required_count)}"
+            )
+            continue
+        if std is None:
+            row["kelly_std_objective_ineligible_reason"] = "kelly_std_unavailable"
+            continue
+        row["kelly_std_objective_eligible"] = True
+
+
+def _pick_best_by_kelly_std_min(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    best: (
+        tuple[tuple[float, float, float, float, float, float], dict[str, Any]] | None
+    ) = None
+    for row in rows:
+        if not bool(row.get("kelly_std_objective_eligible")):
+            continue
+        std = _metric_value(row, "kelly_by_code_std")
+        if std is None:
+            continue
+        mean_kelly = _metric_value(row, "kelly_by_code_mean") or -1e18
+        sharpe = _metric_value(row, "sharpe_ratio") or -1e18
+        ann = _metric_value(row, "annualized_return") or -1e18
+        mdd = _metric_value(row, "max_drawdown")
+        mdd_score = abs(mdd) if mdd is not None else 1e18
+        composite = _to_float(row.get("composite_score")) or -1e18
+        key = (
+            float(std),
+            float(-mean_kelly),
+            float(-sharpe),
+            float(-ann),
+            float(mdd_score),
+            float(-composite),
+        )
+        if best is None:
+            best = (key, row)
+            continue
+        best_key, _ = best
+        if key < best_key:
+            best = (key, row)
+    if best is None:
+        return None
+    return best[1]
+
+
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     cols = [
-        "risk_budget_pct_percent",
-        "risk_budget_pct",
+        "er_threshold",
         "objective_eligible",
         "objective_ineligible_reason",
         "composite_score",
+        "kelly_std_objective_eligible",
+        "kelly_std_objective_ineligible_reason",
         "status",
         "elapsed_ms",
         "sharpe_ratio",
@@ -613,6 +828,17 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "sqn_min_trades",
         "sqn_recent_100_insufficient_100",
         "sqn_recent_100_note",
+        "sqn_recent_100_roll_points",
+        "kelly_overall",
+        "kelly_by_code_std",
+        "kelly_by_code_mean",
+        "kelly_by_code_min",
+        "kelly_by_code_max",
+        "kelly_by_code_valid_count",
+        "kelly_by_code_required_count",
+        "kelly_by_code_complete",
+        "kelly_by_code_missing_count",
+        "kelly_by_code_missing_codes",
         "max_drawdown",
         "max_drawdown_recovery_days",
         "sortino_ratio",
@@ -627,28 +853,47 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         for row in rows:
             metrics = row.get("metrics") if isinstance(row, dict) else {}
             out = {
-                "risk_budget_pct_percent": row.get("risk_budget_pct_percent"),
-                "risk_budget_pct": row.get("risk_budget_pct"),
+                "er_threshold": row.get("er_threshold"),
                 "objective_eligible": row.get("objective_eligible"),
                 "objective_ineligible_reason": row.get("objective_ineligible_reason"),
                 "composite_score": row.get("composite_score"),
+                "kelly_std_objective_eligible": row.get("kelly_std_objective_eligible"),
+                "kelly_std_objective_ineligible_reason": row.get(
+                    "kelly_std_objective_ineligible_reason"
+                ),
                 "status": row.get("status"),
                 "elapsed_ms": row.get("elapsed_ms"),
                 "error": row.get("error"),
             }
-            for c in cols[7:-1]:
+            for c in cols[6:-1]:
                 out[c] = metrics.get(c) if isinstance(metrics, dict) else None
             w.writerow(out)
 
 
 def run(args: argparse.Namespace) -> int:
     base_payload = _build_base_payload(RAW_BASE_PAYLOAD)
-    grid = _grid_decimal_values(
-        start=float(args.start_pct),
-        end=float(args.end_pct),
-        step=float(args.step_pct),
+    expected_codes = [str(c) for c in list(base_payload.get("codes") or [])]
+
+    boundary_check = _verify_er_boundary_support(
+        base_url=str(args.base_url),
+        endpoint=str(args.endpoint),
+        base_payload=base_payload,
+        expected_codes=expected_codes,
+        timeout=float(args.timeout),
     )
-    grid_percent = _search_space_percent_values(grid)
+    boundary_errors = [x for x in boundary_check if str(x.get("status") or "") != "ok"]
+    if boundary_errors and not bool(args.skip_boundary_guard):
+        first = boundary_errors[0]
+        raise RuntimeError(
+            "ER threshold boundary check failed "
+            f"(threshold={first.get('er_threshold')}, error={first.get('error')})"
+        )
+
+    grid = _grid_decimal_values(
+        start=float(args.start_threshold),
+        end=float(args.end_threshold),
+        step=float(args.step_threshold),
+    )
     print(
         f"[INFO] endpoint={args.endpoint}, grid={len(grid)} points, workers={args.workers}"
     )
@@ -661,10 +906,11 @@ def run(args: argparse.Namespace) -> int:
                 base_url=str(args.base_url),
                 endpoint=str(args.endpoint),
                 base_payload=base_payload,
-                risk_budget_pct_input=rb,
+                er_threshold=er,
+                expected_codes=expected_codes,
                 timeout=float(args.timeout),
-            ): rb
-            for rb in grid
+            ): er
+            for er in grid
         }
         done = 0
         for fut in concurrent.futures.as_completed(fut_map):
@@ -676,13 +922,29 @@ def run(args: argparse.Namespace) -> int:
                 print(f"[INFO] progress={done}/{len(grid)}, success={ok}")
 
     metric_bounds = _assign_composite_scores(rows)
-    rows.sort(key=lambda x: float(x.get("risk_budget_pct_percent") or 0.0))
-    best = _pick_best_by_composite(rows)
+    _assign_kelly_std_objective_flags(rows)
+    rows.sort(key=lambda x: float(x.get("er_threshold") or 0.0))
+    best_composite = _pick_best_by_composite(rows)
+    best_kelly_std = _pick_best_by_kelly_std_min(rows)
+    objective_method = str(
+        getattr(args, "objective_method", "composite_score") or ""
+    ).strip()
+    if objective_method == "kelly_std_min":
+        best = best_kelly_std
+    else:
+        objective_method = "composite_score"
+        best = best_composite
     errors = [x for x in rows if str(x.get("status") or "") != "ok"]
     objective_ineligible = [
         x
         for x in rows
         if str(x.get("status") or "") == "ok" and not bool(x.get("objective_eligible"))
+    ]
+    kelly_std_ineligible = [
+        x
+        for x in rows
+        if str(x.get("status") or "") == "ok"
+        and not bool(x.get("kelly_std_objective_eligible"))
     ]
 
     output_json = Path(str(args.output_json))
@@ -705,35 +967,44 @@ def run(args: argparse.Namespace) -> int:
             "api_endpoint": str(args.endpoint),
             "search_context": SEARCH_CONTEXT,
             "search_space": {
-                "risk_budget_pct_start": float(
-                    _risk_budget_pct_decimal(args.start_pct)
-                ),
-                "risk_budget_pct_end": float(_risk_budget_pct_decimal(args.end_pct)),
-                "risk_budget_pct_step": float(_risk_budget_pct_decimal(args.step_pct)),
-                "risk_budget_pct_percent_start": float(
-                    _risk_budget_pct_percent(args.start_pct)
-                ),
-                "risk_budget_pct_percent_end": float(
-                    _risk_budget_pct_percent(args.end_pct)
-                ),
-                "risk_budget_pct_percent_step": float(
-                    _risk_budget_pct_percent(args.step_pct)
-                ),
+                "parameter": "er_threshold",
+                "start": float(args.start_threshold),
+                "end": float(args.end_threshold),
+                "step": float(args.step_threshold),
                 "values": grid,
-                "values_percent": grid_percent,
             },
+            "boundary_support_check": boundary_check,
             "fixed_payload": {
-                k: v for k, v in base_payload.items() if k != "risk_budget_pct"
+                k: v for k, v in base_payload.items() if k != "er_threshold"
             },
             "objective": {
-                "metric": "composite_score",
-                "mode": "max",
-                "method": "grouped_minmax_weighted",
+                "selected_method": objective_method,
+                "metric": (
+                    "kelly_by_code_std"
+                    if objective_method == "kelly_std_min"
+                    else "composite_score"
+                ),
+                "mode": "min" if objective_method == "kelly_std_min" else "max",
+                "method": (
+                    "cross_sectional_kelly_std_min"
+                    if objective_method == "kelly_std_min"
+                    else "grouped_minmax_weighted"
+                ),
                 "strict_comparability": not bool(args.allow_incomplete_objective),
                 "sqn_policy": {
                     "metric": "sqn_recent_100",
+                    "calculation": (
+                        "median_of_rolling_sqn_windows;"
+                        "window=100_when_trade_count>=100_else_window=trade_count"
+                    ),
                     "ineligible_when_trade_count_lt": 30,
                     "mark_insufficient_recent_100_when_trade_count_lt": 100,
+                },
+                "kelly_std_policy": {
+                    "metric": "kelly_by_code_std",
+                    "require_all_codes": True,
+                    "kelly_field": "trade_statistics.by_code.<code>.kelly_ex_zero",
+                    "std_type": "sample_std_n_minus_1",
                 },
                 "components": [
                     {
@@ -755,12 +1026,21 @@ def run(args: argparse.Namespace) -> int:
                 1 for x in rows if bool(x.get("objective_eligible"))
             ),
             "objective_ineligible_cases": len(objective_ineligible),
+            "kelly_std_objective_eligible_cases": sum(
+                1 for x in rows if bool(x.get("kelly_std_objective_eligible"))
+            ),
+            "kelly_std_objective_ineligible_cases": len(kelly_std_ineligible),
             "elapsed_seconds": round(time.perf_counter() - t0, 3),
         },
         "results": rows,
         "best_single_setting": best,
+        "best_by_method": {
+            "composite_score": best_composite,
+            "kelly_std_min": best_kelly_std,
+        },
         "errors": errors,
         "objective_ineligible": objective_ineligible,
+        "kelly_std_objective_ineligible": kelly_std_ineligible,
     }
     output_json.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -772,15 +1052,29 @@ def run(args: argparse.Namespace) -> int:
     print(f"[INFO] json: {output_json}")
     print(f"[INFO] csv: {output_csv}")
     print(f"[INFO] best: {output_best_csv}")
-    if best:
-        m = best.get("metrics") if isinstance(best, dict) else {}
+    if best_composite:
+        m = best_composite.get("metrics") if isinstance(best_composite, dict) else {}
         print(
             "[INFO] best composite "
-            f"risk_budget_pct={best.get('risk_budget_pct_percent')}% "
-            f"(decimal={best.get('risk_budget_pct')}), "
-            f"composite={_to_float(best.get('composite_score'))}, "
+            f"er_threshold={best_composite.get('er_threshold')}, "
+            f"composite={_to_float(best_composite.get('composite_score'))}, "
             f"sharpe={_to_float((m or {}).get('sharpe_ratio'))}, "
-            f"sqn_recent_100={_to_float((m or {}).get('sqn_recent_100'))}"
+            "sqn_roll100_median="
+            f"{_to_float((m or {}).get('sqn_recent_100'))}"
+        )
+    if best_kelly_std:
+        m = best_kelly_std.get("metrics") if isinstance(best_kelly_std, dict) else {}
+        print(
+            "[INFO] best kelly-std-min "
+            f"er_threshold={best_kelly_std.get('er_threshold')}, "
+            f"kelly_by_code_std={_to_float((m or {}).get('kelly_by_code_std'))}, "
+            f"kelly_mean={_to_float((m or {}).get('kelly_by_code_mean'))}, "
+            f"sharpe={_to_float((m or {}).get('sharpe_ratio'))}"
+        )
+    if best:
+        print(
+            "[INFO] selected objective best "
+            f"method={objective_method}, er_threshold={best.get('er_threshold')}"
         )
     if errors:
         print(f"[WARN] error cases: {len(errors)}")
@@ -792,10 +1086,21 @@ def run(args: argparse.Namespace) -> int:
         sample = objective_ineligible[0]
         print(
             "[WARN] sample ineligible: "
-            f"risk_budget_pct={sample.get('risk_budget_pct_percent')}%, "
+            f"er_threshold={sample.get('er_threshold')}, "
             f"reason={sample.get('objective_ineligible_reason')}"
         )
-    if objective_ineligible and not bool(args.allow_incomplete_objective):
+    if kelly_std_ineligible:
+        sample = kelly_std_ineligible[0]
+        print(
+            "[WARN] kelly-std objective ineligible cases: "
+            f"{len(kelly_std_ineligible)} (sample er_threshold={sample.get('er_threshold')}, "
+            f"reason={sample.get('kelly_std_objective_ineligible_reason')})"
+        )
+    if (
+        objective_method == "composite_score"
+        and objective_ineligible
+        and not bool(args.allow_incomplete_objective)
+    ):
         print(
             "[ERROR] strict objective comparability check failed; "
             "re-run with --allow-incomplete-objective to bypass.",
@@ -807,35 +1112,25 @@ def run(args: argparse.Namespace) -> int:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description=(
-            "Grid-search risk_budget_pct for trend portfolio by calling backend API."
-        )
+        description="Grid-search er_threshold for trend portfolio by calling backend API."
     )
     p.add_argument("--base-url", default=DEFAULT_BASE_URL)
     p.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
-    p.add_argument(
-        "--start-pct",
-        type=float,
-        default=0.1,
-        help="risk_budget_pct start (decimal or percent).",
-    )
-    p.add_argument(
-        "--end-pct",
-        type=float,
-        default=1.0,
-        help="risk_budget_pct end (decimal or percent).",
-    )
-    p.add_argument(
-        "--step-pct",
-        type=float,
-        default=0.05,
-        help="risk_budget_pct step (decimal or percent).",
-    )
+    p.add_argument("--start-threshold", type=float, default=0.0)
+    p.add_argument("--end-threshold", type=float, default=1.0)
+    p.add_argument("--step-threshold", type=float, default=0.05)
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--timeout", type=float, default=120.0)
     p.add_argument("--output-json", default=DEFAULT_OUTPUT_JSON)
     p.add_argument("--output-csv", default="")
     p.add_argument("--output-best-csv", default="")
+    p.add_argument(
+        "--objective-method",
+        choices=("composite_score", "kelly_std_min"),
+        default="composite_score",
+        help="Objective selector: composite_score (default) or kelly_std_min.",
+    )
+    p.add_argument("--skip-boundary-guard", action="store_true")
     p.add_argument("--allow-incomplete-objective", action="store_true")
     return p
 

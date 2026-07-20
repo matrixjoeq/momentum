@@ -79,3 +79,21 @@ def test_off_fund_factor_configs_activate_and_delete(api_client: TestClient) -> 
     assert "模板2" not in names
     # deleting active should keep some config active
     assert any(bool(x.get("is_active")) for x in rows2)
+
+
+def test_off_fund_pair_universe_matches_default_factors(
+    api_client: TestClient,
+) -> None:
+    c = api_client
+    r = c.get("/api/off-fund/regression/pair-universe")
+    assert r.status_code == 200
+    rows = r.json()
+    assert isinstance(rows, list)
+    assert len(rows) == len(DEFAULT_CN_STOCK_FACTORS)
+    expected_keys = [spec.key for spec in DEFAULT_CN_STOCK_FACTORS]
+    assert [str(x.get("key")) for x in rows] == expected_keys
+    assert all(bool(str(x.get("label") or "").strip()) for x in rows)
+    assert all(bool(str(x.get("etf_code") or "").strip()) for x in rows)
+    by_key = {str(x.get("key")): x for x in rows}
+    assert by_key["CSI300"]["etf_code"] == "510300"
+    assert by_key["GOLD_SPOT"]["etf_code"] == "518880"

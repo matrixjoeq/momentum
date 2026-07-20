@@ -1131,7 +1131,6 @@ def compute_futures_group_trend_backtest(
             .shift(1)
             .fillna(0.0)
         )
-        atr_override = pd.Series(0.0, index=common_idx, dtype=float)
         if atm_eff != "none" and atr_stop_by_asset:
             open_df = pd.DataFrame(
                 {
@@ -1145,22 +1144,9 @@ def compute_futures_group_trend_backtest(
                 },
                 index=common_idx,
             )
-            w_before_stop = w_eff.copy()
-            w_eff, atr_replacement = _apply_intraday_stop_execution_portfolio(
+            w_eff, _ = _apply_intraday_stop_execution_portfolio(
                 weights=w_eff,
                 atr_stop_by_asset=atr_stop_by_asset,
-                exec_price=str(exec_price),
-                open_sig_df=open_df.reindex(
-                    index=w_eff.index, columns=w_eff.columns
-                ).astype(float),
-                close_sig_df=close_df_exec.reindex(
-                    index=w_eff.index, columns=w_eff.columns
-                ).astype(float),
-            )
-            atr_override = _lot_engine_stop_override_delta(
-                weights_before=w_before_stop,
-                weights_after=w_eff,
-                replacement_override=atr_replacement,
                 exec_price=str(exec_price),
                 open_sig_df=open_df.reindex(
                     index=w_eff.index, columns=w_eff.columns
@@ -1302,7 +1288,6 @@ def compute_futures_group_trend_backtest(
             .shift(1)
             .fillna(0.0)
         )
-        atr_override = pd.Series(0.0, index=common_idx, dtype=float)
         if atm_eff != "none" and atr_stop_by_asset:
             open_df = pd.DataFrame(
                 {
@@ -1320,22 +1305,9 @@ def compute_futures_group_trend_backtest(
                 },
                 index=common_idx,
             )
-            w_before_stop = w_eff.copy()
-            w_eff, atr_replacement = _apply_intraday_stop_execution_portfolio(
+            w_eff, _ = _apply_intraday_stop_execution_portfolio(
                 weights=w_eff,
                 atr_stop_by_asset=atr_stop_by_asset,
-                exec_price=str(exec_price),
-                open_sig_df=open_df.reindex(
-                    index=w_eff.index, columns=w_eff.columns
-                ).astype(float),
-                close_sig_df=close_df_exec.reindex(
-                    index=w_eff.index, columns=w_eff.columns
-                ).astype(float),
-            )
-            atr_override = _lot_engine_stop_override_delta(
-                weights_before=w_before_stop,
-                weights_after=w_eff,
-                replacement_override=atr_replacement,
                 exec_price=str(exec_price),
                 open_sig_df=open_df.reindex(
                     index=w_eff.index, columns=w_eff.columns
@@ -1362,10 +1334,14 @@ def compute_futures_group_trend_backtest(
         position_sizing=str(ps_sim).strip().lower(),
         codes_sorted=codes_sorted,
     )
+    # Keep strategy NAV and trade statistics on the same lot-account basis.
+    # ATR stop impacts are expressed through adjusted weights fed into the lot
+    # engine, without post-hoc daily return replacement overlays.
     group_ret = equity_ser.pct_change().fillna(0.0).astype(float)
-    atr_adj = atr_override.reindex(group_ret.index).fillna(0.0).astype(float)
-    group_ret = (group_ret + atr_adj).astype(float)
     portfolio_meta["lot_account"] = lot_meta
+    portfolio_meta["strategy_nav_return_source"] = "lot_account_equity_pct_change"
+    portfolio_meta["trade_statistics_basis"] = "lot_account_closed_trades"
+    portfolio_meta["intraday_stop_same_day_return_replacement"] = "disabled"
     portfolio_meta["main_contract_roll"] = {
         "mode": "embedded_in_lot_engine",
         "notes": (
@@ -1617,7 +1593,7 @@ def compute_futures_group_trend_backtest(
             if pd.notna(v)
         ]
 
-    symbol_nav_by_code: dict[str, list[dict[str, Any]]] = {}
+    symbol_price_nav_by_code: dict[str, list[dict[str, Any]]] = {}
     for c in sorted(exec_by_code.keys()):
         ex = exec_aligned.get(c)
         if ex is None or "Close" not in ex.columns:
@@ -1625,7 +1601,7 @@ def compute_futures_group_trend_backtest(
         close_ser = ex["Close"].reindex(common_idx).astype(float)
         ret_ser = close_ser.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
         nav_ser = (1.0 + ret_ser).cumprod().fillna(1.0)
-        symbol_nav_by_code[str(c)] = _series_rows(nav_ser)
+        symbol_price_nav_by_code[str(c)] = _series_rows(nav_ser)
 
     return {
         "ok": True,
@@ -1670,6 +1646,9 @@ def compute_futures_group_trend_backtest(
             "signal_execution_rule": f"signal_t_execute_t_plus_1_{exec_price}",
             "signal_lag_trading_days": 1,
             "benchmark_price_basis": ("open" if exec_price == "open" else "close"),
+            "symbol_nav_by_code_basis": (
+                "underlying_hfq_close_buy_hold_non_strategy_nav"
+            ),
             "trend_series_policy": {
                 "benchmark": "synthetic_hfq_continuous ({root}889) only; no fallback",
                 "signals": "same hfq series as execution (889 close)",
@@ -1713,7 +1692,9 @@ def compute_futures_group_trend_backtest(
         "series": {
             "strategy_nav": _series_rows(group_nav),
             "benchmark_nav": _series_rows(bench_nav),
-            "symbol_nav_by_code": symbol_nav_by_code,
+            # Backward-compatible alias kept for frontend consumers.
+            "symbol_nav_by_code": symbol_price_nav_by_code,
+            "symbol_price_nav_by_code": symbol_price_nav_by_code,
         },
         "summary": {
             "strategy_total_return": float(group_nav.iloc[-1] - 1.0),

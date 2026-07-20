@@ -804,7 +804,7 @@ def test_api_rotation_backtest_accepts_r_take_profit_overlay(api_client) -> None
             "r_take_profit_reentry_mode": "reenter",
             "r_take_profit_execution_mode": "intraday",
             "r_take_profit_execution_time": "close",
-            "r_take_profit_tiers": [{"r_multiple": 2.0, "retrace_ratio": 0.5}],
+            "r_take_profit_tiers": [{"r_multiple": 1.0, "retrace_ratio": 1.0}],
         },
     )
     assert bool(data.get("r_take_profit_enabled")) is True
@@ -812,7 +812,10 @@ def test_api_rotation_backtest_accepts_r_take_profit_overlay(api_client) -> None
     assert str(data.get("r_take_profit_execution_time") or "") == "close"
     tiers = list(data.get("r_take_profit_tiers") or [])
     assert tiers and float((tiers[0] or {}).get("r_multiple") or 0.0) == pytest.approx(
-        2.0, rel=0.0, abs=1e-12
+        1.0, rel=0.0, abs=1e-12
+    )
+    assert float((tiers[0] or {}).get("retrace_ratio") or 0.0) == pytest.approx(
+        1.0, rel=0.0, abs=1e-12
     )
 
 

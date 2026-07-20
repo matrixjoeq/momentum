@@ -115,6 +115,7 @@ from .schemas import (
     OffFundRegressionFactorAvailabilityItem,
     OffFundRegressionFactorAvailabilityRequest,
     OffFundRegressionFactorAvailabilityResponse,
+    OffFundRegressionPairUniverseItem,
     OffFundRegressionFactorRequest,
     OffFundResearchStateMeta,
     OffFundResearchStateOut,
@@ -8163,53 +8164,40 @@ _PAIR_WARNING_ORDER = (
     "samples_truncated",
     "invalid_trade_date_filtered",
 )
-_PAIR_KEY_ORDER = (
-    "CSI300",
-    "CSI500",
-    "CSI1000",
-    "CSI2000",
-    "CNI2000",
-    "CYB",
-    "KCP50",
-    "CSIFCF",
-    "CSIHL",
-    "CSI_300_GROWTH_INNOVATION",
-    "CSI_300_VALUE_STABILITY",
-    "CSI_1000_GROWTH_INNOVATION",
-    "CSI_1000_VALUE_STABILITY",
-    "CSI_ALL_ENERGY",
-    "CSI_ALL_MATERIAL",
-    "CSI_ALL_FINANCE",
-    "CSI_ALL_ELECTRICITY",
-    "CSI_ALL_CONSUMER",
-    "CSI_ALL_CONSUMER_SELECTIVE",
-    "CSI_ALL_MEDICINE",
-    "CSI_ALL_INFORMATION",
-    "CSI_ALL_COMMUNICATION",
-)
+
+
+def _pick_pair_etf_code(aliases: tuple[str, ...]) -> str:
+    for alias in aliases:
+        code = str(alias or "").strip()
+        if code.isdigit() and len(code) == 6 and code[0] in {"1", "5"}:
+            return code
+    for alias in aliases:
+        code = str(alias or "").strip()
+        if code.isdigit() and len(code) == 6:
+            return code
+    for alias in aliases:
+        code = str(alias or "").strip()
+        if code:
+            return code
+    raise ValueError("pair factor aliases must not be empty")
+
+
+def _build_off_fund_pair_universe() -> list[OffFundRegressionPairUniverseItem]:
+    return [
+        OffFundRegressionPairUniverseItem(
+            key=str(spec.key),
+            label=str(spec.label),
+            aliases=[str(x) for x in spec.aliases],
+            etf_code=_pick_pair_etf_code(spec.aliases),
+        )
+        for spec in DEFAULT_CN_STOCK_FACTORS
+    ]
+
+
+_PAIR_KEY_ORDER = tuple(str(spec.key) for spec in DEFAULT_CN_STOCK_FACTORS)
 _PAIR_ALLOWED_KEYS = set(_PAIR_KEY_ORDER)
 _PAIR_SLOT_DEFAULT = {
-    "pair_slot_01": "CSI500",
-    "pair_slot_02": "CSI1000",
-    "pair_slot_03": "CSI2000",
-    "pair_slot_04": "CNI2000",
-    "pair_slot_05": "CYB",
-    "pair_slot_06": "KCP50",
-    "pair_slot_07": "CSIFCF",
-    "pair_slot_08": "CSIHL",
-    "pair_slot_09": "CSI_300_GROWTH_INNOVATION",
-    "pair_slot_10": "CSI_300_VALUE_STABILITY",
-    "pair_slot_11": "CSI_1000_GROWTH_INNOVATION",
-    "pair_slot_12": "CSI_1000_VALUE_STABILITY",
-    "pair_slot_13": "CSI_ALL_ENERGY",
-    "pair_slot_14": "CSI_ALL_MATERIAL",
-    "pair_slot_15": "CSI_ALL_FINANCE",
-    "pair_slot_16": "CSI_ALL_ELECTRICITY",
-    "pair_slot_17": "CSI_ALL_CONSUMER",
-    "pair_slot_18": "CSI_ALL_CONSUMER_SELECTIVE",
-    "pair_slot_19": "CSI_ALL_MEDICINE",
-    "pair_slot_20": "CSI_ALL_INFORMATION",
-    "pair_slot_21": "CSI_ALL_COMMUNICATION",
+    f"pair_slot_{idx:02d}": key for idx, key in enumerate(_PAIR_KEY_ORDER[1:], start=1)
 }
 _PAIR_SLOT_IDS = tuple(_PAIR_SLOT_DEFAULT.keys())
 
@@ -8448,6 +8436,16 @@ def update_off_fund_research_state_api(
         pair_chart_prefs_json=pair_out_json,
         meta=_pair_meta(pair_warnings + out_warnings),
     )
+
+
+@router.get(
+    "/off-fund/regression/pair-universe",
+    response_model=list[OffFundRegressionPairUniverseItem],
+)
+def list_off_fund_regression_pair_universe_api() -> list[
+    OffFundRegressionPairUniverseItem
+]:
+    return _build_off_fund_pair_universe()
 
 
 @router.get(

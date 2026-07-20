@@ -1030,7 +1030,10 @@
         <button id="runRotationBacktest">刷新轮动回测</button>
       </div>
       <div id="rotationMeta" class="muted"></div>
-      <div id="futuresRotationChartsPanel" style="display: none; margin-top: 10px">
+      <div
+        id="futuresRotationChartsPanel"
+        style="display: none; margin-top: 10px"
+      >
         <div
           class="panel two"
           style="grid-template-columns: 1fr 1fr; margin-top: 10px"
@@ -3475,13 +3478,19 @@
         const navMap =
           out &&
           out.series &&
-          out.series.symbol_nav_by_code &&
-          typeof out.series.symbol_nav_by_code === "object"
-            ? out.series.symbol_nav_by_code
+          ((out.series.symbol_price_nav_by_code &&
+            typeof out.series.symbol_price_nav_by_code === "object" &&
+            out.series.symbol_price_nav_by_code) ||
+            (out.series.symbol_nav_by_code &&
+              typeof out.series.symbol_nav_by_code === "object" &&
+              out.series.symbol_nav_by_code))
+            ? out.series.symbol_price_nav_by_code ||
+              out.series.symbol_nav_by_code
             : {};
         const navRows = Array.isArray(navMap[code]) ? navMap[code] : [];
         if (!navRows.length) {
-          div.innerHTML = "<div class='muted'>该标的暂无可用净值序列。</div>";
+          div.innerHTML =
+            "<div class='muted'>该标的暂无可用价格净值序列。</div>";
           return;
         }
         const marks =
@@ -3498,7 +3507,8 @@
           dateToNav.set(d, v);
         }
         if (!xs.length) {
-          div.innerHTML = "<div class='muted'>该标的暂无可用净值序列。</div>";
+          div.innerHTML =
+            "<div class='muted'>该标的暂无可用价格净值序列。</div>";
           return;
         }
         const entryX = [];
@@ -3542,8 +3552,8 @@
               x: xs,
               y: ys,
               line: { color: "#1f77b4", width: 2 },
-              name: "净值",
-              hovertemplate: "日期=%{x}<br>净值=%{y:.4f}<extra></extra>",
+              name: "标的价格净值(BH)",
+              hovertemplate: "日期=%{x}<br>价格净值=%{y:.4f}<extra></extra>",
             },
             {
               type: "scatter",
@@ -3554,7 +3564,7 @@
               textposition: "top center",
               marker: { color: "#2ca02c", size: 8, symbol: "triangle-up" },
               name: "入场(B)",
-              hovertemplate: "入场=%{x}<br>净值=%{y:.4f}<extra></extra>",
+              hovertemplate: "入场=%{x}<br>价格净值=%{y:.4f}<extra></extra>",
             },
             {
               type: "scatter",
@@ -3565,14 +3575,14 @@
               textposition: "bottom center",
               marker: { color: "#d62728", size: 8, symbol: "triangle-down" },
               name: "出场(S)",
-              hovertemplate: "出场=%{x}<br>净值=%{y:.4f}<extra></extra>",
+              hovertemplate: "出场=%{x}<br>价格净值=%{y:.4f}<extra></extra>",
             },
           ],
           {
             margin: { t: 36, b: 40 },
-            title: `${code}净值与交易区间标注`,
+            title: `${code}标的价格净值与交易区间标注（非策略净值）`,
             xaxis: { title: "日期" },
-            yaxis: { title: "净值" },
+            yaxis: { title: "价格净值(BH)" },
             shapes,
             legend: { orientation: "h" },
           },
@@ -4111,7 +4121,9 @@
           trade_direction: String(
             $("rotTradeDirection").value || "long_only",
           ).toLowerCase(),
-          position_mode: String($("rotPositionMode").value || "equal").toLowerCase(),
+          position_mode: String(
+            $("rotPositionMode").value || "equal",
+          ).toLowerCase(),
           inverse_vol_window: ivw,
           exec_price: String($("rotExecPrice").value || "close").toLowerCase(),
           min_points: 2,

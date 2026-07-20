@@ -30,8 +30,8 @@
       }
       .mono {
         font-family:
-          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-          "Courier New", monospace;
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
       }
       .robust-row {
         background: color-mix(in srgb, var(--ok, #1e7f4f) 12%, transparent);
@@ -41,7 +41,8 @@
   <body>
     <h2>趋势风险预算参数搜索</h2>
     <div class="muted">
-      展示 `trend_risk_budget_param_search.py` 的网格搜索结果，并给出最高夏普的最佳单一参数设置。
+      展示 `trend_risk_budget_param_search.py`
+      的网格搜索结果，并给出综合评分最高的最佳单一参数设置。
     </div>
     <div class="muted" style="margin-top: 6px">
       <a href="/research">返回研究主页</a>
@@ -73,7 +74,7 @@
           <input id="topN" value="30" />
         </div>
         <div>
-          <label>稳健候选（Sharpe前N）</label>
+          <label>稳健候选（综合评分前N）</label>
           <input id="robustTopK" value="3" />
         </div>
         <div>
@@ -92,7 +93,7 @@
         <div id="metaInfo" class="mono"></div>
       </div>
       <div class="panel">
-        <h3 style="margin-top: 0">最佳单一设置（夏普最高）</h3>
+        <h3 style="margin-top: 0">最佳单一设置（综合评分最高）</h3>
         <div id="bestInfo" class="mono"></div>
       </div>
     </div>
@@ -132,7 +133,7 @@
         return Number.isFinite(x) ? `${(x * 100).toFixed(digits)}%` : "-";
       }
 
-      function fmtPctInput(v, digits = 1) {
+      function fmtPctInput(v, digits = 2) {
         const x = Number(v);
         return Number.isFinite(x) ? `${x.toFixed(digits)}%` : "-";
       }
@@ -156,7 +157,8 @@
           .slice();
         out.sort(
           (a, b) =>
-            Number(a.risk_budget_pct_percent) - Number(b.risk_budget_pct_percent),
+            Number(a.risk_budget_pct_percent) -
+            Number(b.risk_budget_pct_percent),
         );
         return out;
       }
@@ -166,17 +168,171 @@
         return Number.isFinite(v) ? v : null;
       }
 
+      const OBJECTIVE_COMPONENTS = [
+        { key: "sharpe_ratio", label: "夏普", higherBetter: true },
+        { key: "calmar_ratio", label: "卡玛", higherBetter: true },
+        { key: "sortino_ratio", label: "索提诺", higherBetter: true },
+        { key: "ulcer_index", label: "溃疡指标", higherBetter: false },
+        {
+          key: "ulcer_performance_index",
+          label: "溃疡绩效",
+          higherBetter: true,
+        },
+        { key: "sqn_recent_100", label: "近100笔SQN", higherBetter: true },
+      ];
+      const OBJECTIVE_GROUPS = [
+        {
+          key: "risk_adjusted_return",
+          label: "收益效率组",
+          weight: 0.45,
+          metrics: [
+            "sharpe_ratio",
+            "calmar_ratio",
+            "sortino_ratio",
+            "ulcer_performance_index",
+          ],
+        },
+        {
+          key: "pain_control",
+          label: "持有痛苦组",
+          weight: 0.25,
+          metrics: ["ulcer_index"],
+        },
+        {
+          key: "system_quality",
+          label: "系统质量组",
+          weight: 0.3,
+          metrics: ["sqn_recent_100"],
+        },
+      ];
+
+      function objectiveScore(row) {
+        const v = Number(row?.__compositeScore ?? row?.composite_score);
+        return Number.isFinite(v) ? v : null;
+      }
+
+      function objectiveEligible(row) {
+        if (typeof row?.__objectiveEligible === "boolean")
+          return row.__objectiveEligible;
+        return Boolean(row?.objective_eligible);
+      }
+
+      function computeCompositeScores(rows) {
+        const eligibleRows = [];
+        rows.forEach((r) => {
+          r.__compositeScore = null;
+          r.__compositeComponents = {};
+          r.__compositeGroupScores = {};
+          r.__objectiveEligible = false;
+          r.__objectiveMissingMetrics = [];
+          r.__objectiveReason = null;
+          if (String(r?.status || "") !== "ok") return;
+          const sqnMin = Number(r?.metrics?.sqn_min_trades ?? 30);
+          const sqnTradeCountTotal = Number(r?.metrics?.sqn_trade_count_total);
+          if (
+            Number.isFinite(sqnTradeCountTotal) &&
+            Number.isFinite(sqnMin) &&
+            sqnTradeCountTotal < sqnMin
+          ) {
+            const sqnReason = r?.metrics?.sqn_reason;
+            r.__objectiveReason =
+              `sqn_trade_count_lt_min:${sqnTradeCountTotal}<${sqnMin}` +
+              (sqnReason ? ` (sqn_reason=${sqnReason})` : "");
+            return;
+          }
+          const missing = OBJECTIVE_COMPONENTS.map((c) => c.key).filter(
+            (k) => metric(r, k) == null,
+          );
+          if (missing.length > 0) {
+            const sqnReason = r?.metrics?.sqn_reason;
+            r.__objectiveMissingMetrics = missing;
+            r.__objectiveReason =
+              "missing_metrics:" +
+              missing.join(",") +
+              (missing.includes("sqn_recent_100") && sqnReason
+                ? ` (sqn_reason=${sqnReason})`
+                : "");
+            return;
+          }
+          r.__objectiveEligible = true;
+          eligibleRows.push(r);
+        });
+
+        const bounds = {};
+        OBJECTIVE_COMPONENTS.forEach((c) => {
+          const vals = eligibleRows
+            .map((r) => metric(r, c.key))
+            .filter((v) => Number.isFinite(v));
+          if (vals.length > 0) {
+            bounds[c.key] = { min: Math.min(...vals), max: Math.max(...vals) };
+          }
+        });
+
+        eligibleRows.forEach((r) => {
+          const comps = {};
+          OBJECTIVE_COMPONENTS.forEach((c) => {
+            const v = metric(r, c.key);
+            const b = bounds[c.key];
+            if (v == null || !b) return;
+            const range = b.max - b.min;
+            let s = 0.5;
+            if (Math.abs(range) > 1e-12) {
+              const base = (v - b.min) / range;
+              s = c.higherBetter ? base : 1 - base;
+            }
+            comps[c.key] = Math.max(0, Math.min(1, s));
+          });
+          let weightedSum = 0;
+          let weightSum = 0;
+          const groupScores = {};
+          OBJECTIVE_GROUPS.forEach((g) => {
+            const vals = g.metrics
+              .map((m) => comps[m])
+              .filter((v) => Number.isFinite(v));
+            const hasBounds = g.metrics.some((m) =>
+              Object.prototype.hasOwnProperty.call(bounds, m),
+            );
+            let groupScore = null;
+            if (vals.length > 0) {
+              groupScore = vals.reduce((a, b) => a + b, 0) / vals.length;
+            } else if (hasBounds) {
+              groupScore = 0;
+            } else {
+              return;
+            }
+            groupScores[g.key] = groupScore;
+            weightedSum += groupScore * Number(g.weight || 0);
+            weightSum += Number(g.weight || 0);
+          });
+          if (weightSum > 0) {
+            r.__compositeScore = weightedSum / weightSum;
+          }
+          r.__compositeComponents = comps;
+          r.__compositeGroupScores = groupScores;
+          if (r.__compositeScore == null) {
+            r.__objectiveEligible = false;
+            r.__objectiveReason = "composite_score_unavailable";
+          }
+          r.composite_score = r.__compositeScore;
+        });
+        return { bounds, method: "grouped_minmax_weighted" };
+      }
+
       function pickBestFromRows(rows) {
         let best = null;
         let bestKey = null;
         rows.forEach((r) => {
           if (String(r?.status || "") !== "ok") return;
+          if (!objectiveEligible(r)) return;
+          const comp = objectiveScore(r);
+          if (comp == null) return;
           const sharpe = metric(r, "sharpe_ratio");
           if (sharpe == null) return;
           const ann = metric(r, "annualized_return");
           const cum = metric(r, "cumulative_return");
           const mdd = metric(r, "max_drawdown");
           const k = [
+            comp,
             sharpe,
             ann == null ? -1e18 : ann,
             cum == null ? -1e18 : cum,
@@ -205,16 +361,18 @@
       }
 
       function pickRobustCandidates(rows, topK, mddLimitPct) {
-        const okRows = rows.filter((r) => String(r?.status || "") === "ok");
-        const sortedBySharpe = okRows.slice().sort((a, b) => {
-          const av = metric(a, "sharpe_ratio");
-          const bv = metric(b, "sharpe_ratio");
+        const okRows = rows.filter(
+          (r) => String(r?.status || "") === "ok" && objectiveEligible(r),
+        );
+        const sortedByComposite = okRows.slice().sort((a, b) => {
+          const av = objectiveScore(a);
+          const bv = objectiveScore(b);
           if (av == null && bv == null) return 0;
           if (av == null) return 1;
           if (bv == null) return -1;
           return bv - av;
         });
-        const topRows = sortedBySharpe.slice(0, Math.max(1, topK));
+        const topRows = sortedByComposite.slice(0, Math.max(1, topK));
         const mddLimit = Math.abs(Number(mddLimitPct)) / 100.0;
         const robustRows = topRows.filter((r) => {
           const mdd = metric(r, "max_drawdown");
@@ -255,6 +413,21 @@
         const ctx = meta.search_context || {};
         lines.push(`标的池: ${(ctx.selected_codes || []).join(", ")}`);
         lines.push(`策略: tsmom, 执行价: close, 引擎: legacy`);
+        const ineligibleRows = rows.filter(
+          (r) => String(r?.status || "") === "ok" && !objectiveEligible(r),
+        );
+        const sqnLt100Rows = rows.filter((r) => {
+          if (String(r?.status || "") !== "ok") return false;
+          const n = metric(r, "sqn_trade_count_total");
+          return n != null && n >= 30 && n < 100;
+        });
+        lines.push(
+          `可比样本: ${rows.filter((r) => objectiveEligible(r)).length}，不可比样本: ${ineligibleRows.length}`,
+        );
+        lines.push(`近100笔SQN样本不足（30~99笔）: ${sqnLt100Rows.length}`);
+        lines.push(
+          "评价目标: 综合评分（分组加权Min-Max，系统质量使用近100笔SQN；总交易<30不参与排序）",
+        );
         $("metaInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
       }
 
@@ -266,12 +439,26 @@
         }
         const lines = [];
         lines.push(
-          `risk_budget_pct(输入百分比): ${fmtPctInput(best.risk_budget_pct_percent, 1)}`,
+          `risk_budget_pct(输入百分比): ${fmtPctInput(best.risk_budget_pct_percent, 2)}`,
         );
         lines.push(
           `risk_budget_pct(后端小数): ${fmtNum(best.risk_budget_pct, 4)}`,
         );
+        lines.push(`综合评分: ${fmtNum(objectiveScore(best), 6)}`);
         lines.push(`夏普: ${fmtNum(metric(best, "sharpe_ratio"), 6)}`);
+        lines.push(`卡玛: ${fmtNum(metric(best, "calmar_ratio"), 6)}`);
+        lines.push(`索提诺: ${fmtNum(metric(best, "sortino_ratio"), 6)}`);
+        lines.push(`溃疡指标: ${fmtNum(metric(best, "ulcer_index"), 6)}`);
+        lines.push(
+          `溃疡绩效: ${fmtNum(metric(best, "ulcer_performance_index"), 6)}`,
+        );
+        lines.push(`近100笔SQN: ${fmtNum(metric(best, "sqn_recent_100"), 6)}`);
+        const bestTradeCount = metric(best, "sqn_trade_count_total");
+        if (bestTradeCount != null && bestTradeCount < 100) {
+          lines.push(
+            `近100样本状态: 不足100笔（当前 ${fmtNum(bestTradeCount, 0)}）`,
+          );
+        }
         lines.push(`年化收益: ${fmtPct(metric(best, "annualized_return"), 2)}`);
         lines.push(`累计收益: ${fmtPct(metric(best, "cumulative_return"), 2)}`);
         lines.push(`最大回撤: ${fmtPct(metric(best, "max_drawdown"), 2)}`);
@@ -281,30 +468,36 @@
       function renderRobustInfo(pack, cfg) {
         const lines = [];
         lines.push(
-          `筛选规则: Sharpe前 ${cfg.topK} 名 且 最大回撤绝对值 ≤ ${fmtPct(cfg.mddLimitPct / 100.0, 2)}`,
+          `筛选规则: 综合评分前 ${cfg.topK} 名 且 最大回撤绝对值 ≤ ${fmtPct(cfg.mddLimitPct / 100.0, 2)}`,
         );
         lines.push(
           `候选数量: ${pack.robustRows.length} / Top${pack.topRows.length}`,
         );
         if (!pack.interval) {
           lines.push("推荐稳健区间: 无（当前阈值下未命中）");
-          $("robustInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+          $("robustInfo").innerHTML = lines
+            .map((x) => `<div>${x}</div>`)
+            .join("");
           return;
         }
         const minPct = Number(pack.interval.minX);
         const maxPct = Number(pack.interval.maxX);
         const one = pack.robustRows[0];
         lines.push(
-          `推荐稳健区间: [${fmtPctInput(minPct, 1)}, ${fmtPctInput(maxPct, 1)}]`,
+          `推荐稳健区间: [${fmtPctInput(minPct, 2)}, ${fmtPctInput(maxPct, 2)}]`,
         );
         lines.push(
-          `区间内最高Sharpe: ${fmtNum(metric(one, "sharpe_ratio"), 6)} @ ${fmtPctInput(one.risk_budget_pct_percent, 1)}`,
+          `区间内最高综合评分: ${fmtNum(objectiveScore(one), 6)} @ ${fmtPctInput(one.risk_budget_pct_percent, 2)}`,
         );
-        $("robustInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+        $("robustInfo").innerHTML = lines
+          .map((x) => `<div>${x}</div>`)
+          .join("");
       }
 
       function getRiskMetricKey(rows) {
-        const hasVol = rows.some((r) => metric(r, "annualized_volatility") != null);
+        const hasVol = rows.some(
+          (r) => metric(r, "annualized_volatility") != null,
+        );
         return hasVol ? "annualized_volatility" : "max_drawdown_abs";
       }
 
@@ -397,13 +590,17 @@
       function renderLine(rows, best, robustPack) {
         const riskKey = getRiskMetricKey(rows);
         const points = rows
-          .filter((r) => String(r?.status || "") === "ok")
+          .filter(
+            (r) => String(r?.status || "") === "ok" && objectiveEligible(r),
+          )
           .map((r) => {
             const risk = getRiskValue(r, riskKey);
             const ret = metric(r, "annualized_return");
             const budget = Number(r.risk_budget_pct_percent);
             const sharpe = metric(r, "sharpe_ratio");
             const mdd = metric(r, "max_drawdown");
+            const sqnRecent100 = metric(r, "sqn_recent_100");
+            const composite = objectiveScore(r);
             if (
               risk == null ||
               ret == null ||
@@ -413,7 +610,16 @@
             ) {
               return null;
             }
-            return { row: r, risk, ret, budget, sharpe, mdd };
+            return {
+              row: r,
+              risk,
+              ret,
+              budget,
+              sharpe,
+              mdd,
+              sqnRecent100,
+              composite,
+            };
           })
           .filter(Boolean);
         if (points.length === 0) {
@@ -444,7 +650,9 @@
         const frontierXs = frontier.map((p) => p.risk);
         const frontierYs = frontier.map((p) => p.ret);
         const coeffs =
-          frontier.length >= 2 ? fitPolynomial(frontierXs, frontierYs, 2) : null;
+          frontier.length >= 2
+            ? fitPolynomial(frontierXs, frontierYs, 2)
+            : null;
         const fitX = [];
         const fitY = [];
         if (coeffs && frontier.length >= 2) {
@@ -476,9 +684,15 @@
               colorbar: { title: "风险预算(%)" },
               line: { width: 0.5, color: "#1b2a3a" },
             },
-            customdata: points.map((p) => [p.budget, p.sharpe, p.mdd]),
+            customdata: points.map((p) => [
+              p.budget,
+              p.sharpe,
+              p.mdd,
+              p.composite,
+              p.sqnRecent100,
+            ]),
             hovertemplate:
-              "风险预算=%{customdata[0]:.1f}%<br>风险=%{x:.2%}<br>年化收益=%{y:.2%}<br>Sharpe=%{customdata[1]:.4f}<br>最大回撤=%{customdata[2]:.2%}<extra></extra>",
+              "风险预算=%{customdata[0]:.2f}%<br>风险=%{x:.2%}<br>年化收益=%{y:.2%}<br>综合评分=%{customdata[3]:.4f}<br>Sharpe=%{customdata[1]:.4f}<br>近100笔SQN=%{customdata[4]:.4f}<br>最大回撤=%{customdata[2]:.2%}<extra></extra>",
           },
           {
             type: "scatter",
@@ -488,7 +702,8 @@
             name: "有效前沿（离散）",
             marker: { size: 8, color: "#ff7f0e" },
             line: { width: 2, color: "#ff7f0e" },
-            hovertemplate: "有效前沿点<br>风险=%{x:.2%}<br>年化收益=%{y:.2%}<extra></extra>",
+            hovertemplate:
+              "有效前沿点<br>风险=%{x:.2%}<br>年化收益=%{y:.2%}<extra></extra>",
           },
         ];
         if (fitX.length > 0) {
@@ -499,7 +714,8 @@
             y: fitY,
             name: "有效前沿拟合曲线",
             line: { width: 3, color: "#d62728", dash: "dash" },
-            hovertemplate: "拟合前沿<br>风险=%{x:.2%}<br>拟合年化收益=%{y:.2%}<extra></extra>",
+            hovertemplate:
+              "拟合前沿<br>风险=%{x:.2%}<br>拟合年化收益=%{y:.2%}<extra></extra>",
           });
         }
         if (best) {
@@ -547,7 +763,7 @@
               },
               customdata: robustPts.map((p) => [p.budget]),
               hovertemplate:
-                "稳健候选<br>风险预算=%{customdata[0]:.1f}%<br>风险=%{x:.2%}<br>年化收益=%{y:.2%}<extra></extra>",
+                "稳健候选<br>风险预算=%{customdata[0]:.2f}%<br>风险=%{x:.2%}<br>年化收益=%{y:.2%}<extra></extra>",
             });
           }
         }
@@ -575,19 +791,17 @@
             font: { size: 12, color: "#d62728" },
           });
         }
-        Plotly.newPlot(
-          "sharpeLine",
-          traces,
-          layout,
-          { responsive: true },
-        );
+        Plotly.newPlot("sharpeLine", traces, layout, { responsive: true });
       }
 
       function renderTable(rows, robustPack) {
         const topN = Math.max(1, Math.floor(Number($("topN").value || "30")));
         const sorted = rows.slice().sort((a, b) => {
-          const av = metric(a, "sharpe_ratio");
-          const bv = metric(b, "sharpe_ratio");
+          const ae = objectiveEligible(a) ? 1 : 0;
+          const be = objectiveEligible(b) ? 1 : 0;
+          if (ae !== be) return be - ae;
+          const av = objectiveScore(a);
+          const bv = objectiveScore(b);
           if (av == null && bv == null) return 0;
           if (av == null) return 1;
           if (bv == null) return -1;
@@ -596,7 +810,17 @@
         const cols = [
           "risk_budget_pct_percent",
           "risk_budget_pct",
+          "objective_eligible",
+          "objective_ineligible_reason",
+          "composite_score",
           "sharpe_ratio",
+          "calmar_ratio",
+          "sortino_ratio",
+          "ulcer_index",
+          "ulcer_performance_index",
+          "sqn_recent_100",
+          "sqn_trade_count_total",
+          "sqn_recent_100_note",
           "annualized_return",
           "cumulative_return",
           "max_drawdown",
@@ -608,7 +832,17 @@
           [
             "风险预算(%)",
             "风险预算(小数)",
+            "可比",
+            "不可比原因",
+            "综合评分",
             "Sharpe",
+            "Calmar",
+            "Sortino",
+            "Ulcer",
+            "UPI",
+            "近100笔SQN",
+            "总交易数",
+            "近100样本状态",
             "年化收益",
             "累计收益",
             "最大回撤",
@@ -623,13 +857,41 @@
           .map((r) => {
             const cells = cols.map((c) => {
               if (c === "risk_budget_pct_percent")
-                return `<td>${fmtPctInput(r[c], 1)}</td>`;
+                return `<td>${fmtPctInput(r[c], 2)}</td>`;
               if (c === "risk_budget_pct") return `<td>${fmtNum(r[c], 4)}</td>`;
-              if (c === "sharpe_ratio")
+              if (c === "objective_eligible")
+                return `<td>${objectiveEligible(r) ? "是" : "否"}</td>`;
+              if (c === "objective_ineligible_reason") {
+                const reason =
+                  r?.__objectiveReason ||
+                  r?.objective_ineligible_reason ||
+                  String(r?.error || "");
+                return `<td>${String(reason || "-").slice(0, 160)}</td>`;
+              }
+              if (c === "composite_score")
+                return `<td>${fmtNum(objectiveScore(r), 6)}</td>`;
+              if (
+                c === "sharpe_ratio" ||
+                c === "calmar_ratio" ||
+                c === "sortino_ratio" ||
+                c === "ulcer_index" ||
+                c === "ulcer_performance_index" ||
+                c === "sqn_recent_100"
+              )
                 return `<td>${fmtNum(metric(r, c), 6)}</td>`;
+              if (c === "sqn_trade_count_total")
+                return `<td>${fmtNum(metric(r, c), 0)}</td>`;
+              if (c === "sqn_recent_100_note") {
+                const n = metric(r, "sqn_trade_count_total");
+                if (n == null) return "<td>-</td>";
+                if (n < 30) return `<td>不足30（不参与排序）</td>`;
+                if (n < 100) return `<td>不足100（当前 ${fmtNum(n, 0)}）</td>`;
+                return "<td>满100+</td>";
+              }
               if (c === "annualized_return" || c === "cumulative_return")
                 return `<td>${fmtPct(metric(r, c), 2)}</td>`;
-              if (c === "max_drawdown") return `<td>${fmtPct(metric(r, c), 2)}</td>`;
+              if (c === "max_drawdown")
+                return `<td>${fmtPct(metric(r, c), 2)}</td>`;
               if (c === "status") return `<td>${String(r.status || "-")}</td>`;
               if (c === "error")
                 return `<td>${String(r.error || "").slice(0, 120)}</td>`;
@@ -644,13 +906,14 @@
           })
           .join("");
         $("resultTable").innerHTML =
-          head + (body || `<tr><td colspan="8">暂无数据</td></tr>`);
+          head + (body || `<tr><td colspan="18">暂无数据</td></tr>`);
       }
 
       function refreshView() {
         const state = window.__trendRbGrid;
         if (!state) return;
         const rows = toSortedRows(state.results);
+        computeCompositeScores(rows);
         const best = pickBestFromRows(rows);
         const robustCfg = getRobustConfig();
         const robustPack = pickRobustCandidates(

@@ -173,5 +173,74 @@ def test_open_execution_marks_intraday_pnl_on_post_trade_lots() -> None:
         codes_sorted=[code],
     )
     # Day2 entry at open should realize same-day intraday MTM on post-trade lots:
-    # lots=floor(100000 / (130*10*0.1))=769, pnl=769*10*(130-110)=153800.
-    assert float(eq.iloc[1]) == pytest.approx(253800.0)
+    # open-exec sizing uses execution open (not same-day settle), so
+    # lots=floor(100000 / (110*10*0.1))=909, pnl=909*10*(130-110)=181800.
+    assert float(eq.iloc[1]) == pytest.approx(281800.0)
+
+
+def test_open_execution_margin_sizing_does_not_lookahead_same_day_settle() -> None:
+    idx = pd.to_datetime(["2024-01-02"])
+    code = "X0"
+    df = pd.DataFrame(
+        {
+            "Open": [100.0],
+            "High": [100.0],
+            "Low": [100.0],
+            "Close": [100.0],
+            "Volume": [1.0],
+            "Settle": [1_000_000_000.0],
+        },
+        index=idx,
+    )
+    w_eff = pd.DataFrame({code: [1.0]}, index=idx)
+    _, meta = simulate_discrete_lot_portfolio(
+        common_idx=idx,
+        exec_by_code={code: df},
+        w_eff=w_eff,
+        cost_by_symbol={code: _noop_cost()},
+        mults={code: 10.0},
+        margin_rate_frac=0.1,
+        reserve_ratio=0.0,
+        initial_equity_cny=100_000.0,
+        exec_price="open",
+        position_sizing="equal",
+        codes_sorted=[code],
+    )
+    assert int(meta.get("reserve_margin_attempted_entry_count", 0)) == 1
+    assert int(meta.get("reserve_margin_blocked_entry_count", 0)) == 0
+    assert len(list(meta.get("closed_trades") or [])) == 1
+
+
+def test_simulate_forces_liquidation_and_clamps_non_positive_equity() -> None:
+    idx = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+    code = "X0"
+    df = pd.DataFrame(
+        {
+            "Open": [100.0, 100.0, 100.0],
+            "High": [100.0, 100.0, 100.0],
+            "Low": [100.0, 100.0, 100.0],
+            "Close": [100.0, 1.0, 1.0],
+            "Volume": [1.0, 1.0, 1.0],
+            "Settle": [100.0, 1.0, 1.0],
+        },
+        index=idx,
+    )
+    w_eff = pd.DataFrame({code: [1.0, 1.0, 1.0]}, index=idx)
+    eq, meta = simulate_discrete_lot_portfolio(
+        common_idx=idx,
+        exec_by_code={code: df},
+        w_eff=w_eff,
+        cost_by_symbol={code: _noop_cost()},
+        mults={code: 100.0},
+        margin_rate_frac=0.1,
+        reserve_ratio=0.0,
+        initial_equity_cny=100_000.0,
+        exec_price="close",
+        position_sizing="equal",
+        codes_sorted=[code],
+    )
+    assert float(eq.min()) >= 0.0
+    assert float(eq.iloc[1]) == 0.0
+    assert float(eq.iloc[2]) == 0.0
+    assert bool(meta.get("insolvency_forced_liquidation")) is True
+    assert str(meta.get("insolvency_first_date")) == "2024-01-03"

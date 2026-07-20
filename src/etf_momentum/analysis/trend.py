@@ -5120,7 +5120,7 @@ def _normalize_r_take_profit_tiers(
         retrace = float(item.get("retrace_ratio"))
         if (not np.isfinite(r_mult)) or r_mult <= 0.0:
             continue
-        if (not np.isfinite(retrace)) or retrace <= 0.0 or retrace >= 1.0:
+        if (not np.isfinite(retrace)) or retrace <= 0.0 or retrace > 1.0:
             continue
         out.append({"r_multiple": float(r_mult), "retrace_ratio": float(retrace)})
     if not out:
@@ -7786,7 +7786,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     ):
         raise ValueError("risk_budget_max_leverage_multiple must be in [1.0, 10.0]")
     risk_budget_rebalance_mode = (
-        str(getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative")
+        str(
+            getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative"
+        )
         .strip()
         .lower()
     )
@@ -9006,13 +9008,25 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     ui_bh = float(_ulcer_index(bh_nav, in_percent=True))
     ann_strat = float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR))
     ann_bh = float(_annualized_return(bh_nav, ann_factor=TRADING_DAYS_PER_YEAR))
+    mdd_strat = float(_max_drawdown(nav))
+    mdd_bh = float(_max_drawdown(bh_nav))
+    calmar_strat = (
+        float(ann_strat / abs(mdd_strat))
+        if np.isfinite(mdd_strat) and mdd_strat < 0
+        else float("nan")
+    )
+    calmar_bh = (
+        float(ann_bh / abs(mdd_bh))
+        if np.isfinite(mdd_bh) and mdd_bh < 0
+        else float("nan")
+    )
     m_strat = {
         "cumulative_return": float(nav.iloc[-1] - 1.0),
         "annualized_return": float(ann_strat),
         "annualized_volatility": float(
             _annualized_vol(strat_ret, ann_factor=TRADING_DAYS_PER_YEAR)
         ),
-        "max_drawdown": float(_max_drawdown(nav)),
+        "max_drawdown": mdd_strat,
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(nav)),
         "sharpe_ratio": float(
             _sharpe(
@@ -9021,6 +9035,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 ann_factor=TRADING_DAYS_PER_YEAR,
             )
         ),
+        "calmar_ratio": calmar_strat,
         "sortino_ratio": float(
             _sortino(
                 strat_ret,
@@ -9042,13 +9057,14 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "annualized_volatility": float(
             _annualized_vol(ret_bh, ann_factor=TRADING_DAYS_PER_YEAR)
         ),
-        "max_drawdown": float(_max_drawdown(bh_nav)),
+        "max_drawdown": mdd_bh,
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bh_nav)),
         "sharpe_ratio": float(
             _sharpe(
                 ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
             )
         ),
+        "calmar_ratio": calmar_bh,
         "sortino_ratio": float(
             _sortino(
                 ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
@@ -10240,7 +10256,9 @@ def compute_trend_portfolio_backtest(
     ):
         raise ValueError("risk_budget_max_leverage_multiple must be in [1.0, 10.0]")
     risk_budget_rebalance_mode = (
-        str(getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative")
+        str(
+            getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative"
+        )
         .strip()
         .lower()
     )
@@ -11812,10 +11830,9 @@ def compute_trend_portfolio_backtest(
                         desired_row.loc[c] = 0.0
                 desired_total = float(desired_row.sum())
                 overcap_now = bool(desired_total > 1.0 + 1e-12)
-                if (
-                    prev_rb_overcap_state is not None
-                    and bool(prev_rb_overcap_state) != bool(overcap_now)
-                ):
+                if prev_rb_overcap_state is not None and bool(
+                    prev_rb_overcap_state
+                ) != bool(overcap_now):
                     if overcap_now:
                         pre_scale = desired_row.copy().astype(float)
                         w_row = (desired_row * (1.0 / desired_total)).astype(float)
@@ -11879,7 +11896,9 @@ def compute_trend_portfolio_backtest(
                                 risk_budget_overcap_skip_decision_count += 1
                                 _inc_overcap_daily("skip_entry", 1)
                                 risk_budget_overcap_skip_decision_by_code[key] = int(
-                                    risk_budget_overcap_skip_decision_by_code.get(key, 0)
+                                    risk_budget_overcap_skip_decision_by_code.get(
+                                        key, 0
+                                    )
                                     + 1
                                 )
                                 skipped_today.add(key)
@@ -11888,12 +11907,14 @@ def compute_trend_portfolio_backtest(
                                         key, False
                                     )
                                 ):
-                                    risk_budget_overcap_skip_episode_active_by_code[key] = (
-                                        True
-                                    )
+                                    risk_budget_overcap_skip_episode_active_by_code[
+                                        key
+                                    ] = True
                                     risk_budget_overcap_skip_episode_count += 1
                                     risk_budget_overcap_skip_episode_by_code[key] = int(
-                                        risk_budget_overcap_skip_episode_by_code.get(key, 0)
+                                        risk_budget_overcap_skip_episode_by_code.get(
+                                            key, 0
+                                        )
                                         + 1
                                     )
                                 continue
@@ -11909,14 +11930,18 @@ def compute_trend_portfolio_backtest(
                                     rb_entry_seq_by_code[out_code] = -1
                                     risk_budget_overcap_replace_count += 1
                                     _inc_overcap_daily("replace_entry", 1)
-                                    risk_budget_overcap_replace_out_by_code[out_code] = int(
+                                    risk_budget_overcap_replace_out_by_code[
+                                        out_code
+                                    ] = int(
                                         risk_budget_overcap_replace_out_by_code.get(
                                             out_code, 0
                                         )
                                         + 1
                                     )
                                     risk_budget_overcap_replace_in_by_code[key] = int(
-                                        risk_budget_overcap_replace_in_by_code.get(key, 0)
+                                        risk_budget_overcap_replace_in_by_code.get(
+                                            key, 0
+                                        )
                                         + 1
                                     )
                             _set_new_risk_budget_entry(key, float(base_target))
@@ -11991,7 +12016,8 @@ def compute_trend_portfolio_backtest(
                                             )
                                     if (
                                         lev_now
-                                        > float(risk_budget_max_leverage_multiple) + 1e-12
+                                        > float(risk_budget_max_leverage_multiple)
+                                        + 1e-12
                                     ):
                                         _apply_overcap_scale_once(
                                             float(risk_budget_max_leverage_multiple)
@@ -12078,7 +12104,9 @@ def compute_trend_portfolio_backtest(
                     if str(next_state) != st:
                         w_row.loc[c] = float(base_target)
                         rb_state_by_code[key] = str(next_state)
-                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_adjust_total_count"
+                        ] += 1
                         if next_state == "REDUCED":
                             vol_risk_adjust_by_asset[key][
                                 "vol_risk_adjust_reduce_on_expand_count"
@@ -12812,19 +12840,32 @@ def compute_trend_portfolio_backtest(
     ui_bench = float(_ulcer_index(bench_nav, in_percent=True))
     ann_strat = float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR))
     ann_bench = float(_annualized_return(bench_nav, ann_factor=TRADING_DAYS_PER_YEAR))
+    mdd_strat = float(_max_drawdown(nav))
+    mdd_bench = float(_max_drawdown(bench_nav))
+    calmar_strat = (
+        float(ann_strat / abs(mdd_strat))
+        if np.isfinite(mdd_strat) and mdd_strat < 0
+        else float("nan")
+    )
+    calmar_bench = (
+        float(ann_bench / abs(mdd_bench))
+        if np.isfinite(mdd_bench) and mdd_bench < 0
+        else float("nan")
+    )
     m_strat = {
         "cumulative_return": float(nav.iloc[-1] - 1.0),
         "annualized_return": float(ann_strat),
         "annualized_volatility": float(
             _annualized_vol(port_ret, ann_factor=TRADING_DAYS_PER_YEAR)
         ),
-        "max_drawdown": float(_max_drawdown(nav)),
+        "max_drawdown": mdd_strat,
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(nav)),
         "sharpe_ratio": float(
             _sharpe(
                 port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
             )
         ),
+        "calmar_ratio": calmar_strat,
         "sortino_ratio": float(
             _sortino(
                 port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
@@ -12842,7 +12883,7 @@ def compute_trend_portfolio_backtest(
         "annualized_volatility": float(
             _annualized_vol(bench_ret, ann_factor=TRADING_DAYS_PER_YEAR)
         ),
-        "max_drawdown": float(_max_drawdown(bench_nav)),
+        "max_drawdown": mdd_bench,
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bench_nav)),
         "sharpe_ratio": float(
             _sharpe(
@@ -12851,6 +12892,7 @@ def compute_trend_portfolio_backtest(
                 ann_factor=TRADING_DAYS_PER_YEAR,
             )
         ),
+        "calmar_ratio": calmar_bench,
         "sortino_ratio": float(
             _sortino(
                 bench_ret,
