@@ -75,11 +75,14 @@ RAW_BASE_PAYLOAD: dict[str, Any] = {
         "159920",
         "512480",
         "563300",
+        "512660",
+        "562500",
+        "159869",
     ],
     "position_sizing": "risk_budget",
     "dynamic_universe": True,
     "start": "20111209",
-    "end": "20260717",
+    "end": "20211231",
     "initial_account_amount": None,
     "cost_bps": 2,
     "slippage_rate": 0.001,
@@ -207,7 +210,7 @@ RAW_BASE_PAYLOAD: dict[str, Any] = {
 
 SEARCH_CONTEXT: dict[str, Any] = {
     "group_name": "趋势大全",
-    "backtest_range": {"start": "20111209", "end": "20260717"},
+    "backtest_range": {"start": "20111209", "end": "20211231"},
     "dynamic_universe": True,
     "mode": "portfolio",
     "selected_codes": RAW_BASE_PAYLOAD["codes"],
@@ -221,7 +224,7 @@ SEARCH_CONTEXT: dict[str, Any] = {
     "r_profit_scaleout_tiers_parse_error": None,
     "bias_v_take_profit_tiers_text": "3:0.33,5:0.33",
     "bias_v_take_profit_tiers_parse_error": None,
-    "exported_at": "2026-07-20T07:12:52.096Z",
+    "exported_at": "2026-07-21T03:48:38.195Z",
 }
 
 
