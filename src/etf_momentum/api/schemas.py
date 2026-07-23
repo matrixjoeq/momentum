@@ -3319,6 +3319,10 @@ class TrendBacktestRequest(BaseModel):
         default=False,
         description="If true, skip heavy post analyses (return decomposition, entry-condition causal stats, trade_statistics raw traces, event study).",
     )
+    search_minimal_mode: bool = Field(
+        default=False,
+        description="If true, enable parameter-search minimal mode: force quick path and return only search-critical outputs.",
+    )
 
     @model_validator(mode="after")
     def _validate_ma_entry_filter_windows(self) -> "TrendBacktestRequest":
@@ -3734,6 +3738,10 @@ class TrendPortfolioBacktestRequest(BaseModel):
     quick_mode: bool = Field(
         default=False,
         description="If true, skip heavy post analyses (return decomposition, entry-condition causal stats, trade_statistics raw traces, event study).",
+    )
+    search_minimal_mode: bool = Field(
+        default=False,
+        description="If true, enable parameter-search minimal mode: force quick path and return only search-critical outputs.",
     )
 
     @model_validator(mode="after")

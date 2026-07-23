@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import etf_momentum.analysis.bt_trend as bt_trend_mod
 import etf_momentum.analysis.trend as trend_mod
 from etf_momentum.analysis.trend import (
     TrendInputs,
@@ -516,6 +517,25 @@ def test_trade_stats_risk_of_ruin_matches_expected_formula_value() -> None:
     assert float(ror.get("probability") or 0.0) == pytest.approx(
         ((1.0 - 0.6) / 0.6) ** (0.30 / 0.01), rel=0.0, abs=1e-12
     )
+
+
+def test_trade_stats_risk_of_ruin_extreme_exponent_no_overflow_and_engine_parity() -> (
+    None
+):
+    # Tiny average loss + p<0.5 yields huge exponent; probability should saturate to 1.
+    trade_returns = [0.000001, -0.000001, -0.000001]
+    legacy_stats = _trade_stats_from_returns(
+        trade_returns,
+        risk_of_ruin_maxrisk=0.30,
+    )
+    bt_stats = bt_trend_mod._trade_stats_from_returns(
+        trade_returns,
+        risk_of_ruin_maxrisk=0.30,
+    )
+    legacy_prob = (legacy_stats.get("risk_of_ruin") or {}).get("probability")
+    bt_prob = (bt_stats.get("risk_of_ruin") or {}).get("probability")
+    assert float(legacy_prob or 0.0) == pytest.approx(1.0, rel=0.0, abs=1e-12)
+    assert float(bt_prob or 0.0) == pytest.approx(1.0, rel=0.0, abs=1e-12)
 
 
 def test_trailing_stop_latest_atr_moves_up_on_volatility_drop() -> None:

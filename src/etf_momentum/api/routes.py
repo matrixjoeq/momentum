@@ -1025,6 +1025,122 @@ def _attach_trend_capacity_estimate(
     return out
 
 
+def _trim_trend_search_minimal_response(out: dict[str, Any]) -> dict[str, Any]:
+    """Keep only fields required by parameter-search scripts."""
+    if not isinstance(out, dict):
+        return out
+    meta = out.get("meta") if isinstance(out.get("meta"), dict) else {}
+    nav = out.get("nav") if isinstance(out.get("nav"), dict) else {}
+    nav_series = nav.get("series") if isinstance(nav.get("series"), dict) else {}
+    metrics = out.get("metrics") if isinstance(out.get("metrics"), dict) else {}
+    r_stats = (
+        out.get("r_statistics") if isinstance(out.get("r_statistics"), dict) else {}
+    )
+    trade_stats = (
+        out.get("trade_statistics")
+        if isinstance(out.get("trade_statistics"), dict)
+        else {}
+    )
+    trades_raw = trade_stats.get("trades")
+    trades_rows = trades_raw if isinstance(trades_raw, list) else []
+    by_code_raw = trade_stats.get("by_code")
+    by_code_stats = by_code_raw if isinstance(by_code_raw, dict) else {}
+    overall_stats = (
+        trade_stats.get("overall")
+        if isinstance(trade_stats.get("overall"), dict)
+        else {}
+    )
+    sqn_block = (
+        (((r_stats or {}).get("overall") or {}).get("sqn") or {})
+        if isinstance(r_stats, dict)
+        else {}
+    )
+    minimal_trades: list[dict[str, Any]] = []
+    for tr in trades_rows:
+        if not isinstance(tr, dict):
+            continue
+        minimal_trades.append(
+            {
+                "code": str(tr.get("code") or ""),
+                "entry_date": tr.get("entry_date"),
+                "exit_date": tr.get("exit_date"),
+                "r_multiple": tr.get("r_multiple"),
+            }
+        )
+    m_params = (
+        meta.get("params")
+        if isinstance(meta, dict) and isinstance(meta.get("params"), dict)
+        else {}
+    )
+    params = dict(m_params)
+    params["quick_mode"] = True
+    params["search_minimal_mode"] = True
+    return {
+        "meta": {
+            **(meta if isinstance(meta, dict) else {}),
+            "mode": "search_minimal",
+            "params": params,
+        },
+        "nav": {
+            "dates": (
+                nav.get("dates")
+                if isinstance(nav, dict) and isinstance(nav.get("dates"), list)
+                else []
+            ),
+            "series": {
+                "STRAT": (
+                    nav_series.get("STRAT")
+                    if isinstance(nav_series.get("STRAT"), list)
+                    else []
+                ),
+                "BUY_HOLD_EW": (
+                    nav_series.get("BUY_HOLD_EW")
+                    if isinstance(nav_series.get("BUY_HOLD_EW"), list)
+                    else (
+                        nav_series.get("BUY_HOLD")
+                        if isinstance(nav_series.get("BUY_HOLD"), list)
+                        else []
+                    )
+                ),
+                "EXCESS": (
+                    nav_series.get("EXCESS")
+                    if isinstance(nav_series.get("EXCESS"), list)
+                    else []
+                ),
+            },
+        },
+        "metrics": {
+            "strategy": (
+                (metrics.get("strategy") or {}) if isinstance(metrics, dict) else {}
+            )
+        },
+        "trade_statistics": {
+            "all": {"n": len(minimal_trades)},
+            "overall": {"kelly_ex_zero": (overall_stats.get("kelly_ex_zero"))},
+            "by_code": {
+                str(code): {"kelly_ex_zero": (node.get("kelly_ex_zero"))}
+                for code, node in by_code_stats.items()
+                if isinstance(node, dict)
+            },
+            "trades": minimal_trades,
+        },
+        "r_statistics": {
+            "overall": {
+                "sqn": {
+                    "sqn": sqn_block.get("sqn"),
+                    "applicable": sqn_block.get("applicable"),
+                    "reason": sqn_block.get("reason"),
+                    "trade_count_total": sqn_block.get("trade_count_total"),
+                    "trade_count_used": sqn_block.get("trade_count_used"),
+                    "min_trades": sqn_block.get("min_trades"),
+                }
+            }
+        },
+        "return_decomposition": None,
+        "event_study": None,
+    }
+
+
 def _build_rotation_capacity_estimate(
     db: Session, out: dict[str, Any], *, capacity_window_years: int | None = None
 ) -> dict[str, Any]:
@@ -2446,7 +2562,11 @@ def trend_backtest(
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
         initial_account_amount=getattr(payload, "initial_account_amount", None),
-        quick_mode=bool(getattr(payload, "quick_mode", False)),
+        quick_mode=bool(
+            getattr(payload, "quick_mode", False)
+            or getattr(payload, "search_minimal_mode", False)
+        ),
+        search_minimal_mode=bool(getattr(payload, "search_minimal_mode", False)),
     )
     settings = get_settings()
     engine, default_engine = _resolve_trend_engine(
@@ -2459,11 +2579,14 @@ def trend_backtest(
             if engine == "bt"
             else compute_trend_backtest(db, inp)
         )
-        out = _attach_trend_capacity_estimate(
-            db,
-            out,
-            capacity_window_years=getattr(payload, "capacity_window_years", None),
-        )
+        if bool(getattr(payload, "search_minimal_mode", False)):
+            out = _trim_trend_search_minimal_response(out)
+        else:
+            out = _attach_trend_capacity_estimate(
+                db,
+                out,
+                capacity_window_years=getattr(payload, "capacity_window_years", None),
+            )
         meta = out.setdefault("meta", {})
         if isinstance(meta, dict):
             meta.setdefault("engine", engine)
@@ -2684,7 +2807,11 @@ def trend_portfolio_backtest(
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
         initial_account_amount=getattr(payload, "initial_account_amount", None),
-        quick_mode=bool(getattr(payload, "quick_mode", False)),
+        quick_mode=bool(
+            getattr(payload, "quick_mode", False)
+            or getattr(payload, "search_minimal_mode", False)
+        ),
+        search_minimal_mode=bool(getattr(payload, "search_minimal_mode", False)),
     )
     settings = get_settings()
     engine, default_engine = _resolve_trend_engine(
@@ -2697,11 +2824,14 @@ def trend_portfolio_backtest(
             if engine == "bt"
             else compute_trend_portfolio_backtest(db, inp)
         )
-        out = _attach_trend_capacity_estimate(
-            db,
-            out,
-            capacity_window_years=getattr(payload, "capacity_window_years", None),
-        )
+        if bool(getattr(payload, "search_minimal_mode", False)):
+            out = _trim_trend_search_minimal_response(out)
+        else:
+            out = _attach_trend_capacity_estimate(
+                db,
+                out,
+                capacity_window_years=getattr(payload, "capacity_window_years", None),
+            )
         meta = out.setdefault("meta", {})
         if isinstance(meta, dict):
             meta.setdefault("engine", engine)

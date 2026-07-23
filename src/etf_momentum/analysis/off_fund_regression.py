@@ -236,6 +236,11 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         label="货币基金",
         aliases=("MONEY_MARKET_FUND", "511880"),
     ),
+    RegressionFactorSpec(
+        key="USD_BOND",
+        label="美元债",
+        aliases=("USD_BOND", "501300"),
+    ),
 )
 
 

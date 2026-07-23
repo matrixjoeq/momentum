@@ -25,6 +25,7 @@ DEFAULT_OUTPUT_YEARLY_CSV = (
 DEFAULT_OUTPUT_SEARCH_CSV = (
     "src/etf_momentum/web/data/trend_momentum_walkforward_5y_search_summary.csv"
 )
+DEFAULT_LOOKBACK_STABILITY_GAP_QUANTILE = 0.5
 
 TRADING_DAYS_PER_YEAR = 252
 
@@ -49,6 +50,22 @@ def _to_iso_date(d: dt.date) -> str:
 
 def _parse_yyyymmdd(s: str) -> dt.date:
     return dt.datetime.strptime(str(s), "%Y%m%d").date()
+
+
+def _quantile(values: list[float], q: float) -> float | None:
+    if not values:
+        return None
+    data = sorted(float(x) for x in values)
+    if len(data) == 1:
+        return float(data[0])
+    qq = float(max(0.0, min(1.0, q)))
+    pos = qq * float(len(data) - 1)
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+    if lo == hi:
+        return float(data[lo])
+    w = float(pos - lo)
+    return float(data[lo] * (1.0 - w) + data[hi] * w)
 
 
 def _safe_div(a: float | None, b: float | None) -> float | None:
@@ -312,6 +329,188 @@ def _call_trend_api(
     return resp
 
 
+def _row_rank_key(row: dict[str, Any]) -> tuple[float, float, float, float]:
+    comp = _to_float(row.get("composite_score"))
+    sharpe = base._metric_value(row, "sharpe_ratio")
+    ann = base._metric_value(row, "annualized_return")
+    mdd = base._metric_value(row, "max_drawdown")
+    return (
+        float(comp if comp is not None else -1e18),
+        float(sharpe if sharpe is not None else -1e18),
+        float(ann if ann is not None else -1e18),
+        float(-abs(mdd) if mdd is not None else -1e18),
+    )
+
+
+def _build_lookback_representatives(
+    rows: list[dict[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    rep: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        if str(row.get("status") or "") != "ok":
+            continue
+        if not bool(row.get("objective_eligible")):
+            continue
+        lb = row.get("mom_lookback")
+        try:
+            lb_i = int(lb)
+        except (TypeError, ValueError):
+            continue
+        cur = rep.get(lb_i)
+        if cur is None or _row_rank_key(row) > _row_rank_key(cur):
+            rep[lb_i] = row
+    return rep
+
+
+def _pick_best_stable_by_lookback(
+    rows: list[dict[str, Any]],
+    *,
+    lookback_stability_gap_quantile: float,
+    lookback_stability_max_gap_override: float | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    rep = _build_lookback_representatives(rows)
+    if not rep:
+        return None, {
+            "selection_mode": "no_eligible_candidate",
+            "stability_threshold": None,
+            "stability_quantile": float(lookback_stability_gap_quantile),
+            "stability_threshold_mode": "no_samples",
+        }
+
+    candidates = sorted(rep.items(), key=lambda kv: _row_rank_key(kv[1]), reverse=True)
+    gap_samples: list[float] = []
+    for lb, row in candidates:
+        left = rep.get(lb - 1)
+        right = rep.get(lb + 1)
+        if left is None or right is None:
+            continue
+        comp = _to_float(row.get("composite_score"))
+        left_comp = _to_float((left or {}).get("composite_score"))
+        right_comp = _to_float((right or {}).get("composite_score"))
+        if comp is None or left_comp is None or right_comp is None:
+            continue
+        gap_left = abs(float(comp) - float(left_comp))
+        gap_right = abs(float(comp) - float(right_comp))
+        gap_samples.append(float(max(gap_left, gap_right)))
+
+    dynamic_threshold = _quantile(gap_samples, float(lookback_stability_gap_quantile))
+    threshold_mode = "quantile"
+    if lookback_stability_max_gap_override is not None:
+        threshold_mode = "fixed_override"
+        dynamic_threshold = float(lookback_stability_max_gap_override)
+
+    relaxed_best: tuple[float, float, dict[str, Any], dict[str, Any]] | None = None
+    rejected: list[dict[str, Any]] = []
+    for rank_idx, (lb, row) in enumerate(candidates, start=1):
+        left = rep.get(lb - 1)
+        right = rep.get(lb + 1)
+        comp = _to_float(row.get("composite_score"))
+        left_comp = _to_float((left or {}).get("composite_score"))
+        right_comp = _to_float((right or {}).get("composite_score"))
+        diag = {
+            "rank": int(rank_idx),
+            "lookback": int(lb),
+            "composite": comp,
+            "left_lookback": int(lb - 1),
+            "left_composite": left_comp,
+            "right_lookback": int(lb + 1),
+            "right_composite": right_comp,
+        }
+        if left is None or right is None:
+            rejected.append({**diag, "reason": "missing_neighbor"})
+            continue
+        if comp is None or left_comp is None or right_comp is None:
+            rejected.append({**diag, "reason": "missing_composite"})
+            continue
+        gap_left = abs(float(comp) - float(left_comp))
+        gap_right = abs(float(comp) - float(right_comp))
+        max_gap = float(max(gap_left, gap_right))
+        mean_gap = float((gap_left + gap_right) / 2.0)
+        if dynamic_threshold is not None and max_gap <= float(dynamic_threshold):
+            return row, {
+                "selection_mode": "stable_primary",
+                "stability_threshold": float(dynamic_threshold),
+                "stability_quantile": float(lookback_stability_gap_quantile),
+                "stability_threshold_mode": threshold_mode,
+                "selected_rank": int(rank_idx),
+                "selected_lookback": int(lb),
+                "selected_composite": float(comp),
+                "stability_gap_left": float(gap_left),
+                "stability_gap_right": float(gap_right),
+                "stability_max_gap": float(max_gap),
+                "stability_mean_gap": float(mean_gap),
+                "stability_gap_sample_count": int(len(gap_samples)),
+                "stability_gap_sample_p10": _quantile(gap_samples, 0.10),
+                "stability_gap_sample_p50": _quantile(gap_samples, 0.50),
+                "stability_gap_sample_p90": _quantile(gap_samples, 0.90),
+                "eligible_lookback_count": int(len(rep)),
+                "rejected_samples": rejected[:8],
+            }
+        rejected.append(
+            {
+                **diag,
+                "reason": "peak_gap_too_large",
+                "gap_left": float(gap_left),
+                "gap_right": float(gap_right),
+                "max_gap": float(max_gap),
+            }
+        )
+        relaxed_key = (float(max_gap), float(-float(comp)))
+        relaxed_diag = {
+            "selection_mode": "stable_relaxed_min_gap",
+            "stability_threshold": (
+                float(dynamic_threshold) if dynamic_threshold is not None else None
+            ),
+            "stability_quantile": float(lookback_stability_gap_quantile),
+            "stability_threshold_mode": threshold_mode,
+            "selected_rank": int(rank_idx),
+            "selected_lookback": int(lb),
+            "selected_composite": float(comp),
+            "stability_gap_left": float(gap_left),
+            "stability_gap_right": float(gap_right),
+            "stability_max_gap": float(max_gap),
+            "stability_mean_gap": float(mean_gap),
+            "stability_gap_sample_count": int(len(gap_samples)),
+            "stability_gap_sample_p10": _quantile(gap_samples, 0.10),
+            "stability_gap_sample_p50": _quantile(gap_samples, 0.50),
+            "stability_gap_sample_p90": _quantile(gap_samples, 0.90),
+            "eligible_lookback_count": int(len(rep)),
+            "rejected_samples": rejected[:8],
+        }
+        if relaxed_best is None or relaxed_key < (
+            relaxed_best[0],
+            relaxed_best[1],
+        ):
+            relaxed_best = (float(max_gap), float(-float(comp)), row, relaxed_diag)
+
+    if relaxed_best is not None:
+        return relaxed_best[2], relaxed_best[3]
+
+    lb0, row0 = candidates[0]
+    comp0 = _to_float(row0.get("composite_score"))
+    return row0, {
+        "selection_mode": "fallback_top_representative",
+        "stability_threshold": (
+            float(dynamic_threshold) if dynamic_threshold is not None else None
+        ),
+        "stability_quantile": float(lookback_stability_gap_quantile),
+        "stability_threshold_mode": threshold_mode,
+        "selected_rank": 1,
+        "selected_lookback": int(lb0),
+        "selected_composite": float(comp0) if comp0 is not None else None,
+        "stability_gap_left": None,
+        "stability_gap_right": None,
+        "stability_max_gap": None,
+        "stability_mean_gap": None,
+        "stability_gap_sample_count": int(len(gap_samples)),
+        "stability_gap_sample_p10": _quantile(gap_samples, 0.10),
+        "stability_gap_sample_p50": _quantile(gap_samples, 0.50),
+        "stability_gap_sample_p90": _quantile(gap_samples, 0.90),
+        "eligible_lookback_count": int(len(rep)),
+        "rejected_samples": rejected[:8],
+    }
+
+
 def _search_window_best(
     *,
     base_url: str,
@@ -326,6 +525,8 @@ def _search_window_best(
     retry_times: int,
     objective_min_avg_annual_trade_count: float,
     objective_min_annualized_return: float,
+    lookback_stability_gap_quantile: float,
+    lookback_stability_max_gap_override: float | None = None,
 ) -> dict[str, Any]:
     payload = copy.deepcopy(base_payload_template)
     payload["start"] = _to_yyyymmdd(train_start)
@@ -347,8 +548,14 @@ def _search_window_best(
         min_annualized_return=float(objective_min_annualized_return),
     )
     base._sort_rows_for_display(rows)
-    best = base._pick_best_by_composite(rows)
-    selection_mode = "normal"
+    best, stable_diag = _pick_best_stable_by_lookback(
+        rows,
+        lookback_stability_gap_quantile=float(lookback_stability_gap_quantile),
+        lookback_stability_max_gap_override=_to_float(
+            lookback_stability_max_gap_override
+        ),
+    )
+    selection_mode = (stable_diag or {}).get("selection_mode") or "normal"
     if best is None:
         # Relaxed fallback keeps pipeline alive while retaining sqn/min-metric checks.
         _ = base._assign_composite_scores(
@@ -356,8 +563,15 @@ def _search_window_best(
             min_avg_annual_trade_count=0.0,
             min_annualized_return=0.0,
         )
-        best = base._pick_best_by_composite(rows)
-        selection_mode = "relaxed_no_trade_return_gate"
+        best, stable_diag = _pick_best_stable_by_lookback(
+            rows,
+            lookback_stability_gap_quantile=float(lookback_stability_gap_quantile),
+            lookback_stability_max_gap_override=_to_float(
+                lookback_stability_max_gap_override
+            ),
+        )
+        sel = (stable_diag or {}).get("selection_mode") or "unknown"
+        selection_mode = f"relaxed_no_trade_return_gate/{sel}"
     if best is None:
         raise RuntimeError(
             "no valid parameter found in training window "
@@ -383,6 +597,7 @@ def _search_window_best(
         "rows": rows,
         "metric_bounds": metric_bounds,
         "selection_mode": selection_mode,
+        "selection_diagnostics": stable_diag or {},
         "elapsed_seconds": round(time.perf_counter() - t0, 3),
         "total_cases": len(rows),
         "success_cases": len(rows) - len(errors),
@@ -597,6 +812,8 @@ def _write_yearly_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "best_entry_pct",
         "best_exit_pct",
         "search_selection_mode",
+        "search_stability_threshold",
+        "search_stability_max_gap",
         "search_elapsed_seconds",
         "search_total_cases",
         "search_success_cases",
@@ -632,6 +849,12 @@ def _write_yearly_csv(path: Path, rows: list[dict[str, Any]]) -> None:
                         "tsmom_exit_threshold_pct"
                     ),
                     "search_selection_mode": r.get("search", {}).get("selection_mode"),
+                    "search_stability_threshold": r.get("search", {})
+                    .get("selection_diagnostics", {})
+                    .get("stability_threshold"),
+                    "search_stability_max_gap": r.get("search", {})
+                    .get("selection_diagnostics", {})
+                    .get("stability_max_gap"),
                     "search_elapsed_seconds": r.get("search", {}).get(
                         "elapsed_seconds"
                     ),
@@ -772,6 +995,10 @@ def run(args: argparse.Namespace) -> int:
             objective_min_annualized_return=float(
                 float(args.objective_min_annualized_return_pct) / 100.0
             ),
+            lookback_stability_gap_quantile=float(args.lookback_stability_gap_quantile),
+            lookback_stability_max_gap_override=_to_float(
+                args.lookback_stability_max_gap_override
+            ),
         )
         best_row = search_pack["best"]
         oos = _execute_oos_year(
@@ -805,6 +1032,7 @@ def run(args: argparse.Namespace) -> int:
             },
             "search": {
                 "selection_mode": search_pack.get("selection_mode"),
+                "selection_diagnostics": search_pack.get("selection_diagnostics") or {},
                 "elapsed_seconds": search_pack.get("elapsed_seconds"),
                 "total_cases": search_pack.get("total_cases"),
                 "success_cases": search_pack.get("success_cases"),
@@ -838,6 +1066,9 @@ def run(args: argparse.Namespace) -> int:
             "[INFO] year result: "
             f"trade_year={sl['trade_year']}, best=({best_row.get('mom_lookback')}, "
             f"{best_row.get('tsmom_entry_threshold_pct')}%, {best_row.get('tsmom_exit_threshold_pct')}%), "
+            f"pick_mode={search_pack.get('selection_mode')}, "
+            f"stability_threshold={(search_pack.get('selection_diagnostics') or {}).get('stability_threshold')}, "
+            f"stability_max_gap={(search_pack.get('selection_diagnostics') or {}).get('stability_max_gap')}, "
             f"oos_ann={_to_float((oos.get('metrics') or {}).get('annualized_return'))}, "
             f"oos_sharpe={_to_float((oos.get('metrics') or {}).get('sharpe_ratio'))}"
         )
@@ -886,6 +1117,12 @@ def run(args: argparse.Namespace) -> int:
                 ),
                 "min_annualized_return_pct": float(
                     args.objective_min_annualized_return_pct
+                ),
+                "lookback_stability_gap_quantile": float(
+                    args.lookback_stability_gap_quantile
+                ),
+                "lookback_stability_max_gap_override": _to_float(
+                    args.lookback_stability_max_gap_override
                 ),
             },
             "concurrency": {
@@ -954,6 +1191,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=5.0,
         help="Eligibility gate for selecting best params in each train window.",
+    )
+    p.add_argument(
+        "--lookback-stability-gap-quantile",
+        type=float,
+        default=DEFAULT_LOOKBACK_STABILITY_GAP_QUANTILE,
+        help=(
+            "Adaptive threshold quantile in [0,1] computed from each train "
+            "window's lookback-neighbor max-gap distribution."
+        ),
+    )
+    p.add_argument(
+        "--lookback-stability-max-gap-override",
+        type=float,
+        default=None,
+        help=(
+            "Optional hard threshold override for stability gap. "
+            "If omitted, threshold is fully adaptive per window."
+        ),
     )
     p.add_argument("--workers", type=int, default=12)
     p.add_argument("--max-in-flight", type=int, default=96)

@@ -1495,6 +1495,189 @@ def test_api_trend_portfolio_quick_mode_skips_heavy_sections(engine, api_client)
     assert "entry_condition_stats" not in ts
 
 
+def test_api_trend_single_search_minimal_mode_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={"TSMM1": [100.0 + i * 0.35 for i, _ in enumerate(dates)]},
+        dates=dates,
+    )
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "TSMM1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "search_minimal_mode": True,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = ((out.get("meta") or {}).get("params")) or {}
+    ts = out.get("trade_statistics") or {}
+    by_code = ts.get("by_code") or {}
+    assert params.get("search_minimal_mode") is True
+    assert params.get("quick_mode") is True
+    assert "capacity_estimate" not in out
+    assert "asset_nav_exec" not in out
+    assert "signals" not in out
+    assert "risk_controls" not in out
+    assert "market_regime" not in out
+    assert "rolling" not in out
+    assert "period_returns" not in out
+    assert "attribution" not in out
+    assert out.get("return_decomposition") is None
+    assert out.get("event_study") is None
+    assert "STRAT" in ((out.get("nav") or {}).get("series") or {})
+    assert "strategy" in (out.get("metrics") or {})
+    assert "overall" in (out.get("r_statistics") or {})
+    assert "overall" in ts
+    assert "TSMM1" in by_code
+    assert "kelly_ex_zero" in (by_code.get("TSMM1") or {})
+    trades = list(ts.get("trades") or [])
+    if trades:
+        assert set(trades[0].keys()) <= {
+            "code",
+            "entry_date",
+            "exit_date",
+            "r_multiple",
+        }
+
+
+def test_api_trend_portfolio_search_minimal_mode_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "TSMP1": [100.0 + i * 0.45 for i, _ in enumerate(dates)],
+            "TSMP2": [95.0 + i * 0.42 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["TSMP1", "TSMP2"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "equal",
+            "search_minimal_mode": True,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = ((out.get("meta") or {}).get("params")) or {}
+    ts = out.get("trade_statistics") or {}
+    by_code = ts.get("by_code") or {}
+    assert params.get("search_minimal_mode") is True
+    assert params.get("quick_mode") is True
+    assert "capacity_estimate" not in out
+    assert "weights" not in out
+    assert "weights_decision" not in out
+    assert "asset_nav_exec" not in out
+    assert "holdings" not in out
+    assert "risk_controls" not in out
+    assert "market_regime" not in out
+    assert "rolling" not in out
+    assert "period_returns" not in out
+    assert "attribution" not in out
+    assert "next_plan" not in out
+    assert out.get("return_decomposition") is None
+    assert out.get("event_study") is None
+    assert "STRAT" in ((out.get("nav") or {}).get("series") or {})
+    assert "strategy" in (out.get("metrics") or {})
+    assert "overall" in (out.get("r_statistics") or {})
+    assert "overall" in ts
+    assert "TSMP1" in by_code and "TSMP2" in by_code
+    assert "kelly_ex_zero" in (by_code.get("TSMP1") or {})
+    assert "kelly_ex_zero" in (by_code.get("TSMP2") or {})
+    trades = list(ts.get("trades") or [])
+    if trades:
+        assert set(trades[0].keys()) <= {
+            "code",
+            "entry_date",
+            "exit_date",
+            "r_multiple",
+        }
+
+
+def test_api_trend_portfolio_search_minimal_mode_keeps_search_metrics(
+    engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "TSME1": [100.0 + i * 0.35 for i, _ in enumerate(dates)],
+            "TSME2": [90.0 + i * 0.28 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    c = api_client
+    payload = {
+        "codes": ["TSME1", "TSME2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 3,
+        "position_sizing": "equal",
+        "quick_mode": True,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    out_full = post_json_ok(c, "/api/analysis/trend/portfolio", dict(payload))
+    out_min = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload, "search_minimal_mode": True},
+    )
+    m_full = ((out_full.get("metrics") or {}).get("strategy")) or {}
+    m_min = ((out_min.get("metrics") or {}).get("strategy")) or {}
+    for key in [
+        "annualized_return",
+        "sharpe_ratio",
+        "calmar_ratio",
+        "sortino_ratio",
+        "ulcer_index",
+        "ulcer_performance_index",
+        "avg_annual_trade_count",
+    ]:
+        assert float(m_min.get(key) or 0.0) == pytest.approx(
+            float(m_full.get(key) or 0.0), rel=0.0, abs=1e-12
+        )
+    sqn_full = (
+        ((out_full.get("r_statistics") or {}).get("overall") or {}).get("sqn")
+    ) or {}
+    sqn_min = (
+        ((out_min.get("r_statistics") or {}).get("overall") or {}).get("sqn")
+    ) or {}
+    assert float(sqn_min.get("sqn") or 0.0) == pytest.approx(
+        float(sqn_full.get("sqn") or 0.0), rel=0.0, abs=1e-12
+    )
+    by_code_full = ((out_full.get("trade_statistics") or {}).get("by_code")) or {}
+    by_code_min = ((out_min.get("trade_statistics") or {}).get("by_code")) or {}
+    for code in ["TSME1", "TSME2"]:
+        assert float(((by_code_min.get(code) or {}).get("kelly_ex_zero")) or 0.0) == (
+            pytest.approx(
+                float(((by_code_full.get(code) or {}).get("kelly_ex_zero")) or 0.0),
+                rel=0.0,
+                abs=1e-12,
+            )
+        )
+    strat_full = (((out_full.get("nav") or {}).get("series") or {}).get("STRAT")) or []
+    strat_min = (((out_min.get("nav") or {}).get("series") or {}).get("STRAT")) or []
+    assert len(strat_full) == len(strat_min)
+    assert strat_min[-1] == pytest.approx(strat_full[-1], rel=0.0, abs=1e-12)
+
+
 def test_api_trend_single_capacity_estimate_uses_volume_avg_price_fallback(
     engine, api_client
 ):

@@ -50,6 +50,7 @@ RAW_BASE_PAYLOAD: dict[str, Any] = {
     "cost_bps": 2,
     "slippage_rate": 0.001,
     "quick_mode": True,
+    "search_minimal_mode": True,
     "engine": "legacy",
     "exec_price": "close",
     "strategy": "tsmom",

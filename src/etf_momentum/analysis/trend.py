@@ -357,6 +357,7 @@ class TrendInputs:
     er_exit_threshold: float = 0.88
     initial_account_amount: float | None = None
     quick_mode: bool = False
+    search_minimal_mode: bool = False
 
 
 @dataclass(frozen=True)
@@ -489,6 +490,7 @@ class TrendPortfolioInputs:
     er_exit_window: int = 10
     er_exit_threshold: float = 0.88
     quick_mode: bool = False
+    search_minimal_mode: bool = False
 
 
 def _reduce_active_codes_by_group(
@@ -1783,7 +1785,16 @@ def _risk_of_ruin_probability(
         return None
     base = (1.0 - p) / p
     exp = mr / a
-    raw = float(base**exp)
+    # Compute in log-domain to avoid OverflowError for large exponents.
+    log_raw = float(exp * np.log(base))
+    if not np.isfinite(log_raw):
+        return None
+    if log_raw >= 0.0:
+        # raw >= 1.0, and final clipping saturates to probability 1.
+        return 1.0
+    if log_raw <= float(np.log(np.finfo(float).tiny)):
+        return 0.0
+    raw = float(np.exp(log_raw))
     if not np.isfinite(raw):
         return None
     return float(np.clip(raw, 0.0, 1.0))
@@ -7401,6 +7412,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if not np.isfinite(float(inp.risk_free_rate)):
         raise ValueError("risk_free_rate must be finite")
     quick_mode = bool(getattr(inp, "quick_mode", False))
+    search_minimal_mode = bool(getattr(inp, "search_minimal_mode", False))
+    if search_minimal_mode:
+        # Search minimal mode is a strict superset of quick mode.
+        quick_mode = True
 
     strat = (inp.strategy or "ma_filter").strip().lower()
     if strat not in {
@@ -8994,30 +9009,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if len(nav) > 0:
         nav.iloc[0] = 1.0
 
-    bh_nav = (1.0 + ret_bh).cumprod()
-    if len(bh_nav) > 0:
-        bh_nav.iloc[0] = 1.0
-
-    active = strat_ret - ret_bh
-    excess_nav = (1.0 + active).cumprod()
-    if len(excess_nav) > 0:
-        excess_nav.iloc[0] = 1.0
-
     # metrics
     ui_strat = float(_ulcer_index(nav, in_percent=True))
-    ui_bh = float(_ulcer_index(bh_nav, in_percent=True))
     ann_strat = float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR))
-    ann_bh = float(_annualized_return(bh_nav, ann_factor=TRADING_DAYS_PER_YEAR))
     mdd_strat = float(_max_drawdown(nav))
-    mdd_bh = float(_max_drawdown(bh_nav))
     calmar_strat = (
         float(ann_strat / abs(mdd_strat))
         if np.isfinite(mdd_strat) and mdd_strat < 0
-        else float("nan")
-    )
-    calmar_bh = (
-        float(ann_bh / abs(mdd_bh))
-        if np.isfinite(mdd_bh) and mdd_bh < 0
         else float("nan")
     )
     m_strat = {
@@ -9051,94 +9049,125 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         if len(turnover_daily)
         else 0.0,
     }
-    m_bh = {
-        "cumulative_return": float(bh_nav.iloc[-1] - 1.0),
-        "annualized_return": float(ann_bh),
-        "annualized_volatility": float(
-            _annualized_vol(ret_bh, ann_factor=TRADING_DAYS_PER_YEAR)
-        ),
-        "max_drawdown": mdd_bh,
-        "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bh_nav)),
-        "sharpe_ratio": float(
-            _sharpe(
-                ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
-            )
-        ),
-        "calmar_ratio": calmar_bh,
-        "sortino_ratio": float(
-            _sortino(
-                ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
-            )
-        ),
-        "ulcer_index": float(ui_bh),
-        "ulcer_performance_index": float(ann_bh / (ui_bh / 100.0))
-        if ui_bh > 0
-        else float("nan"),
-    }
-    m_ex = {
-        "cumulative_return": float(excess_nav.iloc[-1] - 1.0),
-        "annualized_return": float(
-            _annualized_return(excess_nav, ann_factor=TRADING_DAYS_PER_YEAR)
-        ),
-        "information_ratio": float(
-            _sharpe(active, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
-        ),
-    }
-    asset_ret_for_attribution = (
-        ret_exec_day.to_frame(code).astype(float).reindex(nav.index).fillna(0.0)
-    )
-    weight_for_attribution = (
-        w.to_frame(code).astype(float).reindex(nav.index).fillna(0.0)
-    )
-    cash_weight_attr = _cash_management_residual_weight(
-        weight_for_attribution[str(code)].astype(float)
-    )
-    asset_ret_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
-        cash_ret.reindex(nav.index).astype(float).fillna(0.0)
-    )
-    weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
-        cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
-    )
-    # Keep attribution in net-return space by explicitly modeling risk overrides
-    # and trading costs as standalone components.
-    asset_ret_for_attribution[RISK_EXIT_PROXY_CODE] = (
-        risk_exit_override_ret.reindex(nav.index).astype(float).fillna(0.0)
-    )
-    weight_for_attribution[RISK_EXIT_PROXY_CODE] = 1.0
-    asset_ret_for_attribution[TRADING_COST_PROXY_CODE] = (
-        -(cost.astype(float) + slippage.astype(float))
-        .reindex(nav.index)
-        .astype(float)
-        .fillna(0.0)
-    )
-    weight_for_attribution[TRADING_COST_PROXY_CODE] = 1.0
-    attribution = _compute_return_risk_contributions(
-        asset_ret=asset_ret_for_attribution,
-        weights=weight_for_attribution,
-        total_return=float(nav.iloc[-1] - 1.0),
-    )
-    (
-        cash_contrib_total,
-        cash_contrib_annualized,
-    ) = _extract_cash_management_return_contribution(attribution)
-    (
-        risk_exit_contrib_total,
-        risk_exit_contrib_annualized,
-    ) = _extract_return_contribution_by_code(attribution, code=RISK_EXIT_PROXY_CODE)
-    (
-        trading_cost_contrib_total,
-        trading_cost_contrib_annualized,
-    ) = _extract_return_contribution_by_code(attribution, code=TRADING_COST_PROXY_CODE)
-    m_strat["cash_management_proxy_code"] = str(CASH_MANAGEMENT_PROXY_CODE)
-    m_strat["cash_management_data_available"] = bool(cash_data_available)
-    m_strat["cash_management_return_contribution"] = cash_contrib_total
-    m_strat["cash_management_return_contribution_annualized"] = cash_contrib_annualized
-    m_strat["risk_exit_return_contribution"] = risk_exit_contrib_total
-    m_strat["risk_exit_return_contribution_annualized"] = risk_exit_contrib_annualized
-    m_strat["trading_cost_return_contribution"] = trading_cost_contrib_total
-    m_strat["trading_cost_return_contribution_annualized"] = (
-        trading_cost_contrib_annualized
-    )
+    bh_nav = pd.Series(1.0, index=nav.index, dtype=float)
+    if not search_minimal_mode:
+        bh_nav = (1.0 + ret_bh).cumprod()
+        if len(bh_nav) > 0:
+            bh_nav.iloc[0] = 1.0
+    m_bh: dict[str, Any] = {}
+    m_ex: dict[str, Any] = {}
+    attribution: dict[str, Any] = {}
+    if not search_minimal_mode:
+        active = strat_ret - ret_bh
+        excess_nav = (1.0 + active).cumprod()
+        if len(excess_nav) > 0:
+            excess_nav.iloc[0] = 1.0
+        ui_bh = float(_ulcer_index(bh_nav, in_percent=True))
+        ann_bh = float(_annualized_return(bh_nav, ann_factor=TRADING_DAYS_PER_YEAR))
+        mdd_bh = float(_max_drawdown(bh_nav))
+        calmar_bh = (
+            float(ann_bh / abs(mdd_bh))
+            if np.isfinite(mdd_bh) and mdd_bh < 0
+            else float("nan")
+        )
+        m_bh = {
+            "cumulative_return": float(bh_nav.iloc[-1] - 1.0),
+            "annualized_return": float(ann_bh),
+            "annualized_volatility": float(
+                _annualized_vol(ret_bh, ann_factor=TRADING_DAYS_PER_YEAR)
+            ),
+            "max_drawdown": mdd_bh,
+            "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bh_nav)),
+            "sharpe_ratio": float(
+                _sharpe(
+                    ret_bh,
+                    rf=float(inp.risk_free_rate),
+                    ann_factor=TRADING_DAYS_PER_YEAR,
+                )
+            ),
+            "calmar_ratio": calmar_bh,
+            "sortino_ratio": float(
+                _sortino(
+                    ret_bh,
+                    rf=float(inp.risk_free_rate),
+                    ann_factor=TRADING_DAYS_PER_YEAR,
+                )
+            ),
+            "ulcer_index": float(ui_bh),
+            "ulcer_performance_index": float(ann_bh / (ui_bh / 100.0))
+            if ui_bh > 0
+            else float("nan"),
+        }
+        m_ex = {
+            "cumulative_return": float(excess_nav.iloc[-1] - 1.0),
+            "annualized_return": float(
+                _annualized_return(excess_nav, ann_factor=TRADING_DAYS_PER_YEAR)
+            ),
+            "information_ratio": float(
+                _sharpe(active, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
+            ),
+        }
+        asset_ret_for_attribution = (
+            ret_exec_day.to_frame(code).astype(float).reindex(nav.index).fillna(0.0)
+        )
+        weight_for_attribution = (
+            w.to_frame(code).astype(float).reindex(nav.index).fillna(0.0)
+        )
+        cash_weight_attr = _cash_management_residual_weight(
+            weight_for_attribution[str(code)].astype(float)
+        )
+        asset_ret_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
+            cash_ret.reindex(nav.index).astype(float).fillna(0.0)
+        )
+        weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
+            cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
+        )
+        # Keep attribution in net-return space by explicitly modeling risk
+        # overrides and trading costs as standalone components.
+        asset_ret_for_attribution[RISK_EXIT_PROXY_CODE] = (
+            risk_exit_override_ret.reindex(nav.index).astype(float).fillna(0.0)
+        )
+        weight_for_attribution[RISK_EXIT_PROXY_CODE] = 1.0
+        asset_ret_for_attribution[TRADING_COST_PROXY_CODE] = (
+            -(cost.astype(float) + slippage.astype(float))
+            .reindex(nav.index)
+            .astype(float)
+            .fillna(0.0)
+        )
+        weight_for_attribution[TRADING_COST_PROXY_CODE] = 1.0
+        attribution = _compute_return_risk_contributions(
+            asset_ret=asset_ret_for_attribution,
+            weights=weight_for_attribution,
+            total_return=float(nav.iloc[-1] - 1.0),
+        )
+        (
+            cash_contrib_total,
+            cash_contrib_annualized,
+        ) = _extract_cash_management_return_contribution(attribution)
+        (
+            risk_exit_contrib_total,
+            risk_exit_contrib_annualized,
+        ) = _extract_return_contribution_by_code(attribution, code=RISK_EXIT_PROXY_CODE)
+        (
+            trading_cost_contrib_total,
+            trading_cost_contrib_annualized,
+        ) = _extract_return_contribution_by_code(
+            attribution, code=TRADING_COST_PROXY_CODE
+        )
+        m_strat["cash_management_proxy_code"] = str(CASH_MANAGEMENT_PROXY_CODE)
+        m_strat["cash_management_data_available"] = bool(cash_data_available)
+        m_strat["cash_management_return_contribution"] = cash_contrib_total
+        m_strat["cash_management_return_contribution_annualized"] = (
+            cash_contrib_annualized
+        )
+        m_strat["risk_exit_return_contribution"] = risk_exit_contrib_total
+        m_strat["risk_exit_return_contribution_annualized"] = (
+            risk_exit_contrib_annualized
+        )
+        m_strat["trading_cost_return_contribution"] = trading_cost_contrib_total
+        m_strat["trading_cost_return_contribution_annualized"] = (
+            trading_cost_contrib_annualized
+        )
     trade_one = _trade_returns_from_weight_series(
         w,
         ret_exec_day,
@@ -9192,6 +9221,105 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     r_stats_out = dict(trade_r_pack.get("statistics") or {})
     r_stats_out.pop("trade_system_score", None)
     trades_with_r = list(trade_r_pack.get("trades") or [])
+    if search_minimal_mode:
+
+        def _finite_float_or_none(x: Any) -> float | None:
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                return None
+            if not np.isfinite(v):
+                return None
+            return float(v)
+
+        overall_stats_full = _trade_stats_from_returns(
+            trade_one.get("returns", []),
+            risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+        )
+        by_code_stats_full = {
+            str(code): _trade_stats_from_returns(
+                trade_one.get("returns", []),
+                risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+            )
+        }
+        sqn_block = (
+            (((r_stats_out or {}).get("overall") or {}).get("sqn") or {})
+            if isinstance(r_stats_out, dict)
+            else {}
+        )
+        trades_min: list[dict[str, Any]] = []
+        for tr in trades_with_r:
+            if not isinstance(tr, dict):
+                continue
+            trades_min.append(
+                {
+                    "code": str(tr.get("code") or str(code)),
+                    "entry_date": tr.get("entry_date"),
+                    "exit_date": tr.get("exit_date"),
+                    "r_multiple": _finite_float_or_none(tr.get("r_multiple")),
+                }
+            )
+        return {
+            "meta": {
+                "type": "trend_backtest",
+                "mode": "search_minimal",
+                "code": str(code),
+                "start": inp.start.strftime("%Y%m%d"),
+                "end": inp.end.strftime("%Y%m%d"),
+                "strategy": strat,
+                "strategy_execution_description": (
+                    TREND_STRATEGY_EXECUTION_DESCRIPTIONS.get(strat, "")
+                ),
+                "params": {
+                    "quick_mode": bool(quick_mode),
+                    "search_minimal_mode": True,
+                    "exec_price": str(ep),
+                    "position_sizing": str(ps),
+                    "risk_budget_pct": float(risk_budget_pct),
+                    "mom_lookback": int(inp.mom_lookback),
+                    "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
+                    "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),
+                    "er_filter": bool(er_filter),
+                    "er_window": int(er_window),
+                    "er_threshold": float(er_threshold),
+                },
+            },
+            "nav": {
+                "dates": nav.index.date.astype(str).tolist(),
+                "series": {
+                    "STRAT": nav.astype(float).tolist(),
+                },
+            },
+            "metrics": {"strategy": m_strat},
+            "trade_statistics": {
+                "all": {"n": len(trades_min)},
+                "overall": {"kelly_ex_zero": (overall_stats_full.get("kelly_ex_zero"))},
+                "by_code": {
+                    str(code): {
+                        "kelly_ex_zero": (
+                            (by_code_stats_full.get(str(code)) or {}).get(
+                                "kelly_ex_zero"
+                            )
+                        )
+                    }
+                },
+                "trades": trades_min,
+            },
+            "r_statistics": {
+                "overall": {
+                    "sqn": {
+                        "sqn": sqn_block.get("sqn"),
+                        "applicable": sqn_block.get("applicable"),
+                        "reason": sqn_block.get("reason"),
+                        "trade_count_total": sqn_block.get("trade_count_total"),
+                        "trade_count_used": sqn_block.get("trade_count_used"),
+                        "min_trades": sqn_block.get("min_trades"),
+                    }
+                }
+            },
+            "return_decomposition": None,
+            "event_study": None,
+        }
     if not quick_mode:
         mom_for_entry = (px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0).astype(
             float
@@ -9819,6 +9947,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                     else float(getattr(inp, "initial_account_amount"))
                 ),
                 "quick_mode": bool(quick_mode),
+                "search_minimal_mode": bool(search_minimal_mode),
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),
@@ -10201,6 +10330,10 @@ def compute_trend_portfolio_backtest(
     if not np.isfinite(float(inp.risk_free_rate)):
         raise ValueError("risk_free_rate must be finite")
     quick_mode = bool(getattr(inp, "quick_mode", False))
+    search_minimal_mode = bool(getattr(inp, "search_minimal_mode", False))
+    if search_minimal_mode:
+        # Search minimal mode is a strict superset of quick mode.
+        quick_mode = True
     ps = str(inp.position_sizing or "equal").strip().lower()
     if ps not in {"equal", "vol_target", "fixed_ratio", "risk_budget"}:
         raise ValueError(
@@ -10642,7 +10775,9 @@ def compute_trend_portfolio_backtest(
         )
         if not du_b:
             ch_nb = ch_nb.ffill()
-        if len(codes) == 1:
+        if search_minimal_mode:
+            bench_ret = pd.Series(0.0, index=dates, dtype=float)
+        elif len(codes) == 1:
             bench_ret = hfq_close_buy_hold_returns(ch_nb.iloc[:, 0])
         else:
             bench_ret = hfq_close_daily_equal_weight_returns(
@@ -10713,7 +10848,9 @@ def compute_trend_portfolio_backtest(
         ch_nb = close_hfq.reindex(dates).reindex(columns=codes).astype(float)
         if not du_b:
             ch_nb = ch_nb.ffill()
-        if len(codes) == 1:
+        if search_minimal_mode:
+            bench_ret = pd.Series(0.0, index=dates, dtype=float)
+        elif len(codes) == 1:
             bench_ret = hfq_close_buy_hold_returns(ch_nb.iloc[:, 0])
         else:
             bench_ret = hfq_close_daily_equal_weight_returns(
@@ -12504,10 +12641,14 @@ def compute_trend_portfolio_backtest(
                     ),
                 }
 
-    bench_ret = bench_ret.reindex(dates).fillna(0.0).astype(float)
-    bench_nav = (1.0 + bench_ret).cumprod()
-    if len(bench_nav) > 0:
-        bench_nav.iloc[0] = 1.0
+    if search_minimal_mode:
+        bench_ret = pd.Series(0.0, index=dates, dtype=float)
+        bench_nav = pd.Series(1.0, index=dates, dtype=float)
+    else:
+        bench_ret = bench_ret.reindex(dates).fillna(0.0).astype(float)
+        bench_nav = (1.0 + bench_ret).cumprod()
+        if len(bench_nav) > 0:
+            bench_nav.iloc[0] = 1.0
     turnover = (w - w.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
     cost = turnover * (float(inp.cost_bps) / 10000.0)
     turnover_by_asset = (w - w.shift(1).fillna(0.0)).abs() / 2.0
@@ -12831,25 +12972,13 @@ def compute_trend_portfolio_backtest(
     nav = (1.0 + port_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
-    active = (port_ret - bench_ret).astype(float)
-    ex_nav = (1.0 + active).cumprod()
-    if len(ex_nav) > 0:
-        ex_nav.iloc[0] = 1.0
 
     ui_strat = float(_ulcer_index(nav, in_percent=True))
-    ui_bench = float(_ulcer_index(bench_nav, in_percent=True))
     ann_strat = float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR))
-    ann_bench = float(_annualized_return(bench_nav, ann_factor=TRADING_DAYS_PER_YEAR))
     mdd_strat = float(_max_drawdown(nav))
-    mdd_bench = float(_max_drawdown(bench_nav))
     calmar_strat = (
         float(ann_strat / abs(mdd_strat))
         if np.isfinite(mdd_strat) and mdd_strat < 0
-        else float("nan")
-    )
-    calmar_bench = (
-        float(ann_bench / abs(mdd_bench))
-        if np.isfinite(mdd_bench) and mdd_bench < 0
         else float("nan")
     )
     m_strat = {
@@ -12877,98 +13006,125 @@ def compute_trend_portfolio_backtest(
         else float("nan"),
         "avg_daily_turnover": float(turnover.mean()) if len(turnover) else 0.0,
     }
-    m_bench = {
-        "cumulative_return": float(bench_nav.iloc[-1] - 1.0),
-        "annualized_return": float(ann_bench),
-        "annualized_volatility": float(
-            _annualized_vol(bench_ret, ann_factor=TRADING_DAYS_PER_YEAR)
-        ),
-        "max_drawdown": mdd_bench,
-        "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bench_nav)),
-        "sharpe_ratio": float(
-            _sharpe(
-                bench_ret,
-                rf=float(inp.risk_free_rate),
-                ann_factor=TRADING_DAYS_PER_YEAR,
-            )
-        ),
-        "calmar_ratio": calmar_bench,
-        "sortino_ratio": float(
-            _sortino(
-                bench_ret,
-                rf=float(inp.risk_free_rate),
-                ann_factor=TRADING_DAYS_PER_YEAR,
-            )
-        ),
-        "ulcer_index": float(ui_bench),
-        "ulcer_performance_index": float(ann_bench / (ui_bench / 100.0))
-        if ui_bench > 0
-        else float("nan"),
-    }
-    m_ex = {
-        "cumulative_return": float(ex_nav.iloc[-1] - 1.0),
-        "annualized_return": float(
-            _annualized_return(ex_nav, ann_factor=TRADING_DAYS_PER_YEAR)
-        ),
-        "information_ratio": float(
-            _information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)
-        ),
-    }
-    asset_ret_for_attribution = (
-        ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0)
-    )
-    weight_for_attribution = (
-        w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0)
-    )
-    cash_weight_attr = _cash_management_residual_weight(
-        weight_for_attribution.sum(axis=1).astype(float)
-    )
-    asset_ret_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
-        cash_ret.reindex(nav.index).astype(float).fillna(0.0)
-    )
-    weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
-        cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
-    )
-    # Keep attribution in net-return space by explicitly modeling risk overrides
-    # and trading costs as standalone components.
-    asset_ret_for_attribution[RISK_EXIT_PROXY_CODE] = (
-        decomp_risk_exit_override.reindex(nav.index).astype(float).fillna(0.0)
-    )
-    weight_for_attribution[RISK_EXIT_PROXY_CODE] = 1.0
-    asset_ret_for_attribution[TRADING_COST_PROXY_CODE] = (
-        -(cost.astype(float) + slippage.astype(float))
-        .reindex(nav.index)
-        .astype(float)
-        .fillna(0.0)
-    )
-    weight_for_attribution[TRADING_COST_PROXY_CODE] = 1.0
-    attribution = _compute_return_risk_contributions(
-        asset_ret=asset_ret_for_attribution,
-        weights=weight_for_attribution,
-        total_return=float(nav.iloc[-1] - 1.0),
-    )
-    (
-        cash_contrib_total,
-        cash_contrib_annualized,
-    ) = _extract_cash_management_return_contribution(attribution)
-    (
-        risk_exit_contrib_total,
-        risk_exit_contrib_annualized,
-    ) = _extract_return_contribution_by_code(attribution, code=RISK_EXIT_PROXY_CODE)
-    (
-        trading_cost_contrib_total,
-        trading_cost_contrib_annualized,
-    ) = _extract_return_contribution_by_code(attribution, code=TRADING_COST_PROXY_CODE)
-    m_strat["cash_management_proxy_code"] = str(CASH_MANAGEMENT_PROXY_CODE)
-    m_strat["cash_management_data_available"] = bool(cash_data_available)
-    m_strat["cash_management_return_contribution"] = cash_contrib_total
-    m_strat["cash_management_return_contribution_annualized"] = cash_contrib_annualized
-    m_strat["risk_exit_return_contribution"] = risk_exit_contrib_total
-    m_strat["risk_exit_return_contribution_annualized"] = risk_exit_contrib_annualized
-    m_strat["trading_cost_return_contribution"] = trading_cost_contrib_total
-    m_strat["trading_cost_return_contribution_annualized"] = (
-        trading_cost_contrib_annualized
-    )
+    m_bench: dict[str, Any] = {}
+    m_ex: dict[str, Any] = {}
+    ex_nav = pd.Series(1.0, index=nav.index, dtype=float)
+    if not search_minimal_mode:
+        active = (port_ret - bench_ret).astype(float)
+        ex_nav = (1.0 + active).cumprod()
+        if len(ex_nav) > 0:
+            ex_nav.iloc[0] = 1.0
+        ui_bench = float(_ulcer_index(bench_nav, in_percent=True))
+        ann_bench = float(
+            _annualized_return(bench_nav, ann_factor=TRADING_DAYS_PER_YEAR)
+        )
+        mdd_bench = float(_max_drawdown(bench_nav))
+        calmar_bench = (
+            float(ann_bench / abs(mdd_bench))
+            if np.isfinite(mdd_bench) and mdd_bench < 0
+            else float("nan")
+        )
+        m_bench = {
+            "cumulative_return": float(bench_nav.iloc[-1] - 1.0),
+            "annualized_return": float(ann_bench),
+            "annualized_volatility": float(
+                _annualized_vol(bench_ret, ann_factor=TRADING_DAYS_PER_YEAR)
+            ),
+            "max_drawdown": mdd_bench,
+            "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bench_nav)),
+            "sharpe_ratio": float(
+                _sharpe(
+                    bench_ret,
+                    rf=float(inp.risk_free_rate),
+                    ann_factor=TRADING_DAYS_PER_YEAR,
+                )
+            ),
+            "calmar_ratio": calmar_bench,
+            "sortino_ratio": float(
+                _sortino(
+                    bench_ret,
+                    rf=float(inp.risk_free_rate),
+                    ann_factor=TRADING_DAYS_PER_YEAR,
+                )
+            ),
+            "ulcer_index": float(ui_bench),
+            "ulcer_performance_index": float(ann_bench / (ui_bench / 100.0))
+            if ui_bench > 0
+            else float("nan"),
+        }
+        m_ex = {
+            "cumulative_return": float(ex_nav.iloc[-1] - 1.0),
+            "annualized_return": float(
+                _annualized_return(ex_nav, ann_factor=TRADING_DAYS_PER_YEAR)
+            ),
+            "information_ratio": float(
+                _information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)
+            ),
+        }
+    if not search_minimal_mode:
+        asset_ret_for_attribution = (
+            ret_exec_day.reindex(index=nav.index, columns=codes)
+            .astype(float)
+            .fillna(0.0)
+        )
+        weight_for_attribution = (
+            w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0)
+        )
+        cash_weight_attr = _cash_management_residual_weight(
+            weight_for_attribution.sum(axis=1).astype(float)
+        )
+        asset_ret_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
+            cash_ret.reindex(nav.index).astype(float).fillna(0.0)
+        )
+        weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
+            cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
+        )
+        # Keep attribution in net-return space by explicitly modeling risk
+        # overrides and trading costs as standalone components.
+        asset_ret_for_attribution[RISK_EXIT_PROXY_CODE] = (
+            decomp_risk_exit_override.reindex(nav.index).astype(float).fillna(0.0)
+        )
+        weight_for_attribution[RISK_EXIT_PROXY_CODE] = 1.0
+        asset_ret_for_attribution[TRADING_COST_PROXY_CODE] = (
+            -(cost.astype(float) + slippage.astype(float))
+            .reindex(nav.index)
+            .astype(float)
+            .fillna(0.0)
+        )
+        weight_for_attribution[TRADING_COST_PROXY_CODE] = 1.0
+        attribution = _compute_return_risk_contributions(
+            asset_ret=asset_ret_for_attribution,
+            weights=weight_for_attribution,
+            total_return=float(nav.iloc[-1] - 1.0),
+        )
+        (
+            cash_contrib_total,
+            cash_contrib_annualized,
+        ) = _extract_cash_management_return_contribution(attribution)
+        (
+            risk_exit_contrib_total,
+            risk_exit_contrib_annualized,
+        ) = _extract_return_contribution_by_code(attribution, code=RISK_EXIT_PROXY_CODE)
+        (
+            trading_cost_contrib_total,
+            trading_cost_contrib_annualized,
+        ) = _extract_return_contribution_by_code(
+            attribution, code=TRADING_COST_PROXY_CODE
+        )
+        m_strat["cash_management_proxy_code"] = str(CASH_MANAGEMENT_PROXY_CODE)
+        m_strat["cash_management_data_available"] = bool(cash_data_available)
+        m_strat["cash_management_return_contribution"] = cash_contrib_total
+        m_strat["cash_management_return_contribution_annualized"] = (
+            cash_contrib_annualized
+        )
+        m_strat["risk_exit_return_contribution"] = risk_exit_contrib_total
+        m_strat["risk_exit_return_contribution_annualized"] = (
+            risk_exit_contrib_annualized
+        )
+        m_strat["trading_cost_return_contribution"] = trading_cost_contrib_total
+        m_strat["trading_cost_return_contribution_annualized"] = (
+            trading_cost_contrib_annualized
+        )
     trade_pack = _trade_returns_from_weight_df(
         w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
         ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
@@ -13033,6 +13189,121 @@ def compute_trend_portfolio_backtest(
     r_stats_out = dict(trade_r_pack.get("statistics") or {})
     r_stats_out.pop("trade_system_score", None)
     trades_with_r = list(trade_r_pack.get("trades") or [])
+    if search_minimal_mode:
+
+        def _finite_float_or_none(x: Any) -> float | None:
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                return None
+            if not np.isfinite(v):
+                return None
+            return float(v)
+
+        returns_by_code = dict(trade_pack.get("returns_by_code") or {})
+        trade_stats_overall_full = _trade_stats_from_returns(
+            trade_pack.get("returns", []),
+            risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+        )
+        trade_stats_by_code_full = {
+            str(c): _trade_stats_from_returns(
+                returns_by_code.get(str(c), []),
+                risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+            )
+            for c in codes
+        }
+        sqn_block = (
+            (((r_stats_out or {}).get("overall") or {}).get("sqn") or {})
+            if isinstance(r_stats_out, dict)
+            else {}
+        )
+        trades_min: list[dict[str, Any]] = []
+        for tr in trades_with_r:
+            if not isinstance(tr, dict):
+                continue
+            code_key = str(tr.get("code") or "")
+            row = {
+                "code": code_key,
+                "entry_date": tr.get("entry_date"),
+                "exit_date": tr.get("exit_date"),
+                "r_multiple": _finite_float_or_none(tr.get("r_multiple")),
+            }
+            trades_min.append(row)
+        untradable_codes_skipped = list(
+            dict.fromkeys(
+                [
+                    str(c)
+                    for c in codes
+                    if (c not in asset_data_available.columns)
+                    or (not bool(asset_data_available[c].astype(bool).any()))
+                ]
+            )
+        )
+        return {
+            "meta": {
+                "type": "trend_portfolio_backtest",
+                "mode": "search_minimal",
+                "codes": codes,
+                "untradable_codes_skipped": untradable_codes_skipped,
+                "start": inp.start.strftime("%Y%m%d"),
+                "end": inp.end.strftime("%Y%m%d"),
+                "strategy": strat,
+                "strategy_execution_description": (
+                    TREND_STRATEGY_EXECUTION_DESCRIPTIONS.get(strat, "")
+                ),
+                "params": {
+                    "quick_mode": bool(quick_mode),
+                    "search_minimal_mode": True,
+                    "exec_price": str(ep),
+                    "position_sizing": str(ps),
+                    "risk_budget_pct": float(risk_budget_pct),
+                    "mom_lookback": int(inp.mom_lookback),
+                    "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
+                    "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),
+                    "er_filter": bool(er_filter),
+                    "er_window": int(er_window),
+                    "er_threshold": float(er_threshold),
+                },
+            },
+            "nav": {
+                "dates": nav.index.date.astype(str).tolist(),
+                "series": {
+                    "STRAT": nav.astype(float).tolist(),
+                },
+            },
+            "metrics": {"strategy": m_strat},
+            "trade_statistics": {
+                "all": {"n": len(trades_min)},
+                "overall": {
+                    "kelly_ex_zero": (trade_stats_overall_full.get("kelly_ex_zero"))
+                },
+                "by_code": {
+                    str(c): {
+                        "kelly_ex_zero": (
+                            (trade_stats_by_code_full.get(str(c)) or {}).get(
+                                "kelly_ex_zero"
+                            )
+                        )
+                    }
+                    for c in codes
+                },
+                "trades": trades_min,
+            },
+            "r_statistics": {
+                "overall": {
+                    "sqn": {
+                        "sqn": sqn_block.get("sqn"),
+                        "applicable": sqn_block.get("applicable"),
+                        "reason": sqn_block.get("reason"),
+                        "trade_count_total": sqn_block.get("trade_count_total"),
+                        "trade_count_used": sqn_block.get("trade_count_used"),
+                        "min_trades": sqn_block.get("min_trades"),
+                    }
+                }
+            },
+            "return_decomposition": None,
+            "event_study": None,
+        }
     if not quick_mode:
         condition_bins_by_code: dict[str, dict[str, pd.Series]] = {}
         for c in codes:
@@ -14217,6 +14488,7 @@ def compute_trend_portfolio_backtest(
                 "er_exit_window": int(er_exit_window),
                 "er_exit_threshold": float(er_exit_threshold),
                 "quick_mode": bool(quick_mode),
+                "search_minimal_mode": bool(search_minimal_mode),
                 "ma_type": ma_type,
                 "kama_er_window": int(kama_er_window),
                 "kama_fast_window": int(kama_fast_window),

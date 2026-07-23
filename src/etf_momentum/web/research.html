@@ -22078,8 +22078,18 @@
               signif_horizon_days: hs,
             }),
           });
-          cache[key] = res;
-          return res;
+          const text = await res.text();
+          if (!res.ok) {
+            throw new Error(text || `HTTP ${res.status}`);
+          }
+          let data = null;
+          try {
+            data = JSON.parse(text);
+          } catch (_e) {
+            throw new Error("截面动量接口返回了无法解析的JSON");
+          }
+          cache[key] = data;
+          return data;
         };
         const _renderMomentumContribution = async ({
           code,

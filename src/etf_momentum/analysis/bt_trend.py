@@ -1287,7 +1287,16 @@ def _risk_of_ruin_probability(
         return None
     base = (1.0 - p) / p
     exp = mr / a
-    raw = float(base**exp)
+    # Compute in log-domain to avoid OverflowError for large exponents.
+    log_raw = float(exp * np.log(base))
+    if not np.isfinite(log_raw):
+        return None
+    if log_raw >= 0.0:
+        # raw >= 1.0, and final clipping saturates to probability 1.
+        return 1.0
+    if log_raw <= float(np.log(np.finfo(float).tiny)):
+        return 0.0
+    raw = float(np.exp(log_raw))
     if not np.isfinite(raw):
         return None
     return float(np.clip(raw, 0.0, 1.0))
