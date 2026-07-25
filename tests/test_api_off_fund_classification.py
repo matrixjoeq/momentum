@@ -138,6 +138,9 @@ def test_api_off_fund_classify_cn_stock_profile(api_client: TestClient) -> None:
     assert by_code["FUND2"]["avg_r2"] > 0.2
     assert "A股" in str(by_code["FUND1"]["label"])
     assert "A股" in str(by_code["FUND2"]["label"])
+    assert "unattributed" in by_code["FUND1"]["avg_exposures"]
+    assert "residual" not in by_code["FUND1"]["avg_exposures"]
+    assert "cash" not in by_code["FUND1"]["avg_exposures"]
 
 
 def test_api_off_fund_classify_drops_short_history_factor(
@@ -236,3 +239,54 @@ def test_api_off_fund_classify_returns_error_when_benchmark_empty(
     out = resp.json()
     assert out["ok"] is False
     assert out["error"] == "empty_benchmark_series"
+
+
+def test_api_off_fund_classify_includes_portfolio_series(
+    api_client: TestClient,
+) -> None:
+    start, end = _seed_classification_fixture(api_client)
+    engine = api_client.app.state.engine
+    sf = make_session_factory(engine)
+    with sf() as db:
+        rows = (
+            db.query(EtfPrice)
+            .filter(EtfPrice.code == "000300", EtfPrice.adjust == "hfq")
+            .order_by(EtfPrice.trade_date.asc())
+            .all()
+        )
+    portfolio_nav_series = [
+        {"trade_date": r.trade_date.isoformat(), "nav": float(r.close or 0.0)}
+        for r in rows
+        if r.trade_date is not None and r.close is not None and float(r.close) > 0.0
+    ]
+    resp = api_client.post(
+        "/api/analysis/off-fund/classify",
+        json={
+            "codes": ["FUND1"],
+            "start": start,
+            "end": end,
+            "fund_adjust": "hfq",
+            "benchmark_adjust": "hfq",
+            "benchmark_profile": "cn_stock_core",
+            "rolling_window": 252,
+            "min_samples": 120,
+            "dominance_gap": 0.08,
+            "include_exposure_series": True,
+            "include_portfolio": True,
+            "portfolio_code": "__PORTFOLIO__",
+            "portfolio_name": "组合净值",
+            "portfolio_nav_series": portfolio_nav_series,
+        },
+    )
+    assert resp.status_code == 200
+    out = resp.json()
+    assert out["ok"] is True
+    assert int((out.get("meta") or {}).get("analyzed_codes") or -1) == 1
+    assert int((out.get("meta") or {}).get("analyzed_funds") or -1) == 1
+    assert bool((out.get("meta") or {}).get("analyzed_portfolio")) is True
+    by_code = {x["code"]: x for x in out["items"]}
+    assert "FUND1" in by_code
+    assert "__PORTFOLIO__" in by_code
+    assert by_code["__PORTFOLIO__"]["name"] == "组合净值"
+    assert by_code["__PORTFOLIO__"]["sample_days"] > 0
+    assert len(by_code["__PORTFOLIO__"]["exposure_series"]) > 0

@@ -234,6 +234,10 @@
           <label>均衡判定阈值(top1-top2)</label>
           <input id="offClsGap" value="0.08" />
         </div>
+        <label style="display: flex; align-items: center; gap: 6px; margin: 0">
+          <input id="offClsIncludePortfolio" type="checkbox" checked />
+          <span>包含组合净值归因</span>
+        </label>
         <button id="offClsCheckFactors">检查因子历史覆盖</button>
         <button id="runCls">运行基金分类回归</button>
       </div>
@@ -254,11 +258,43 @@
       <table id="offClsFactorTable"></table>
       <div class="muted" style="margin-top: 6px">本次回归实际生效因子</div>
       <table id="offClsActiveFactors"></table>
-      <div class="muted" style="margin-top: 10px">
-        基准对比图（默认：CSI300 对其余内置基准，口径均为 hfq close）
-      </div>
-      <div id="offClsPairCards" class="two" style="margin-top: 8px"></div>
+      <details class="panel" style="margin-top: 10px">
+        <summary>
+          <h4 style="display: inline; margin: 0">基准对比图（默认折叠）</h4>
+        </summary>
+        <div class="muted" style="margin-top: 8px">
+          默认：CSI300 对其余内置基准，口径均为 hfq close
+        </div>
+        <div id="offClsPairCards" class="two" style="margin-top: 8px"></div>
+      </details>
       <table id="offClsTable"></table>
+      <div class="muted" style="margin-top: 6px">
+        口径说明：未归因项=在当前因子模板下无法归因的权重部分，不等同于完整因子空间下的统计残差。
+      </div>
+      <div class="muted" style="margin-top: 10px">
+        因子日度占比变化（按当前回归设置；仅展示本次回归有有效序列的基金）
+      </div>
+      <div class="row" style="margin-top: 6px">
+        <div>
+          <label>基金选择</label>
+          <select id="offClsExposureCode" style="min-width: 220px"></select>
+        </div>
+        <div>
+          <label>时间范围</label>
+          <select id="offClsExposureRange" style="min-width: 180px">
+            <option value="1y">近一年</option>
+            <option value="3y">近三年</option>
+            <option value="5y">近五年</option>
+            <option value="10y">近十年</option>
+            <option value="all" selected>全部</option>
+          </select>
+        </div>
+      </div>
+      <div
+        id="offClsExposureChart"
+        style="width: 100%; height: 360px; margin-top: 8px"
+      ></div>
+      <table id="offClsExposureStats" style="margin-top: 8px"></table>
     </div>
     <div class="panel">
       <h3 style="margin: 0 0 6px 0">市场状态划分（统一前端模块）</h3>
@@ -717,6 +753,11 @@
       let offParamPersistTimer = null;
       let offParamPersistPayload = "";
       let offParamHydrating = false;
+      let offClsLastRows = [];
+      let offClsLastFactorLabelByKey = {};
+      let offClsLastFactorOrder = [];
+      let offClsExposureSelectedCode = "";
+      let offClsExposureRangeKey = "all";
       const pageSize = 12;
       const offPeriodState = {
         weekly: { page: 1, rows: [] },
@@ -834,6 +875,11 @@
       let OFF_FUND_PAIR_CARD_IDS = [];
       let OFF_FUND_PAIR_DEFAULT_PREFS = {};
       const OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID = "pair_slot_extra_01";
+      const OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID_2 = "pair_slot_extra_02";
+      const OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_IDS = [
+        OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID,
+        OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID_2,
+      ];
       function _rebuildOffFundPairUniverseDerived() {
         OFF_FUND_PAIR_UNIVERSE_BY_KEY = Object.fromEntries(
           OFF_FUND_PAIR_UNIVERSE.map((x) => [x.key, x]),
@@ -849,7 +895,7 @@
         );
         OFF_FUND_PAIR_CARD_IDS = [
           ...autoCardIds,
-          OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID,
+          ...OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_IDS,
         ];
         OFF_FUND_PAIR_DEFAULT_PREFS = Object.fromEntries(
           autoCardIds.map((cardId, idx) => [
@@ -857,10 +903,12 @@
             { base: "CSI300", peer: OFF_FUND_PAIR_DEFAULT_PEERS[idx] },
           ]),
         );
-        OFF_FUND_PAIR_DEFAULT_PREFS[OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID] = {
-          base: "",
-          peer: "",
-        };
+        for (const cardId of OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_IDS) {
+          OFF_FUND_PAIR_DEFAULT_PREFS[cardId] = {
+            base: "",
+            peer: "",
+          };
+        }
       }
       function _normalizeOffFundPairUniverse(rows) {
         const out = [];
@@ -1034,8 +1082,14 @@
         for (const cardId of OFF_FUND_PAIR_CARD_IDS) {
           const baseSel = $(`${cardId}_base`);
           const peerSel = $(`${cardId}_peer`);
-          if (baseSel) baseSel.value = String(offPairPrefsByCard[cardId].base);
-          if (peerSel) peerSel.value = String(offPairPrefsByCard[cardId].peer);
+          const pref = {
+            base: "",
+            peer: "",
+            ...(OFF_FUND_PAIR_DEFAULT_PREFS[cardId] || {}),
+            ...(offPairPrefsByCard[cardId] || {}),
+          };
+          if (baseSel) baseSel.value = String(pref.base || "");
+          if (peerSel) peerSel.value = String(pref.peer || "");
         }
         if (saveLocal) persistOffFundPairPrefsLocal();
       }
@@ -1061,8 +1115,12 @@
         const host = $("offClsPairCards");
         if (!host) return;
         host.innerHTML = OFF_FUND_PAIR_CARD_IDS.map((cardId, idx) => {
-          const pref =
-            offPairPrefsByCard[cardId] || OFF_FUND_PAIR_DEFAULT_PREFS[cardId];
+          const pref = {
+            base: "",
+            peer: "",
+            ...(OFF_FUND_PAIR_DEFAULT_PREFS[cardId] || {}),
+            ...(offPairPrefsByCard[cardId] || {}),
+          };
           const baseKey = String(pref.base != null ? pref.base : "CSI300");
           const peerKey = String(
             pref.peer != null
@@ -1452,6 +1510,7 @@
             diff40: [],
             diff40Ma242: [],
             rsi14: [],
+            rsi14Ma242: [],
           };
         }
         const base0 = Number(baseClose[0]);
@@ -1473,6 +1532,7 @@
             diff40: [],
             diff40Ma242: [],
             rsi14: [],
+            rsi14Ma242: [],
           };
         }
         const normBase = baseClose.map((x) => Number(x) / base0);
@@ -1518,6 +1578,7 @@
         }
         const diff40Ma242 = _rollingMean(diff40, 242);
         const rsi14 = _computeRsi14(ratio);
+        const rsi14Ma242 = _rollingMean(rsi14, 242);
         return {
           dates,
           normBase,
@@ -1529,6 +1590,7 @@
           diff40,
           diff40Ma242,
           rsi14,
+          rsi14Ma242,
         };
       }
       function _deriveOffFundPairStatus({
@@ -1565,6 +1627,7 @@
           "bb_upper",
           "bb_lower",
           "diff40_ma242",
+          "rsi14_ma242",
         ];
         const enabled = new Set();
         if (n >= 2) {
@@ -1578,6 +1641,7 @@
           enabled.add("ratio_ma242");
           enabled.add("bb_upper");
           enabled.add("bb_lower");
+          enabled.add("rsi14_ma242");
         }
         if (n >= 282) enabled.add("diff40_ma242");
         if (n <= 1) enabled.clear();
@@ -1605,6 +1669,12 @@
             y: metrics.rsi14,
             name: "RSI14(比值)",
             line: { width: 1.4, color: "#aed581" },
+          },
+          rsi14_ma242: {
+            row: 4,
+            y: metrics.rsi14Ma242,
+            name: "RSI14 MA242",
+            line: { width: 1.2, dash: "dot", color: "#8bc34a" },
           },
           diff40: {
             row: 3,
@@ -3207,6 +3277,23 @@
             (persistentGroups[nm] || []).filter((c) => allCodes.includes(c)),
           );
         }
+        if (!persistentGroups[DEFAULT_PERSISTENT_GROUP]) {
+          persistentGroups[DEFAULT_PERSISTENT_GROUP] = [];
+        }
+        // Auto-merge only newly introduced pool codes into the default group.
+        // Custom groups remain fully user-managed.
+        const assigned = new Set();
+        for (const nm of Object.keys(persistentGroups)) {
+          for (const code of persistentGroups[nm] || [])
+            assigned.add(String(code));
+        }
+        const unassigned = allCodes.filter((c) => !assigned.has(c));
+        if (unassigned.length) {
+          persistentGroups[DEFAULT_PERSISTENT_GROUP] = validCodes([
+            ...(persistentGroups[DEFAULT_PERSISTENT_GROUP] || []),
+            ...unassigned,
+          ]);
+        }
         activePersistentGroup = ensurePersistentGroupExists(
           activePersistentGroup,
         );
@@ -3243,22 +3330,265 @@
           )
           .map((it) => String(it.code || ""));
       }
+      function _buildOffClsBacktestSignature({
+        picked,
+        start,
+        end,
+        adjust,
+        innerMode,
+        rpWindow,
+        rebalanceCycle,
+        driftRebalanceEnabled,
+        driftAbsThreshold,
+        driftRelThreshold,
+        assetGroupsText,
+        groupWeightsText,
+        innerCustomWeightsText,
+      }) {
+        const payload = {
+          picked: Array.from(
+            new Set((picked || []).map((x) => String(x || ""))),
+          )
+            .filter(Boolean)
+            .sort(),
+          start: String(start || ""),
+          end: String(end || ""),
+          adjust: String(adjust || "hfq"),
+          inner_mode: String(innerMode || "risk_parity_cov"),
+          rp_window: Number(rpWindow),
+          rebalance_cycle: String(rebalanceCycle || "daily"),
+          drift_rebalance_enabled: Boolean(driftRebalanceEnabled),
+          drift_abs_threshold: Number(driftAbsThreshold),
+          drift_rel_threshold: Number(driftRelThreshold),
+          asset_groups_text: String(assetGroupsText || "").trim(),
+          group_weights_text: String(groupWeightsText || "").trim(),
+          inner_custom_weights_text: String(
+            innerCustomWeightsText || "",
+          ).trim(),
+        };
+        return JSON.stringify(payload);
+      }
       function summarizeExposure(exposures, factorLabelByKey) {
         const arr = Object.entries(exposures || {})
-          .filter(
-            ([k, v]) =>
-              String(k || "").toLowerCase() !== "cash" &&
-              Number.isFinite(Number(v)),
-          )
-          .sort((a, b) => Number(b[1]) - Number(a[1]))
-          .slice(0, 3);
+          .filter(([, v]) => Number.isFinite(Number(v)))
+          .sort((a, b) => Number(b[1]) - Number(a[1]));
         if (!arr.length) return "-";
         return arr
           .map(
             ([k, v]) =>
-              `${esc(factorLabelByKey[String(k)] || String(k))}:${fmtPct(Number(v))}`,
+              `${esc(_offClsExposureLabel(k, factorLabelByKey))}:${fmtPct(Number(v))}`,
           )
           .join("，");
+      }
+      function _offClsExposureLabel(key, factorLabelByKey) {
+        const k = String(key || "").trim();
+        const low = k.toLowerCase();
+        if (low === "unattributed" || low === "residual" || low === "cash")
+          return "未归因项";
+        return String((factorLabelByKey && factorLabelByKey[k]) || k);
+      }
+      function _clearClsExposurePanel(msg) {
+        const sel = $("offClsExposureCode");
+        if (sel) sel.innerHTML = `<option value="">(无可用基金)</option>`;
+        const chart = $("offClsExposureChart");
+        if (chart) {
+          chart.innerHTML = `<div class="muted" style="padding-top: 8px">${esc(String(msg || "暂无可用序列"))}</div>`;
+        }
+        const stats = $("offClsExposureStats");
+        if (stats) stats.innerHTML = "";
+      }
+      function _filterClsExposureSeriesByRange(points, rangeKey) {
+        const arr = Array.isArray(points) ? points : [];
+        if (!arr.length) return [];
+        const key = String(rangeKey || "all")
+          .trim()
+          .toLowerCase();
+        const years =
+          key === "1y"
+            ? 1
+            : key === "3y"
+              ? 3
+              : key === "5y"
+                ? 5
+                : key === "10y"
+                  ? 10
+                  : 0;
+        if (!years) return arr.slice();
+        const lastDate = String(
+          (arr[arr.length - 1] && arr[arr.length - 1].trade_date) || "",
+        );
+        const end = new Date(`${lastDate}T00:00:00`);
+        if (!Number.isFinite(end.getTime())) return arr.slice();
+        const start = new Date(end.getTime());
+        start.setFullYear(start.getFullYear() - years);
+        return arr.filter((p) => {
+          const d = new Date(`${String((p && p.trade_date) || "")}T00:00:00`);
+          return Number.isFinite(d.getTime()) && d >= start && d <= end;
+        });
+      }
+      function _renderClsExposureChartByCode(code) {
+        const rows = Array.isArray(offClsLastRows) ? offClsLastRows : [];
+        const row =
+          rows.find(
+            (x) => String((x && x.code) || "") === String(code || ""),
+          ) || null;
+        const pointsRaw = Array.isArray(row && row.exposure_series)
+          ? row.exposure_series
+          : [];
+        const points = _filterClsExposureSeriesByRange(
+          pointsRaw,
+          offClsExposureRangeKey,
+        );
+        if (!row || !points.length) {
+          const chart = $("offClsExposureChart");
+          if (chart) {
+            chart.innerHTML = `<div class="muted" style="padding-top: 8px">${esc("当前时间范围下无可用日度因子占比序列。")}</div>`;
+          }
+          const stats = $("offClsExposureStats");
+          if (stats) stats.innerHTML = "";
+          return;
+        }
+        const factorOrder = Array.isArray(offClsLastFactorOrder)
+          ? offClsLastFactorOrder
+          : [];
+        const fallbackKeys = Object.keys(
+          (points[0] && points[0].exposures) || {},
+        );
+        const extraKeys = fallbackKeys.filter((k) => !factorOrder.includes(k));
+        const keys = factorOrder.concat(extraKeys);
+        const isResidualLike = (k) => {
+          const low = String(k || "").toLowerCase();
+          return low === "unattributed" || low === "residual" || low === "cash";
+        };
+        const orderedKeys = keys
+          .filter((k) => !isResidualLike(k))
+          .concat(keys.filter((k) => isResidualLike(k)));
+        const pointsDense = points.filter((p) =>
+          orderedKeys.some((k) =>
+            Number.isFinite(Number(p && p.exposures && p.exposures[k])),
+          ),
+        );
+        if (!pointsDense.length) {
+          const chart = $("offClsExposureChart");
+          if (chart) {
+            chart.innerHTML = `<div class="muted" style="padding-top: 8px">${esc("当前时间范围下全部日期均无有效因子占比数据。")}</div>`;
+          }
+          const stats = $("offClsExposureStats");
+          if (stats) stats.innerHTML = "";
+          return;
+        }
+        const dates = pointsDense.map((p) => String((p && p.trade_date) || ""));
+        const traces = orderedKeys.map((k) => {
+          const trace = {
+            type: "bar",
+            name: _offClsExposureLabel(k, offClsLastFactorLabelByKey),
+            x: dates,
+            y: pointsDense.map((p) => {
+              const v = Number((p && p.exposures && p.exposures[k]) || NaN);
+              return Number.isFinite(v) ? v : null;
+            }),
+            hovertemplate: `%{x}<br>${esc(_offClsExposureLabel(k, offClsLastFactorLabelByKey))}: %{y:.2%}<extra></extra>`,
+          };
+          if (isResidualLike(k)) {
+            trace.marker = { color: "#90a4ae", opacity: 0.75 };
+          }
+          return trace;
+        });
+        const plotTheme = _offFundPairPlotThemeTokens();
+        const chartId = "offClsExposureChart";
+        ensurePlotlyLoaded()
+          .then(() =>
+            window.Plotly.newPlot(
+              chartId,
+              traces,
+              {
+                margin: { t: 30, b: 120 },
+                paper_bgcolor: plotTheme.plotBg,
+                plot_bgcolor: plotTheme.plotBg,
+                font: { color: plotTheme.plotFg },
+                title: `${esc(row.code || "-")} ${esc(row.name || "")} · 日度因子占比`,
+                legend: { orientation: "h", y: -0.5 },
+                yaxis: {
+                  title: "占比",
+                  tickformat: ".0%",
+                  gridcolor: plotTheme.plotGrid,
+                  linecolor: plotTheme.plotGrid,
+                  zerolinecolor: plotTheme.plotGrid,
+                },
+                xaxis: {
+                  title: "日期",
+                  type: "category",
+                  gridcolor: plotTheme.plotGrid,
+                  linecolor: plotTheme.plotGrid,
+                  zerolinecolor: plotTheme.plotGrid,
+                },
+                barmode: "stack",
+                bargap: 0,
+              },
+              { responsive: true, displaylogo: false },
+            ),
+          )
+          .catch((e) => {
+            const chart = $(chartId);
+            if (chart) {
+              chart.innerHTML = `<div class="muted" style="padding-top: 8px">${esc(String((e && e.message) || e || "绘图失败"))}</div>`;
+            }
+          });
+        const latest = pointsDense[pointsDense.length - 1] || null;
+        const latestTxt = orderedKeys
+          .map((k) => {
+            const v = Number(
+              (latest && latest.exposures && latest.exposures[k]) || NaN,
+            );
+            if (!Number.isFinite(v)) return "";
+            return `${esc(_offClsExposureLabel(k, offClsLastFactorLabelByKey))}:${fmtPct(v)}`;
+          })
+          .filter(Boolean)
+          .join("，");
+        const stats = $("offClsExposureStats");
+        if (stats) {
+          stats.innerHTML =
+            "<tr><th>指标</th><th>值</th></tr>" +
+            `<tr><td>样本点数</td><td>${pointsDense.length}</td></tr>` +
+            `<tr><td>起止日期</td><td>${esc(dates[0] || "-")} ~ ${esc(dates[dates.length - 1] || "-")}</td></tr>` +
+            `<tr><td>最新一期占比</td><td>${latestTxt || "-"}</td></tr>`;
+        }
+      }
+      function renderClsExposurePanel(rows, factorLabelByKey, factorOrder) {
+        offClsLastRows = Array.isArray(rows) ? rows : [];
+        offClsLastFactorLabelByKey =
+          factorLabelByKey && typeof factorLabelByKey === "object"
+            ? factorLabelByKey
+            : {};
+        offClsLastFactorOrder = Array.isArray(factorOrder) ? factorOrder : [];
+        const usable = offClsLastRows.filter(
+          (x) =>
+            Array.isArray(x && x.exposure_series) &&
+            x.exposure_series.length > 0,
+        );
+        if (!usable.length) {
+          offClsExposureSelectedCode = "";
+          _clearClsExposurePanel("本次回归无可用日度因子占比序列。");
+          return;
+        }
+        const sel = $("offClsExposureCode");
+        if (!sel) return;
+        const keep =
+          offClsExposureSelectedCode &&
+          usable.some(
+            (x) => String((x && x.code) || "") === offClsExposureSelectedCode,
+          )
+            ? offClsExposureSelectedCode
+            : String((usable[0] && usable[0].code) || "");
+        offClsExposureSelectedCode = keep;
+        sel.innerHTML = usable
+          .map((x) => {
+            const c = String((x && x.code) || "");
+            const n = String((x && x.name) || "");
+            return `<option value="${esc(c)}" ${c === keep ? "selected" : ""}>${esc(c)} ${esc(n)}</option>`;
+          })
+          .join("");
+        _renderClsExposureChartByCode(keep);
       }
       function factorsTextFromList(factors) {
         const arr = Array.isArray(factors) ? factors : [];
@@ -3543,6 +3873,91 @@
           0,
           Math.min(1, Number(String($("offClsGap").value || "0.08").trim())),
         );
+        const adjust = String(($("adjust").value || "hfq").trim() || "hfq");
+        const innerMode = String(
+          ($("innerMode").value || "risk_parity_cov").trim(),
+        );
+        const rpWindow = Math.max(
+          20,
+          Math.floor(Number(String($("rpWindow").value || "60").trim())),
+        );
+        const rebalanceCycle = String(
+          ($("rebalanceCycle") && $("rebalanceCycle").value) || "daily",
+        );
+        const driftRebalanceEnabled =
+          String(
+            ($("driftRebalanceEnabled") && $("driftRebalanceEnabled").value) ||
+              "1",
+          ) !== "0";
+        const driftAbsThreshold = Math.max(
+          0,
+          Number(
+            (
+              ($("driftAbsThreshold") && $("driftAbsThreshold").value) ||
+              "0.05"
+            ).trim(),
+          ),
+        );
+        const driftRelThreshold = Math.max(
+          0,
+          Number(
+            (
+              ($("driftRelThreshold") && $("driftRelThreshold").value) ||
+              "0.25"
+            ).trim(),
+          ),
+        );
+        const currentBacktestSig = _buildOffClsBacktestSignature({
+          picked,
+          start,
+          end,
+          adjust,
+          innerMode,
+          rpWindow,
+          rebalanceCycle,
+          driftRebalanceEnabled,
+          driftAbsThreshold,
+          driftRelThreshold,
+          assetGroupsText: String(
+            ($("assetGroups") && $("assetGroups").value) || "",
+          ),
+          groupWeightsText: String(
+            ($("groupWeights") && $("groupWeights").value) || "",
+          ),
+          innerCustomWeightsText: String(
+            ($("innerCustomWeights") && $("innerCustomWeights").value) || "",
+          ),
+        });
+        const includePortfolio = Boolean(
+          $("offClsIncludePortfolio") && $("offClsIncludePortfolio").checked,
+        );
+        const portfolioCtxReady = Boolean(
+          lastCtx &&
+          Array.isArray(lastCtx.datesRet) &&
+          Array.isArray(lastCtx.nav) &&
+          lastCtx.datesRet.length === lastCtx.nav.length &&
+          String(lastCtx.backtestSig || "") === currentBacktestSig,
+        );
+        const portfolioSeries =
+          includePortfolio &&
+          portfolioCtxReady &&
+          Array.isArray(lastCtx.datesRet) &&
+          Array.isArray(lastCtx.nav) &&
+          lastCtx.datesRet.length === lastCtx.nav.length
+            ? lastCtx.datesRet
+                .map((d, i) => ({
+                  trade_date: String(d || ""),
+                  nav: Number(lastCtx.nav[i]),
+                }))
+                .filter(
+                  (x) =>
+                    String(x.trade_date || "").trim() &&
+                    Number.isFinite(Number(x.nav)) &&
+                    Number(x.nav) > 0,
+                )
+            : [];
+        const portfolioEnabled =
+          includePortfolio && portfolioSeries.length >= 2;
         let factorAvail = null;
         try {
           factorAvail = await checkClsFactorAvailability({ quiet: true });
@@ -3590,7 +4005,12 @@
               rolling_window: rollingWindow,
               min_samples: minSamples,
               dominance_gap: gap,
-              include_exposure_series: false,
+              include_exposure_series: true,
+              max_series_points: 2000,
+              include_portfolio: portfolioEnabled,
+              portfolio_code: "__PORTFOLIO__",
+              portfolio_name: "组合净值",
+              portfolio_nav_series: portfolioSeries,
             }),
           });
           const txt = await resp.text();
@@ -3622,7 +4042,7 @@
         }
         const rows = Array.isArray(out.items) ? out.items : [];
         $("offClsTable").innerHTML =
-          `<tr><th>代码</th><th>名称</th><th>分类标签</th><th>置信度</th><th>平均R²</th><th>最新R²</th><th>主导暴露(Top3)</th><th>状态/告警</th></tr>` +
+          `<tr><th>代码</th><th>名称</th><th>分类标签</th><th>置信度</th><th>平均R²</th><th>最新R²</th><th>主导暴露(全部成分)</th><th>状态/告警</th></tr>` +
           (rows.length
             ? rows
                 .map((x) => {
@@ -3637,9 +4057,23 @@
                 })
                 .join("")
             : `<tr><td colspan="8" class="muted">暂无结果</td></tr>`);
+        renderClsExposurePanel(
+          rows,
+          factorLabelByKey,
+          (Array.isArray(out.factors) ? out.factors : [])
+            .map((f) => String((f && f.key) || "").trim())
+            .filter(Boolean),
+        );
         const okN = rows.filter((x) => String(x.status || "") === "ok").length;
         setMsg(
-          `分类回归完成：请求${picked.length}只，成功${okN}只，失败/未分类${picked.length - okN}只。`,
+          `分类回归完成：请求${picked.length}只${portfolioEnabled ? " + 组合净值" : ""}，成功${okN}只，失败/未分类${rows.length - okN}只。` +
+            (includePortfolio && !portfolioEnabled
+              ? `（组合净值未启用：${
+                  portfolioCtxReady
+                    ? "请先运行持有策略回测以生成组合净值序列"
+                    : "当前回归参数/区间与最近一次回测不一致，请先重跑持有策略回测"
+                }）`
+              : ""),
         );
       }
 
@@ -3681,6 +4115,27 @@
           20,
           Math.floor(Number(String($("rpWindow").value || "60").trim())),
         );
+        const backtestSig = _buildOffClsBacktestSignature({
+          picked,
+          start,
+          end,
+          adjust,
+          innerMode,
+          rpWindow,
+          rebalanceCycle,
+          driftRebalanceEnabled,
+          driftAbsThreshold,
+          driftRelThreshold,
+          assetGroupsText: String(
+            ($("assetGroups") && $("assetGroups").value) || "",
+          ),
+          groupWeightsText: String(
+            ($("groupWeights") && $("groupWeights").value) || "",
+          ),
+          innerCustomWeightsText: String(
+            ($("innerCustomWeights") && $("innerCustomWeights").value) || "",
+          ),
+        });
         await saveOffParamStateToBackend({ quiet: true }).catch(() => {});
 
         const mpGroup = parseKvText($("assetGroups").value);
@@ -3809,6 +4264,7 @@
           datesRet: datesRet.slice(),
           nav: m.nav.slice(),
           navByCode,
+          backtestSig,
         };
 
         Plotly.newPlot(
@@ -4258,8 +4714,26 @@
       $("runCls").addEventListener("click", () =>
         runClassification().catch((e) => setMsg(String((e && e.message) || e))),
       );
+      $("offClsExposureCode").addEventListener("change", () => {
+        const code = String(($("offClsExposureCode").value || "").trim() || "");
+        offClsExposureSelectedCode = code;
+        _renderClsExposureChartByCode(code);
+      });
+      $("offClsExposureRange").addEventListener("change", () => {
+        offClsExposureRangeKey = String(
+          ($("offClsExposureRange").value || "all").trim() || "all",
+        ).toLowerCase();
+        _renderClsExposureChartByCode(offClsExposureSelectedCode);
+      });
+      offClsExposureRangeKey = String(
+        ($("offClsExposureRange").value || "all").trim() || "all",
+      ).toLowerCase();
+      _clearClsExposurePanel("请先运行基金分类回归。");
       window.addEventListener("momentum-theme-change", () => {
         scheduleRenderAllOffFundPairCards(30);
+        if (offClsExposureSelectedCode) {
+          _renderClsExposureChartByCode(offClsExposureSelectedCode);
+        }
       });
       offPairPrefsByCard = loadOffFundPairPrefsLocal();
       renderOffFundPairCardShell();

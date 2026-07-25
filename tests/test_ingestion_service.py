@@ -16,6 +16,20 @@ class FakeAk:
         return self.df
 
 
+class FakeAkTencentOutOfRange:
+    def stock_zh_a_hist_tx(self, **kwargs):  # pylint: disable=unused-argument
+        return pd.DataFrame(
+            {
+                "date": ["2023-12-29", "2024-01-02", "2024-01-03", "2024-01-05"],
+                "open": [1.0, 1.0, 1.01, 1.02],
+                "high": [1.05, 1.05, 1.06, 1.07],
+                "low": [0.98, 0.99, 1.0, 1.01],
+                "close": [1.01, 1.01, 1.02, 1.03],
+                "amount": [10.0, 20.0, 30.0, 40.0],
+            }
+        )
+
+
 def test_ingest_success_creates_batch_items_and_prices(
     session_factory: sessionmaker,
 ) -> None:
@@ -221,3 +235,43 @@ def test_ingest_validation_failure_keeps_data_unchanged(
     with session_factory() as db:
         after = [(p.trade_date, p.close) for p in list_prices(db, code="510300")]
         assert after == before
+
+
+def test_ingest_clips_source_rows_to_requested_date_range(
+    session_factory: sessionmaker,
+) -> None:
+    with session_factory() as db:
+        upsert_etf_pool(
+            db,
+            code="510300",
+            name="沪深300ETF",
+            start_date="20240102",
+            end_date="20240103",
+        )
+        db.commit()
+
+    with session_factory() as db:
+        res = ingest_one_etf(
+            db,
+            ak=FakeAkTencentOutOfRange(),
+            code="510300",
+            start_date="20240102",
+            end_date="20240103",
+            adjust="hfq",
+        )
+        assert res.status == "success"
+        assert res.upserted == 2
+
+    with session_factory() as db:
+        prices = list_prices(
+            db,
+            code="510300",
+            start_date=None,
+            end_date=None,
+            adjust="hfq",
+            limit=1000000,
+        )
+        assert [p.trade_date.isoformat() for p in prices] == [
+            "2024-01-02",
+            "2024-01-03",
+        ]

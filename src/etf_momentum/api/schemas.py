@@ -362,6 +362,11 @@ class OffFundRegressionFactorConfigOut(BaseModel):
     )
 
 
+class OffFundRegressionPortfolioNavPoint(BaseModel):
+    trade_date: str = Field(description="YYYYMMDD or YYYY-MM-DD")
+    nav: float = Field(description="Portfolio NAV value at trade_date")
+
+
 class OffFundRegressionClassifyRequest(BaseModel):
     codes: list[str] = Field(min_length=1, description="Off-fund codes to classify")
     start: str = Field(description="YYYYMMDD")
@@ -388,6 +393,25 @@ class OffFundRegressionClassifyRequest(BaseModel):
     )
     include_exposure_series: bool = Field(default=False)
     max_series_points: int = Field(default=260, ge=0, le=2000)
+    include_portfolio: bool = Field(
+        default=False,
+        description="If true, also run regression on provided portfolio nav series.",
+    )
+    portfolio_code: str = Field(
+        default="__PORTFOLIO__",
+        description="Synthetic code used for portfolio regression row.",
+    )
+    portfolio_name: str = Field(
+        default="组合净值",
+        description="Display name used for portfolio regression row.",
+    )
+    portfolio_nav_series: list[OffFundRegressionPortfolioNavPoint] = Field(
+        default_factory=list,
+        description=(
+            "Optional portfolio nav points, each item: "
+            "{trade_date:'YYYY-MM-DD|YYYYMMDD', nav:number}."
+        ),
+    )
 
 
 class OffFundRegressionFactorAvailabilityRequest(BaseModel):

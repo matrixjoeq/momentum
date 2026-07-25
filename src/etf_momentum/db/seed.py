@@ -13,14 +13,14 @@ DEFAULT_POLICIES: list[dict] = [
         # Some broad-market ETFs can occasionally exceed 12% in adjusted series due to corporate actions / data quirks.
         # Keep it only slightly relaxed to still catch true anomalies.
         "max_abs_return": 0.13,
-        "max_hl_spread": 0.40,
+        "max_hl_spread": 0.50,
         "max_gap_days": 15,
     },
     {
         "name": "chinext_related_20",
         "description": "创业板相关ETF，20%涨跌幅，异常检测阈值略放宽。",
         "max_abs_return": 0.22,
-        "max_hl_spread": 0.40,
+        "max_hl_spread": 0.50,
         "max_gap_days": 15,
     },
     {

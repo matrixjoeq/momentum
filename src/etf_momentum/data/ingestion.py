@@ -131,6 +131,7 @@ def ingest_one_etf(
                 f"(code={code}, adjust={adj}, start={start}, end={end}); "
                 f"fetch_meta={fetch_meta}"
             )
+        raw_rows_count = len(rows)
         # record which source succeeded (best-effort)
         try:
             if rows:
@@ -154,6 +155,14 @@ def ingest_one_etf(
             )
             for r in rows
         ]
+        # Enforce requested date bounds even if upstream provider ignores start/end.
+        rows = [r for r in rows if start_d <= r.trade_date <= end_d]
+        if not rows:
+            raise ValueError(
+                "fetched data outside requested range "
+                f"(code={code}, adjust={adj}, start={start}, end={end}, "
+                f"raw_rows={raw_rows_count}, fetch_meta={fetch_meta})"
+            )
 
         # fetch existing rows for touched dates to audit + determine insert/update
         existing_rows = list_prices(

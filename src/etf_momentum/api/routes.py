@@ -8329,7 +8329,9 @@ _PAIR_ALLOWED_KEYS = set(_PAIR_KEY_ORDER)
 _PAIR_SLOT_DEFAULT = {
     f"pair_slot_{idx:02d}": key for idx, key in enumerate(_PAIR_KEY_ORDER[1:], start=1)
 }
-_PAIR_SLOT_IDS = tuple(_PAIR_SLOT_DEFAULT.keys())
+_PAIR_EXTRA_SLOT_IDS = ("pair_slot_extra_01", "pair_slot_extra_02")
+_PAIR_EXTRA_SLOT_ID_SET = set(_PAIR_EXTRA_SLOT_IDS)
+_PAIR_SLOT_IDS = tuple(_PAIR_SLOT_DEFAULT.keys()) + _PAIR_EXTRA_SLOT_IDS
 
 
 def _pair_sorted_warnings(codes: list[str]) -> list[str]:
@@ -8395,8 +8397,17 @@ def _normalize_pair_chart_prefs_json(
         obj = payload.get(slot_id)
         if not isinstance(obj, dict):
             continue
-        base_raw = str(obj.get("base") or "CSI300").strip()
-        peer_raw = str(obj.get("peer") or _PAIR_SLOT_DEFAULT[slot_id]).strip()
+        base_input = str(obj.get("base") or "").strip()
+        peer_input = str(obj.get("peer") or "").strip()
+        # Extra empty slots should preserve blank values when users intentionally leave
+        # one or both sides empty; non-empty values are normalized by the same rules.
+        if slot_id in _PAIR_EXTRA_SLOT_ID_SET and (not base_input or not peer_input):
+            base = base_input if base_input in _PAIR_ALLOWED_KEYS else ""
+            peer = peer_input if peer_input in _PAIR_ALLOWED_KEYS else ""
+            out[slot_id] = {"base": base, "peer": peer}
+            continue
+        base_raw = base_input or "CSI300"
+        peer_raw = peer_input or _PAIR_SLOT_DEFAULT.get(slot_id, "CSI500")
         base = base_raw if base_raw in _PAIR_ALLOWED_KEYS else "CSI300"
         peer = peer_raw if peer_raw in _PAIR_ALLOWED_KEYS and peer_raw != base else ""
         if not peer:
@@ -8829,8 +8840,45 @@ def analysis_off_fund_classify(
             continue
         seen.add(cc)
         req_codes.append(cc)
+    portfolio_nav: pd.Series | None = None
+    include_portfolio = bool(getattr(payload, "include_portfolio", False))
+    if include_portfolio:
+        pts = list(getattr(payload, "portfolio_nav_series", []) or [])
+        vals: list[float] = []
+        idx: list[dt.date] = []
+        for p in pts:
+            d_raw = str(getattr(p, "trade_date", "") or "").strip()
+            nav_v = float(getattr(p, "nav", np.nan))
+            if not d_raw or not np.isfinite(nav_v) or nav_v <= 0.0:
+                continue
+            try:
+                d_v = (
+                    _parse_yyyymmdd(d_raw)
+                    if len(d_raw) == 8 and d_raw.isdigit()
+                    else pd.Timestamp(d_raw).date()
+                )
+            except Exception:
+                continue
+            vals.append(nav_v)
+            idx.append(d_v)
+        if len(vals) < 2:
+            return OffFundRegressionClassifyResponse(
+                ok=False,
+                error="invalid_portfolio_nav_series",
+                meta={
+                    "detail": "portfolio_nav_series requires at least 2 valid points"
+                },
+            )
+        portfolio_nav = (
+            pd.Series(vals, index=idx, dtype=float)
+            .sort_index()
+            .groupby(level=0)
+            .last()
+            .dropna()
+        )
     items: list[OffFundRegressionClassifyItem] = []
-    ok_count = 0
+    fund_ok_count = 0
+    portfolio_ok = False
     for code in req_codes:
         rows = list_off_fund_navs(
             db,
@@ -8886,7 +8934,57 @@ def analysis_off_fund_classify(
             exposure_series=list(out.get("series") or []),
         )
         if item.status == "ok":
-            ok_count += 1
+            fund_ok_count += 1
+        items.append(item)
+    if include_portfolio and portfolio_nav is not None:
+        out = classify_fund_by_regression(
+            fund_nav=portfolio_nav,
+            factor_close_df=factor_close,
+            rolling_window=int(payload.rolling_window),
+            min_samples=int(payload.min_samples),
+            dominance_gap=float(payload.dominance_gap),
+            include_series=bool(payload.include_exposure_series),
+            max_series_points=int(payload.max_series_points),
+        )
+        warnings = list(out.get("warnings") or [])
+        if factor_warnings:
+            warnings.extend(factor_warnings)
+        p_code = str(getattr(payload, "portfolio_code", "__PORTFOLIO__") or "").strip()
+        if not p_code:
+            p_code = "__PORTFOLIO__"
+        p_name = str(getattr(payload, "portfolio_name", "组合净值") or "").strip()
+        if not p_name:
+            p_name = "组合净值"
+        item = OffFundRegressionClassifyItem(
+            code=p_code,
+            name=p_name,
+            status=str(out.get("status") or "failed"),
+            sample_days=int(out.get("sample_days") or 0),
+            effective_windows=(
+                int(out.get("effective_windows"))
+                if out.get("effective_windows") is not None
+                else None
+            ),
+            avg_r2=(float(out["avg_r2"]) if out.get("avg_r2") is not None else None),
+            latest_r2=(
+                float(out["latest_r2"]) if out.get("latest_r2") is not None else None
+            ),
+            label=str(out.get("label") or "未分类"),
+            confidence=str(out.get("confidence") or "LOW"),
+            primary_asset_class=str(out.get("primary_asset_class") or "unclassified"),
+            avg_exposures={
+                str(k): float(v)
+                for k, v in dict(out.get("avg_exposures") or {}).items()
+            },
+            latest_exposures={
+                str(k): float(v)
+                for k, v in dict(out.get("latest_exposures") or {}).items()
+            },
+            warnings=warnings,
+            exposure_series=list(out.get("series") or []),
+        )
+        if item.status == "ok":
+            portfolio_ok = True
         items.append(item)
     meta = {
         "start": start_d.isoformat(),
@@ -8896,8 +8994,12 @@ def analysis_off_fund_classify(
         "rolling_window": int(payload.rolling_window),
         "min_samples": int(payload.min_samples),
         "requested_codes": req_codes,
-        "analyzed_codes": int(ok_count),
+        # Backward-compatible semantics: fund success count only.
+        "analyzed_codes": int(fund_ok_count),
+        "analyzed_funds": int(fund_ok_count),
+        "analyzed_portfolio": bool(portfolio_ok),
         "factor_count": int(factor_close.shape[1]),
+        "portfolio_included": bool(include_portfolio),
     }
     return OffFundRegressionClassifyResponse(
         ok=True,

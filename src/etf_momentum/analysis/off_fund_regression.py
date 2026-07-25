@@ -57,9 +57,19 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("932365", "159232"),
     ),
     RegressionFactorSpec(
-        key="CSIHL",
-        label="中证红利",
-        aliases=("000922", "515180"),
+        key="CNI_FCF",
+        label="国证自由现金流",
+        aliases=("980092", "159201"),
+    ),
+    RegressionFactorSpec(
+        key="SHHL",
+        label="上证红利",
+        aliases=("000015", "510880"),
+    ),
+    RegressionFactorSpec(
+        key="CSIHL_LOW_VOLATILITY",
+        label="中证红利低波动",
+        aliases=("h30269", "512890"),
     ),
     RegressionFactorSpec(
         key="CSI_300_GROWTH_INNOVATION",
@@ -125,6 +135,16 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         key="CSI_ALL_COMMUNICATION",
         label="中证全指通信",
         aliases=("931160", "515880"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_DEFENSE",
+        label="中证军工指数",
+        aliases=("399967", "512660"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_CONSTRUCTION_MACHINERY",
+        label="中证工程机械主题指数",
+        aliases=("931752", "560280"),
     ),
     RegressionFactorSpec(
         key="HSI",
@@ -571,7 +591,8 @@ def classify_fund_by_regression(
         }
         for j, key in enumerate(factor_keys):
             rec[key] = float(w[j])
-        rec["cash"] = float(max(0.0, 1.0 - float(w.sum())))
+        # Unattributed part under current factor template (not strict statistical residual).
+        rec["unattributed"] = float(max(0.0, 1.0 - float(w.sum())))
         rows.append(rec)
     if not rows:
         return {
@@ -588,7 +609,7 @@ def classify_fund_by_regression(
             "series": [],
         }
     df = pd.DataFrame(rows)
-    exposure_cols = factor_keys + ["cash"]
+    exposure_cols = factor_keys + ["unattributed"]
     avg_exposure = df[exposure_cols].mean(numeric_only=True)
     latest = df.iloc[-1]
     avg_r2 = float(df["r2"].mean(skipna=True))

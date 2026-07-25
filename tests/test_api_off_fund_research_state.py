@@ -116,10 +116,13 @@ def test_off_fund_research_state_rejects_invalid_payload(
 def test_off_fund_research_state_trim_and_order(api_client: TestClient) -> None:
     client = api_client
     slot_count = max(0, len(DEFAULT_CN_STOCK_FACTORS) - 1)
-    too_many = {
+    too_many: dict[str, dict[str, str]] = {
         f"pair_slot_{i:02d}": {"base": "CSI300", "peer": "CSI500"}
-        for i in range(1, slot_count + 2)
+        for i in range(1, slot_count + 1)
     }
+    too_many["pair_slot_extra_01"] = {"base": "CSI300", "peer": "CSI500"}
+    too_many["pair_slot_extra_02"] = {"base": "CSI300", "peer": "CSI500"}
+    too_many["pair_slot_extra_03"] = {"base": "CSI300", "peer": "CSI500"}
     r = client.put(
         "/api/off-fund/research/state",
         json={"pair_chart_prefs_json": json.dumps(too_many)},
@@ -132,7 +135,9 @@ def test_off_fund_research_state_trim_and_order(api_client: TestClient) -> None:
     assert isinstance(prefs, str)
     assert '"pair_slot_01"' in prefs
     assert f'"pair_slot_{slot_count:02d}"' in prefs
-    assert f'"pair_slot_{slot_count + 1:02d}"' not in prefs
+    assert '"pair_slot_extra_01"' in prefs
+    assert '"pair_slot_extra_02"' in prefs
+    assert '"pair_slot_extra_03"' not in prefs
     assert prefs.index('"pair_slot_01"') < prefs.index(f'"pair_slot_{slot_count:02d}"')
 
 
@@ -202,6 +207,34 @@ def test_off_fund_state_partial_put_keeps_unspecified_fields(
         out["pair_chart_prefs_json"]
         == '{"pair_slot_01":{"base":"CSI300","peer":"CSI500"}}'
     )
+
+
+def test_off_fund_state_roundtrip_persists_extra_pair_slots(
+    api_client: TestClient,
+) -> None:
+    client = api_client
+    payload = {
+        "pair_chart_prefs_json": json.dumps(
+            {
+                "pair_slot_01": {"base": "CSI300", "peer": "CSI500"},
+                "pair_slot_extra_01": {"base": "CSI500", "peer": "CYB"},
+                "pair_slot_extra_02": {"base": "HSI", "peer": "NASDAQ100"},
+            }
+        )
+    }
+    r1 = client.put("/api/off-fund/research/state", json=payload)
+    assert r1.status_code == 200
+    out1 = r1.json()
+    prefs1 = json.loads(out1["pair_chart_prefs_json"])
+    assert prefs1["pair_slot_extra_01"] == {"base": "CSI500", "peer": "CYB"}
+    assert prefs1["pair_slot_extra_02"] == {"base": "HSI", "peer": "NASDAQ100"}
+
+    r2 = client.get("/api/off-fund/research/state")
+    assert r2.status_code == 200
+    out2 = r2.json()
+    prefs2 = json.loads(out2["pair_chart_prefs_json"])
+    assert prefs2["pair_slot_extra_01"] == {"base": "CSI500", "peer": "CYB"}
+    assert prefs2["pair_slot_extra_02"] == {"base": "HSI", "peer": "NASDAQ100"}
 
 
 def test_runtime_schema_adds_pair_chart_prefs_column(tmp_path) -> None:

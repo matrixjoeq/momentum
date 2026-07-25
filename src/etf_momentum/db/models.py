@@ -34,7 +34,7 @@ class ValidationPolicy(Base):
     max_abs_return: Mapped[float] = mapped_column(Float, nullable=False)
 
     # Example: 0.30 for (high/low - 1) threshold.
-    max_hl_spread: Mapped[float] = mapped_column(Float, nullable=False, default=0.30)
+    max_hl_spread: Mapped[float] = mapped_column(Float, nullable=False, default=0.50)
 
     # Max allowed "long gap" in natural days inside a requested range.
     max_gap_days: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
