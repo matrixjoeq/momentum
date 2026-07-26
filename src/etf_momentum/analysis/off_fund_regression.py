@@ -228,8 +228,13 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
     ),
     RegressionFactorSpec(
         key="0-3Y_GOV_BOND",
-        label="0-3年期国债",
+        label="0-3年期国债/政金债",
         aliases=("0-3Y_GOV_BOND", "511580"),
+    ),
+    RegressionFactorSpec(
+        key="7Y_GOV_BOND",
+        label="7年政金债",
+        aliases=("7Y_GOV_BOND", "511520"),
     ),
     RegressionFactorSpec(
         key="5Y_GOV_BOND",
@@ -247,9 +252,44 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("30Y_GOV_BOND", "511090"),
     ),
     RegressionFactorSpec(
+        key="4Y_LOCAL_DEBT",
+        label="4年地方债",
+        aliases=("4Y_LOCAL_DEBT", "159816"),
+    ),
+    RegressionFactorSpec(
+        key="5Y_LOCAL_DEBT",
+        label="5年地方债",
+        aliases=("5Y_LOCAL_DEBT", "511060"),
+    ),
+    RegressionFactorSpec(
+        key="10Y_LOCAL_DEBT",
+        label="10年地方债",
+        aliases=("10Y_LOCAL_DEBT", "511270"),
+    ),
+    RegressionFactorSpec(
         key="CITY_DEBT",
         label="城投债",
         aliases=("CITY_DEBT", "511220"),
+    ),
+    RegressionFactorSpec(
+        key="SH_COMPANY_BOND",
+        label="上证公司债",
+        aliases=("SH_COMPANY_BOND", "511110"),
+    ),
+    RegressionFactorSpec(
+        key="SZ_COMPANY_BOND",
+        label="深证公司债",
+        aliases=("SZ_COMPANY_BOND", "159396"),
+    ),
+    RegressionFactorSpec(
+        key="BOND_SPREAD",
+        label="利差因子公司债",
+        aliases=("BOND_SPREAD", "511030"),
+    ),
+    RegressionFactorSpec(
+        key="SHORT_BOND",
+        label="短融",
+        aliases=("SHORT_BOND", "511360"),
     ),
     RegressionFactorSpec(
         key="MONEY_MARKET_FUND",
