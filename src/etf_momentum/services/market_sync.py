@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_ADJUSTS = ("qfq", "hfq", "none")
 
-# fixed mini-program pool
+# fixed reference ETF pool
 FIXED_CODES = ["159915", "511010", "513100", "518880"]
 FIXED_NAMES = {
     "159915": "创业板ETF",

@@ -9,9 +9,6 @@ from etf_momentum.db.models import EtfPrice
 from etf_momentum.db.session import make_session_factory
 
 
-FIXED_MINIPROGRAM_CODES = ["159915", "511010", "513100", "518880"]
-
-
 def seed_prices(
     engine, *, code_to_series: dict[str, list[float]], dates: list[dt.date]
 ) -> None:
@@ -62,18 +59,6 @@ def build_rotation_case_series() -> tuple[list[dt.date], dict[str, list[float]]]
         "E": [100.0 + i * 0.03 for i, _ in enumerate(dates)],
     }
     return dates, series
-
-
-def map_case_series_to_miniprogram_codes(
-    src: dict[str, list[float]],
-) -> dict[str, list[float]]:
-    """Map synthetic A/B/C/D series to fixed mini-program ETF codes."""
-    return {
-        "159915": src["A"],
-        "511010": src["B"],
-        "513100": src["C"],
-        "518880": src["D"],
-    }
 
 
 def fmt_ymd(d: dt.date) -> str:

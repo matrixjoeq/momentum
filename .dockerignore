@@ -7,7 +7,6 @@ __pycache__/
 .DS_Store
 .cursor/
 tests/
-miniprogram/
 docs/
 agent-transcripts/
 *.sqlite3

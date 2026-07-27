@@ -3802,6 +3802,7 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         ),
         "group_max_holdings": int(getattr(inp, "group_max_holdings", 4) or 4),
         "asset_groups": dict(getattr(inp, "asset_groups", {}) or {}),
+        "search_minimal_mode": bool(getattr(inp, "search_minimal_mode", False)),
     }
     return out
 
@@ -9380,6 +9381,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             "strategy": strat,
             "codes": list(nav_map.keys()),
             "failed_codes": failures,
+            "untradable_codes_skipped": sorted(
+                {str(c) for c in (failures or []) if str(c)}
+            ),
             "strategy_execution_description": TREND_STRATEGY_EXECUTION_DESCRIPTIONS.get(
                 strat, ""
             ),

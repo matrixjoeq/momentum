@@ -2743,42 +2743,6 @@ class RotationCalendarEffectRequest(RotationBacktestRequest):
     )
 
 
-class RotationWeekly5OpenSimRequest(RotationBacktestRequest):
-    """
-    Mini-program friendly weekly5-open simulation request.
-
-    Notes:
-    - Universe is fixed to 4 ETFs (159915/511010/513100/518880). The API will ignore provided codes.
-    - Execution is on open, and rebalance_shift is effectively forced to 'prev' due to open-exec semantics.
-    - All retained rotation parameters（基础参数 + 动量/趋势/乖离 + 恐慌择时）均可用。
-    """
-
-    # Keep backward compatibility: allow omitting codes in clients.
-    codes: list[str] = Field(
-        default_factory=lambda: ["159915", "511010", "513100", "518880"],
-        description="(Ignored by server) Fixed universe. Included for schema compatibility.",
-        min_length=1,
-    )
-    anchor_weekday: int | None = Field(
-        default=None,
-        ge=1,
-        le=5,
-        description="Optional: if set, compute only one execution weekday (1=Mon..5=Fri) to reduce payload/runtime.",
-    )
-
-
-class RotationNextPlanRequest(BaseModel):
-    """
-    Next rebalance plan for the fixed 4-ETF mini-program strategy (weekly, top1, lookback20, open execution).
-    Used by the mini-program to show "tomorrow plan" when tomorrow is a rebalance effective day.
-    """
-
-    anchor_weekday: int = Field(ge=1, le=5, description="1=Mon..5=Fri")
-    asof: str = Field(
-        description="YYYYMMDD (usually the latest available trading day in backtest range)"
-    )
-
-
 class SimPortfolioCreateRequest(BaseModel):
     name: str = Field(default="默认账户", description="Portfolio name")
     initial_cash: float = Field(
@@ -2814,25 +2778,6 @@ class SimTradePreviewRequest(BaseModel):
 class SimTradeConfirmRequest(BaseModel):
     variant_id: int = Field(ge=1)
     decision_id: int = Field(ge=1)
-
-
-class BaselineWeekly5EWDashboardRequest(BaseModel):
-    """
-    Equal-weight benchmark dashboard for the fixed 4-ETF pool, for 5 weekly anchor weekdays (MON..FRI).
-    Uses hfq close and rebalances at close on decision_date (effective next trading day).
-    """
-
-    start: str = Field(description="YYYYMMDD")
-    end: str = Field(description="YYYYMMDD")
-    rebalance_shift: str = Field(
-        default="prev", description="prev|next when anchor falls on non-trading day"
-    )
-    anchor_weekday: int | None = Field(
-        default=None,
-        ge=1,
-        le=5,
-        description="Optional: if set, compute only one anchor weekday (1=Mon..5=Fri) to reduce payload/runtime.",
-    )
 
 
 class RTakeProfitTier(BaseModel):

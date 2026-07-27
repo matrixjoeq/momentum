@@ -3,14 +3,6 @@ from __future__ import annotations
 from typing import Iterable
 
 
-FIXED_MINIPROGRAM_POOL: list[tuple[str, str]] = [
-    ("159915", "创业板ETF"),
-    ("511010", "国债ETF"),
-    ("513100", "纳指ETF"),
-    ("518880", "黄金ETF"),
-]
-
-
 def upsert_and_fetch_etfs(
     client,
     *,

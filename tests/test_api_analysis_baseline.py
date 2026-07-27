@@ -13,7 +13,6 @@ from tests.helpers.rotation_case_data import (
     make_bias_rule,
     make_rotation_base_payload,
     make_trend_rule,
-    map_case_series_to_miniprogram_codes,
     post_json,
     post_json_ok,
     seed_prices,
@@ -479,23 +478,6 @@ def test_api_rotation_capacity_estimate_has_three_scenarios(engine, api_client):
     ) == pytest.approx(0.10, rel=0.0, abs=1e-12)
     src = (meta.get("source_stats") or {}).get("sources") or {}
     assert int(src.get("volume_avg_price") or 0) > 0
-
-
-def test_api_rotation_weekly5_open_contains_capacity_estimate(api_client, engine):
-    dates, src = build_rotation_case_series()
-    mapped = map_case_series_to_miniprogram_codes(src)
-    seed_prices(engine, code_to_series=mapped, dates=dates)
-    c = api_client
-    out = post_json_ok(
-        c,
-        "/api/analysis/rotation/weekly5-open",
-        {"start": "20240102", "end": "20240731", "anchor_weekday": 5},
-    )
-    one = ((out or {}).get("by_anchor") or {}).get("5") or {}
-    cap = one.get("capacity_estimate") or {}
-    assert str(cap.get("method") or "") == "asset_participation_bottleneck_daily"
-    assert "meta" in cap
-    assert "scenarios" in cap
 
 
 def test_api_rotation_backtest_accepts_negative_top_k(api_client) -> None:
@@ -4812,50 +4794,6 @@ def test_api_rotation_next_execution_plan_keeps_explicit_empty_picks(
     )
 
 
-def test_api_rotation_next_plan_keeps_explicit_empty_picks(api_client, monkeypatch):
-    c = api_client
-    upsert_and_fetch_etfs(
-        c,
-        codes=["159915", "511010", "513100", "518880"],
-        names={
-            "159915": "创业板",
-            "511010": "国债",
-            "513100": "纳指",
-            "518880": "黄金",
-        },
-        start_date="20240102",
-        end_date="20240103",
-    )
-
-    import etf_momentum.strategy.rotation as rot_mod
-
-    def _fake_backtest_rotation(*_args, **_kwargs):
-        return {
-            "holdings": [
-                {
-                    "start_date": "2024-01-03",
-                    "decision_date": "2024-01-02",
-                    "mode": "cash",
-                    "picks": [],
-                    "scores": {},
-                }
-            ],
-            "weights_end": {"weights": {"159915": 1.0}},
-        }
-
-    monkeypatch.setattr(rot_mod, "backtest_rotation", _fake_backtest_rotation)
-
-    data = post_json_ok(
-        c,
-        "/api/analysis/rotation/next-plan",
-        {"asof": "20240102", "anchor_weekday": 3},
-    )
-    assert data["rebalance_effective_next_day"] is True
-    assert data["pick_code"] is None
-    assert data["pick_name"] == "现金"
-    assert float(data["pick_exposure"]) == 0.0
-
-
 @pytest.mark.parametrize(
     "entry_match_n,entry_backfill,expect_empty,expect_codes",
     [
@@ -5074,56 +5012,6 @@ def test_api_rotation_next_execution_plan_trace_includes_exit_checks_without_tri
     assert checks
     assert checks[0]["code"] == "510300"
     assert checks[0]["triggered"] is False
-
-
-@pytest.mark.parametrize(
-    "entry_match_n,expect_cash",
-    [
-        (0, True),
-        (1, False),
-    ],
-)
-def test_api_rotation_next_plan_entry_param_matrix_mini_program(
-    api_client,
-    engine,
-    entry_match_n: int,
-    expect_cash: bool,
-):
-    dates, src = build_rotation_case_series()
-    # Map to fixed mini-program universe codes.
-    mapped = map_case_series_to_miniprogram_codes(src)
-    seed_prices(engine, code_to_series=mapped, dates=dates)
-
-    c = api_client
-    # Ensure next trading day weekday matches anchor tab (Wednesday here).
-    asof = dt.date(2024, 7, 2)  # Tue -> next trading day Wed(2)
-    data = post_json_ok(
-        c,
-        "/api/analysis/rotation/next-plan",
-        {
-            "asof": fmt_ymd(asof),
-            "anchor_weekday": 3,
-            **make_rotation_base_payload(
-                codes=["159915", "511010", "513100", "518880"], dates=dates
-            ),
-            "entry_backfill": False,
-            "entry_match_n": int(entry_match_n),
-            "trend_filter": True,
-            "bias_filter": True,
-            "asset_trend_rules": [make_trend_rule(stage="entry")],
-            "asset_bias_rules": [
-                make_bias_rule(stage="entry", op="<=", fixed_value=1.5)
-            ],
-        },
-    )
-    assert data["rebalance_effective_next_day"] is True
-    if expect_cash:
-        assert data["pick_code"] is None
-        assert data["pick_name"] == "现金"
-        assert float(data["pick_exposure"]) == 0.0
-    else:
-        assert data["pick_code"] is not None
-        assert float(data["pick_exposure"]) > 0.0
 
 
 def test_api_trend_ma_trailing_stop_contract_and_validation(engine, api_client):
