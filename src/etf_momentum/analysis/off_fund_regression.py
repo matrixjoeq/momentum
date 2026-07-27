@@ -227,6 +227,11 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("TOPIX", "513800"),
     ),
     RegressionFactorSpec(
+        key="CSI_CONVERTIBLE_BOND",
+        label="中证可转债",
+        aliases=("931078", "511380"),
+    ),
+    RegressionFactorSpec(
         key="0-3Y_GOV_BOND",
         label="0-3年期国债/政金债",
         aliases=("0-3Y_GOV_BOND", "511580"),
