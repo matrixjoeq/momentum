@@ -5,10 +5,12 @@ import hashlib
 import json
 from decimal import ROUND_HALF_UP, Decimal
 
+import etf_momentum.api.live_trading as live_api
 from etf_momentum.db.models import (
     EtfPrice,
     LiveHoldingSnapshot,
     LiveNavDaily,
+    LiveRepoTradeDetail,
     LiveTrade,
     LiveTradeAuditLog,
 )
@@ -2581,3 +2583,498 @@ def test_live_account_snapshot_import_rejects_repo_open_trade_id_self_reference(
         expected_status=400,
     )
     assert "must not reference itself" in str(r.json().get("detail", ""))
+
+
+def test_live_trade_fee_quantity_audit_and_confirm_contract(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "审计账户A", "initial_cash": 50000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略审计A"})
+    sid = int(st["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "AUDIT-HOLDER-A"},
+    )
+    hid = int(holder["id"])
+
+    created = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:35:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 3.33,
+            "idempotency_key": "audit-mismatch-fee-k1",
+        },
+    )
+    tid = int(created["id"])
+
+    audit_out = get_json(
+        c, f"/api/live/trades/audit/fee-quantity?scope_type=strategy&scope_id={sid}"
+    )
+    assert audit_out["scope_type"] == "strategy"
+    assert int(audit_out["scope_id"]) == sid
+    assert int(audit_out["total_trades"]) >= 1
+    mismatch_rows = list(audit_out.get("mismatch_rows") or [])
+    one = next((x for x in mismatch_rows if int(x.get("trade_id") or 0) == tid), None)
+    assert one is not None
+    fee_mismatch = next(
+        (x for x in (one.get("mismatches") or []) if x.get("field") == "fee"), None
+    )
+    assert fee_mismatch is not None
+    assert float(fee_mismatch["current"]) == 3.33
+    assert float(fee_mismatch["expected"]) == 0.2
+    assert bool(fee_mismatch["auto_fixable"]) is True
+
+    confirm_out = post_json(
+        c,
+        f"/api/live/trades/audit/fee-quantity/confirm?scope_type=strategy&scope_id={sid}",
+        {"trade_ids": [tid], "reason": "审计确认费用修正"},
+    )
+    assert int(confirm_out["requested"]) == 1
+    assert int(confirm_out["updated"]) == 1
+    assert int(confirm_out["skipped"]) == 0
+
+    trades = get_json(c, f"/api/live/trades?strategy_id={sid}&page=1&page_size=200")
+    row = next((x for x in trades["items"] if int(x["id"]) == tid), None)
+    assert row is not None
+    assert abs(float(row["fee"]) - 0.2) < 1e-9
+
+
+def test_live_trade_fee_quantity_audit_confirm_requires_trade_ids(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "审计账户B", "initial_cash": 1000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略审计B"})
+    sid = int(st["id"])
+
+    r = post_response(
+        c,
+        f"/api/live/trades/audit/fee-quantity/confirm?scope_type=strategy&scope_id={sid}",
+        {"trade_ids": [], "reason": "empty ids"},
+        expected_status=422,
+    )
+    assert r.status_code == 422
+
+
+def test_live_trade_audit_repo_fee_uses_principal_not_dirty_amount(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "审计账户C", "initial_cash": 20000}
+    )
+    aid = int(acc["id"])
+    st = post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategies",
+        {"name": "策略审计C", "strategy_type": "bond_repo"},
+    )
+    sid = int(st["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "AUDIT-HOLDER-C"},
+    )
+    hid = int(holder["id"])
+    opened = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "GC001",
+            "trade_date": "20240621",
+            "trade_time": "15:30:00",
+            "side": "BUY",
+            "price": 1.50,
+            "quantity": 10,
+            "amount": 10000.0,
+            "fee": 0.2,
+            "repo_action": "LEND",
+            "repo_principal_amount": 10000.0,
+            "repo_interest_days": 3,
+            "idempotency_key": "audit-repo-principal-k1",
+        },
+    )
+    tid = int(opened["id"])
+
+    # Simulate legacy dirty data: amount manually corrupted while principal is still correct.
+    with session_factory() as db:
+        row = db.query(LiveTrade).filter(LiveTrade.id == tid).one()
+        row.amount = 20000.0
+        row.fee = 0.2
+        db.commit()
+
+    audit_out = get_json(
+        c, f"/api/live/trades/audit/fee-quantity?scope_type=strategy&scope_id={sid}"
+    )
+    one = next(
+        (
+            x
+            for x in (audit_out.get("mismatch_rows") or [])
+            if int(x.get("trade_id")) == tid
+        ),
+        None,
+    )
+    assert one is not None
+    fee_mismatch = next(
+        (x for x in (one.get("mismatches") or []) if x.get("field") == "fee"), None
+    )
+    assert fee_mismatch is not None
+    # repo fee must be based on principal=10000 -> 0.1
+    assert abs(float(fee_mismatch["expected"]) - 0.1) < 1e-9
+
+
+def test_live_trade_audit_confirm_uses_trade_side_for_repo_action_fallback(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "审计账户D", "initial_cash": 10100}
+    )
+    aid = int(acc["id"])
+    st = post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategies",
+        {"name": "策略审计D", "strategy_type": "bond_repo"},
+    )
+    sid = int(st["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "AUDIT-HOLDER-D"},
+    )
+    hid = int(holder["id"])
+    open_trade = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "GC001",
+            "trade_date": "20240621",
+            "trade_time": "15:30:00",
+            "side": "BUY",
+            "price": 1.50,
+            "quantity": 10,
+            "amount": 10000.0,
+            "fee": 0.1,
+            "repo_action": "LEND",
+            "repo_principal_amount": 10000.0,
+            "repo_interest_days": 3,
+            "idempotency_key": "audit-repo-fallback-open-k1",
+        },
+    )
+    _ = int(open_trade["id"])
+    close_trade = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "GC001",
+            "trade_date": "20240624",
+            "trade_time": "00:00:00",
+            "side": "SELL",
+            "price": 1.50,
+            "quantity": 10,
+            "amount": 10001.2,
+            "fee": 1.0,
+            "repo_action": "BUYBACK",
+            "repo_principal_amount": 10000.0,
+            "repo_interest_days": 3,
+            "idempotency_key": "audit-repo-fallback-close-k2",
+        },
+    )
+    close_tid = int(close_trade["id"])
+
+    # Simulate dirty repo detail action missing on close trade.
+    with session_factory() as db:
+        row = db.query(LiveTrade).filter(LiveTrade.id == close_tid).one()
+        row.quantity = 9.0
+        detail = (
+            db.query(LiveRepoTradeDetail)
+            .filter(LiveRepoTradeDetail.trade_id == close_tid)
+            .one()
+        )
+        detail.repo_action = ""
+        db.commit()
+
+    confirm_out = post_json(
+        c,
+        f"/api/live/trades/audit/fee-quantity/confirm?scope_type=strategy&scope_id={sid}",
+        {"trade_ids": [close_tid], "reason": "repo action fallback should follow side"},
+    )
+    assert int(confirm_out["updated"]) == 1
+    trades = get_json(c, f"/api/live/trades?strategy_id={sid}&page=1&page_size=200")
+    row = next((x for x in trades["items"] if int(x["id"]) == close_tid), None)
+    assert row is not None
+    assert abs(float(row["quantity"]) - 10.0) < 1e-9
+
+
+def test_live_trade_audit_flags_one_cent_fee_difference(api_client, session_factory):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "审计账户E", "initial_cash": 20000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略审计E"})
+    sid = int(st["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "AUDIT-HOLDER-E"},
+    )
+    hid = int(holder["id"])
+    created = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:35:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 3.33,
+            "idempotency_key": "audit-fee-one-cent-k1",
+        },
+    )
+    tid = int(created["id"])
+    with session_factory() as db:
+        row = db.query(LiveTrade).filter(LiveTrade.id == tid).one()
+        row.fee = 0.21
+        db.commit()
+
+    audit_out = get_json(
+        c, f"/api/live/trades/audit/fee-quantity?scope_type=strategy&scope_id={sid}"
+    )
+    one = next(
+        (
+            x
+            for x in (audit_out.get("mismatch_rows") or [])
+            if int(x.get("trade_id")) == tid
+        ),
+        None,
+    )
+    assert one is not None
+    fee_mismatch = next(
+        (x for x in (one.get("mismatches") or []) if x.get("field") == "fee"), None
+    )
+    assert fee_mismatch is not None
+    assert abs(float(fee_mismatch["current"]) - 0.21) < 1e-9
+    assert abs(float(fee_mismatch["expected"]) - 0.2) < 1e-9
+
+
+def test_live_trade_audit_confirm_batch_partial_failure_does_not_block_others(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "审计账户F", "initial_cash": 80000}
+    )
+    aid = int(acc["id"])
+    st_spot = post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategies",
+        {"name": "策略审计F-现货", "strategy_type": "etf_spot"},
+    )
+    sid_spot = int(st_spot["id"])
+    st_repo = post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategies",
+        {"name": "策略审计F-回购", "strategy_type": "bond_repo"},
+    )
+    sid_repo = int(st_repo["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "AUDIT-HOLDER-F"},
+    )
+    hid = int(holder["id"])
+
+    spot_trade = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid_spot,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:35:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 3.33,
+            "idempotency_key": "audit-batch-partial-spot-k1",
+        },
+    )
+    spot_tid = int(spot_trade["id"])
+    repo_trade = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid_repo,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "GC001",
+            "trade_date": "20240621",
+            "trade_time": "15:30:00",
+            "side": "BUY",
+            "price": 1.5,
+            "quantity": 10,
+            "amount": 10000.0,
+            "fee": 0.1,
+            "repo_action": "LEND",
+            "repo_principal_amount": 10000.0,
+            "repo_interest_days": 3,
+            "idempotency_key": "audit-batch-partial-repo-k2",
+        },
+    )
+    repo_tid = int(repo_trade["id"])
+
+    resp = post_response(
+        c,
+        f"/api/live/trades/audit/fee-quantity/confirm?scope_type=account&scope_id={aid}",
+        {
+            "trade_ids": [spot_tid, repo_tid],
+            "reason": "batch partial failure should continue",
+        },
+        expected_status=None,
+    )
+    assert resp.status_code == 200, resp.json()
+    out = resp.json()
+    assert int(out["requested"]) == 2
+    assert int(out["updated"]) == 1
+    assert int(out["skipped"]) == 1
+    assert int(spot_tid) in [int(x) for x in (out.get("updated_trade_ids") or [])]
+    skipped = list(out.get("skipped_details") or [])
+    assert any(
+        int(x.get("trade_id") or 0) == repo_tid
+        and "no deterministic auto-fix suggestion" in str(x.get("reason") or "")
+        for x in skipped
+    )
+
+    trades = get_json(c, f"/api/live/trades?account_id={aid}&page=1&page_size=200")
+    spot_row = next((x for x in trades["items"] if int(x["id"]) == spot_tid), None)
+    assert spot_row is not None
+    assert abs(float(spot_row["fee"]) - 0.2) < 1e-9
+
+
+def test_live_trade_audit_confirm_runtime_error_on_one_row_does_not_block_others(
+    api_client, session_factory, monkeypatch
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "审计账户G", "initial_cash": 40000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略审计G"})
+    sid = int(st["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "AUDIT-HOLDER-G"},
+    )
+    hid = int(holder["id"])
+
+    t1 = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:35:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 3.33,
+            "idempotency_key": "audit-runtime-row-k1",
+        },
+    )
+    t2 = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159916",
+            "name": "深证ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:36:00",
+            "side": "BUY",
+            "price": 8.0,
+            "quantity": 100,
+            "fee": 3.33,
+            "idempotency_key": "audit-runtime-row-k2",
+        },
+    )
+    tid1 = int(t1["id"])
+    tid2 = int(t2["id"])
+    original = live_api._trade_audit_row
+
+    def _patched_trade_audit_row(*, row, strategy_type, repo_detail):
+        if int(row.id) == tid2:
+            raise RuntimeError("synthetic runtime error")
+        return original(row=row, strategy_type=strategy_type, repo_detail=repo_detail)
+
+    monkeypatch.setattr(live_api, "_trade_audit_row", _patched_trade_audit_row)
+    out = post_json(
+        c,
+        f"/api/live/trades/audit/fee-quantity/confirm?scope_type=strategy&scope_id={sid}",
+        {"trade_ids": [tid1, tid2], "reason": "runtime row should not block batch"},
+    )
+    assert int(out["requested"]) == 2
+    assert int(out["updated"]) == 1
+    assert int(out["skipped"]) == 1
+    assert tid1 in [int(x) for x in (out.get("updated_trade_ids") or [])]
+    skipped = list(out.get("skipped_details") or [])
+    assert any(
+        int(x.get("trade_id") or 0) == tid2
+        and "unexpected audit error" in str(x.get("reason") or "")
+        for x in skipped
+    )

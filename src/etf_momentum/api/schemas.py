@@ -4110,6 +4110,55 @@ class LiveTradeOut(BaseModel):
     created_at: str
 
 
+class LiveTradeAuditMismatchOut(BaseModel):
+    field: str
+    issue: str
+    current: float | str | None = None
+    expected: float | str | None = None
+    delta: float | None = None
+    auto_fixable: bool = False
+    detail: str | None = None
+
+
+class LiveTradeAuditRowOut(BaseModel):
+    trade_id: int
+    account_id: int
+    strategy_id: int
+    strategy_type: str
+    code: str
+    name: str
+    trade_date: str
+    trade_time: str
+    side: str
+    quantity: float
+    fee: float
+    amount: float
+    repo_action: str | None = None
+    mismatches: list[LiveTradeAuditMismatchOut]
+    suggested_patch: dict[str, float | str | None] | None = None
+
+
+class LiveTradeAuditListOut(BaseModel):
+    scope_type: str
+    scope_id: int
+    total_trades: int
+    mismatch_trades: int
+    mismatch_rows: list[LiveTradeAuditRowOut]
+
+
+class LiveTradeAuditConfirmRequest(BaseModel):
+    trade_ids: list[int] = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class LiveTradeAuditConfirmOut(BaseModel):
+    requested: int
+    updated: int
+    skipped: int
+    updated_trade_ids: list[int]
+    skipped_details: list[dict[str, Any]]
+
+
 class LiveCorporateActionCreateRequest(BaseModel):
     account_id: int | None = Field(default=None, ge=1)
     strategy_id: int | None = Field(default=None, ge=1)

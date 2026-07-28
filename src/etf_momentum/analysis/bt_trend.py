@@ -5635,6 +5635,11 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     single_semi_variance_stats = _semi_variance_run_stats_from_returns(
         strat_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
     )
+    single_holding_asset_count_stats = (
+        _trend_semantic_helpers._holding_asset_count_stats_from_weights(
+            w_eff.reindex(nav.index).astype(float).fillna(0.0)
+        )
+    )
     trade_extreme_stats = (
         _trend_semantic_helpers._build_trade_extreme_stats_from_trades(
             trade_one.get("trades", []),
@@ -5664,6 +5669,7 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
         **dict(trade_extreme_stats.get("overall") or {}),
         "n": int(single["trade_count"]),
         "semi_variance": dict(single_semi_variance_stats),
+        "holding_asset_count_stats": dict(single_holding_asset_count_stats),
         "atr_stop_trigger_count": int(atr_stats.get("trigger_count", 0)),
         "r_take_profit_trigger_count": int(rtp_stats.get("trigger_count", 0)),
         "r_profit_scaleout_trigger_count": int(
@@ -8668,6 +8674,13 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     portfolio_semi_variance_overall = _semi_variance_run_stats_from_returns(
         port_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
     )
+    portfolio_holding_asset_count_stats = (
+        _trend_semantic_helpers._holding_asset_count_stats_from_weights(
+            w_eff.reindex(index=nav.index, columns=wdf.columns)
+            .astype(float)
+            .fillna(0.0)
+        )
+    )
     ret_exec_for_runs = ret_exec_df.reindex(
         index=nav.index, columns=wdf.columns
     ).astype(float)
@@ -8705,6 +8718,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         **dict(trade_extreme_stats.get("overall") or {}),
         "n": len(trades),
         "semi_variance": dict(portfolio_semi_variance_overall),
+        "holding_asset_count_stats": dict(portfolio_holding_asset_count_stats),
         "atr_stop_trigger_count": int(atr_trigger_total),
         "r_take_profit_trigger_count": int(rtp_trigger_total),
         "r_profit_scaleout_trigger_count": int(rps_trigger_total),

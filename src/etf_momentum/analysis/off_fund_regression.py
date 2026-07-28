@@ -52,6 +52,11 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("000688", "588000"),
     ),
     RegressionFactorSpec(
+        key="KCE50",
+        label="科创创业50",
+        aliases=("931643", "159781"),
+    ),
+    RegressionFactorSpec(
         key="CSIFCF",
         label="中证全指自由现金流",
         aliases=("932365", "159232"),
@@ -65,6 +70,11 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         key="SHHL",
         label="上证红利",
         aliases=("000015", "510880"),
+    ),
+    RegressionFactorSpec(
+        key="CSIHL",
+        label="中证红利",
+        aliases=("000922", "515180"),
     ),
     RegressionFactorSpec(
         key="CSIHL_LOW_VOLATILITY",

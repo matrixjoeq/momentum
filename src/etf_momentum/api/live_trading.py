@@ -46,8 +46,13 @@ from .schemas import (
     LiveStrategyTransferRequest,
     LiveStrategyUpdateRequest,
     LiveTradeBatchCreateRequest,
+    LiveTradeAuditConfirmOut,
+    LiveTradeAuditConfirmRequest,
+    LiveTradeAuditListOut,
     LiveTradeCreateRequest,
     LiveTradeDeleteRequest,
+    LiveTradeAuditMismatchOut,
+    LiveTradeAuditRowOut,
     LiveTradeOut,
     LiveTradeUpdateRequest,
 )
@@ -4134,6 +4139,168 @@ def _log_trade_audit(
     )
 
 
+def _repo_detail_payload_from_row(
+    detail: LiveRepoTradeDetail | None,
+    *,
+    side: str,
+) -> dict[str, Any] | None:
+    if detail is None:
+        return None
+    return {
+        "repo_action": _norm_repo_action(str(detail.repo_action or ""), side=side),
+        "principal_amount": float(detail.principal_amount),
+        "lot_quantity": float(detail.lot_quantity),
+        "annual_rate_pct": float(detail.annual_rate_pct),
+        "interest_days": int(detail.interest_days),
+        "day_count_basis": int(detail.day_count_basis),
+        "open_trade_id": (
+            int(detail.open_trade_id) if detail.open_trade_id is not None else None
+        ),
+    }
+
+
+def _trade_audit_row(
+    *,
+    row: LiveTrade,
+    strategy_type: str,
+    repo_detail: LiveRepoTradeDetail | None,
+) -> LiveTradeAuditRowOut:
+    mismatches: list[LiveTradeAuditMismatchOut] = []
+    suggested_patch: dict[str, float | str | None] = {}
+    qty = float(row.quantity)
+    fee = _round_fee_2(float(row.fee or 0.0))
+    if strategy_type == "bond_repo":
+        if repo_detail is None:
+            mismatches.append(
+                LiveTradeAuditMismatchOut(
+                    field="quantity",
+                    issue="missing_repo_detail",
+                    current=qty,
+                    expected=None,
+                    delta=None,
+                    auto_fixable=False,
+                    detail="缺少 repo 明细，无法审计数量规则。",
+                )
+            )
+            mismatches.append(
+                LiveTradeAuditMismatchOut(
+                    field="fee",
+                    issue="missing_repo_detail",
+                    current=fee,
+                    expected=None,
+                    delta=None,
+                    auto_fixable=False,
+                    detail="缺少 repo 明细，无法审计费用规则。",
+                )
+            )
+            return LiveTradeAuditRowOut(
+                trade_id=int(row.id),
+                account_id=int(row.account_id),
+                strategy_id=int(row.strategy_id),
+                strategy_type=strategy_type,
+                code=str(row.code),
+                name=str(row.name or ""),
+                trade_date=row.trade_date.isoformat(),
+                trade_time=str(row.trade_time),
+                side=str(row.side),
+                quantity=float(row.quantity),
+                fee=float(row.fee or 0.0),
+                amount=float(row.amount),
+                repo_action=None,
+                mismatches=mismatches,
+                suggested_patch=None,
+            )
+        action = _norm_repo_action(
+            str(repo_detail.repo_action or ""), side=str(row.side)
+        )
+        principal = float(repo_detail.principal_amount)
+        exp_qty = principal / REPO_LOT_AMOUNT
+        qty_is_int_lot = abs(qty - round(qty)) <= 1e-9 and qty > 0
+        principal_qty_is_int = abs(exp_qty - round(exp_qty)) <= 1e-9 and exp_qty > 0
+        if (not qty_is_int_lot) or abs(qty - exp_qty) > 1e-9:
+            auto_fixable_qty = principal_qty_is_int
+            mismatches.append(
+                LiveTradeAuditMismatchOut(
+                    field="quantity",
+                    issue="repo_quantity_principal_inconsistent",
+                    current=qty,
+                    expected=(int(round(exp_qty)) if principal_qty_is_int else exp_qty),
+                    delta=float(qty - exp_qty),
+                    auto_fixable=auto_fixable_qty,
+                    detail="应满足 数量(手) × 1000 = principal_amount",
+                )
+            )
+            if auto_fixable_qty:
+                suggested_patch["quantity"] = float(int(round(exp_qty)))
+        exp_fee = 0.0 if action == "BUYBACK" else _default_repo_trade_fee(principal)
+        exp_fee_2 = _round_fee_2(exp_fee)
+        if fee != exp_fee_2:
+            mismatches.append(
+                LiveTradeAuditMismatchOut(
+                    field="fee",
+                    issue="repo_fee_mismatch",
+                    current=fee,
+                    expected=exp_fee_2,
+                    delta=float(fee - exp_fee_2),
+                    auto_fixable=True,
+                    detail=(
+                        "BUYBACK 费用应为 0；LEND 费用应为 principal_amount × repo 费率（四舍五入到分）。"
+                    ),
+                )
+            )
+            suggested_patch["fee"] = float(exp_fee_2)
+        repo_action = action
+    else:
+        qty_lot = qty / 100.0
+        if qty <= 0 or (
+            not math.isclose(qty_lot, round(qty_lot), rel_tol=0.0, abs_tol=1e-9)
+        ):
+            mismatches.append(
+                LiveTradeAuditMismatchOut(
+                    field="quantity",
+                    issue="spot_quantity_lot_invalid",
+                    current=qty,
+                    expected=None,
+                    delta=None,
+                    auto_fixable=False,
+                    detail="现货成交数量应为 100 的正整数倍。",
+                )
+            )
+        exp_fee = _default_trade_fee(float(row.price), qty)
+        exp_fee_2 = _round_fee_2(exp_fee)
+        if fee != exp_fee_2:
+            mismatches.append(
+                LiveTradeAuditMismatchOut(
+                    field="fee",
+                    issue="spot_fee_mismatch",
+                    current=fee,
+                    expected=exp_fee_2,
+                    delta=float(fee - exp_fee_2),
+                    auto_fixable=True,
+                    detail="现货费用应为 max(price×quantity×费率, 最低费用) 后四舍五入到分。",
+                )
+            )
+            suggested_patch["fee"] = float(exp_fee_2)
+        repo_action = None
+    return LiveTradeAuditRowOut(
+        trade_id=int(row.id),
+        account_id=int(row.account_id),
+        strategy_id=int(row.strategy_id),
+        strategy_type=strategy_type,
+        code=str(row.code),
+        name=str(row.name or ""),
+        trade_date=row.trade_date.isoformat(),
+        trade_time=str(row.trade_time),
+        side=str(row.side),
+        quantity=float(row.quantity),
+        fee=float(row.fee or 0.0),
+        amount=float(row.amount),
+        repo_action=repo_action,
+        mismatches=mismatches,
+        suggested_patch=(suggested_patch if suggested_patch else None),
+    )
+
+
 def _insert_trade(payload: LiveTradeCreateRequest, db: Session) -> LiveTrade:
     account_id, strategy_id = _validate_trade_payload(payload, db)
     row = LiveTrade(
@@ -4329,6 +4496,282 @@ def live_list_trades(
             for x in rows
         ],
     }
+
+
+@router.get("/trades/audit/fee-quantity", response_model=LiveTradeAuditListOut)
+def live_trade_audit_fee_quantity(
+    scope_type: str = Query(description="account|strategy"),
+    scope_id: int = Query(ge=1),
+    db: Session = Depends(get_session),
+):
+    st = str(scope_type or "").strip().lower()
+    if st not in {"account", "strategy"}:
+        raise HTTPException(
+            status_code=400, detail="scope_type must be account|strategy"
+        )
+    scope = _scope_from_ids(
+        db,
+        account_id=(int(scope_id) if st == "account" else None),
+        strategy_id=(int(scope_id) if st == "strategy" else None),
+    )
+    trades, _, _, _ = _scope_rows(db, scope)
+    repo_map = _repo_detail_map(db, [int(x.id) for x in trades])
+    stype_map = _strategy_type_map(db, sorted({int(x.strategy_id) for x in trades}))
+    mismatch_rows: list[LiveTradeAuditRowOut] = []
+    for row in sorted(
+        trades,
+        key=lambda x: (x.trade_date, str(x.trade_time), int(x.id)),
+        reverse=True,
+    ):
+        strategy_type = str(stype_map.get(int(row.strategy_id), "etf_spot"))
+        try:
+            one = _trade_audit_row(
+                row=row,
+                strategy_type=strategy_type,
+                repo_detail=repo_map.get(int(row.id)),
+            )
+        except HTTPException as exc:
+            detail = (
+                str(exc.detail)
+                if isinstance(exc.detail, str)
+                else json.dumps(exc.detail, ensure_ascii=False, sort_keys=True)
+            )
+            one = LiveTradeAuditRowOut(
+                trade_id=int(row.id),
+                account_id=int(row.account_id),
+                strategy_id=int(row.strategy_id),
+                strategy_type=strategy_type,
+                code=str(row.code),
+                name=str(row.name or ""),
+                trade_date=row.trade_date.isoformat(),
+                trade_time=str(row.trade_time),
+                side=str(row.side),
+                quantity=float(row.quantity),
+                fee=float(row.fee or 0.0),
+                amount=float(row.amount),
+                repo_action=None,
+                mismatches=[
+                    LiveTradeAuditMismatchOut(
+                        field="audit",
+                        issue="audit_error",
+                        current=None,
+                        expected=None,
+                        delta=None,
+                        auto_fixable=False,
+                        detail=f"audit failed: {detail}",
+                    )
+                ],
+                suggested_patch=None,
+            )
+        except Exception as exc:
+            one = LiveTradeAuditRowOut(
+                trade_id=int(row.id),
+                account_id=int(row.account_id),
+                strategy_id=int(row.strategy_id),
+                strategy_type=strategy_type,
+                code=str(row.code),
+                name=str(row.name or ""),
+                trade_date=row.trade_date.isoformat(),
+                trade_time=str(row.trade_time),
+                side=str(row.side),
+                quantity=float(row.quantity),
+                fee=float(row.fee or 0.0),
+                amount=float(row.amount),
+                repo_action=None,
+                mismatches=[
+                    LiveTradeAuditMismatchOut(
+                        field="audit",
+                        issue="audit_error",
+                        current=None,
+                        expected=None,
+                        delta=None,
+                        auto_fixable=False,
+                        detail=f"audit failed: {str(exc)}",
+                    )
+                ],
+                suggested_patch=None,
+            )
+        if one.mismatches:
+            mismatch_rows.append(one)
+    return LiveTradeAuditListOut(
+        scope_type=scope.scope_type,
+        scope_id=int(scope.scope_id),
+        total_trades=int(len(trades)),
+        mismatch_trades=int(len(mismatch_rows)),
+        mismatch_rows=mismatch_rows,
+    )
+
+
+@router.post(
+    "/trades/audit/fee-quantity/confirm", response_model=LiveTradeAuditConfirmOut
+)
+def live_trade_audit_fee_quantity_confirm(
+    payload: LiveTradeAuditConfirmRequest,
+    scope_type: str = Query(description="account|strategy"),
+    scope_id: int = Query(ge=1),
+    db: Session = Depends(get_session),
+):
+    st = str(scope_type or "").strip().lower()
+    if st not in {"account", "strategy"}:
+        raise HTTPException(
+            status_code=400, detail="scope_type must be account|strategy"
+        )
+    scope = _scope_from_ids(
+        db,
+        account_id=(int(scope_id) if st == "account" else None),
+        strategy_id=(int(scope_id) if st == "strategy" else None),
+    )
+    reason = _require_change_reason(payload.reason)
+    trades, _, _, _ = _scope_rows(db, scope)
+    allowed_trade_ids = {int(x.id) for x in trades}
+    req_ids = list(dict.fromkeys(int(x) for x in payload.trade_ids))
+    rows = (
+        db.query(LiveTrade)
+        .filter(LiveTrade.id.in_(req_ids))
+        .order_by(
+            LiveTrade.trade_date.asc(),
+            LiveTrade.trade_time.asc(),
+            LiveTrade.id.asc(),
+        )
+        .all()
+    )
+    row_by_id = {int(x.id): x for x in rows}
+    repo_map = _repo_detail_map(db, [int(x.id) for x in rows])
+    stype_map = _strategy_type_map(db, sorted({int(x.strategy_id) for x in rows}))
+    updated_trade_ids: list[int] = []
+    skipped_details: list[dict[str, Any]] = []
+    touched_strategy_ids: set[int] = set()
+    touched_account_ids: set[int] = set()
+
+    for tid in req_ids:
+        if tid not in allowed_trade_ids:
+            skipped_details.append(
+                {"trade_id": tid, "reason": "trade is out of current scope"}
+            )
+            continue
+        row = row_by_id.get(tid)
+        if row is None:
+            skipped_details.append({"trade_id": tid, "reason": "trade not found"})
+            continue
+        strategy_type = str(stype_map.get(int(row.strategy_id), "etf_spot"))
+        repo_detail = repo_map.get(tid)
+        try:
+            with db.begin_nested():
+                audit_row = _trade_audit_row(
+                    row=row,
+                    strategy_type=strategy_type,
+                    repo_detail=repo_detail,
+                )
+                patch = dict(audit_row.suggested_patch or {})
+                if not patch:
+                    skipped_details.append(
+                        {
+                            "trade_id": tid,
+                            "reason": "no deterministic auto-fix suggestion",
+                        }
+                    )
+                    continue
+                old_snapshot = _serialize_trade(
+                    row, repo_detail=repo_detail
+                ).model_dump()
+                if "quantity" in patch:
+                    qty_new = float(patch["quantity"])
+                    if strategy_type == "etf_spot":
+                        lot_ratio = qty_new / 100.0
+                        if (qty_new <= 0) or (
+                            not math.isclose(
+                                lot_ratio, round(lot_ratio), rel_tol=0.0, abs_tol=1e-9
+                            )
+                        ):
+                            skipped_details.append(
+                                {
+                                    "trade_id": tid,
+                                    "reason": "suggested quantity is invalid",
+                                }
+                            )
+                            continue
+                    row.quantity = qty_new
+                    if strategy_type == "bond_repo" and repo_detail is not None:
+                        principal_new = qty_new * REPO_LOT_AMOUNT
+                        repo_detail.lot_quantity = qty_new
+                        repo_detail.principal_amount = principal_new
+                        if (
+                            _norm_repo_action(
+                                str(repo_detail.repo_action or ""), side=str(row.side)
+                            )
+                            == "LEND"
+                        ):
+                            row.amount = principal_new
+                    elif strategy_type != "bond_repo":
+                        row.amount = float(row.price) * qty_new
+                if "fee" in patch:
+                    row.fee = float(patch["fee"])
+
+                repo_detail_payload = _repo_detail_payload_from_row(
+                    repo_detail, side=str(row.side)
+                )
+                _validate_trade_funding_constraints(
+                    db,
+                    account_id=int(row.account_id),
+                    strategy_id=int(row.strategy_id),
+                    strategy_type=_strategy_type_for(db, int(row.strategy_id)),
+                    trade_date=row.trade_date,
+                    trade_time=str(row.trade_time),
+                    side=str(row.side),
+                    amount=float(row.amount),
+                    fee=float(row.fee or 0.0),
+                    repo_detail=repo_detail_payload,
+                    exclude_trade_id=int(row.id),
+                    order_trade_id=int(row.id),
+                )
+                db.flush()
+                _log_trade_audit(
+                    db,
+                    trade_id=int(row.id),
+                    account_id=int(row.account_id),
+                    strategy_id=int(row.strategy_id),
+                    action="audit_fix",
+                    reason=reason,
+                    snapshot={
+                        "before": old_snapshot,
+                        "after": _serialize_trade(
+                            row, repo_detail=repo_detail
+                        ).model_dump(),
+                    },
+                )
+            touched_strategy_ids.add(int(row.strategy_id))
+            touched_account_ids.add(int(row.account_id))
+            updated_trade_ids.append(int(row.id))
+        except HTTPException as exc:
+            detail = (
+                str(exc.detail)
+                if isinstance(exc.detail, str)
+                else json.dumps(exc.detail, ensure_ascii=False, sort_keys=True)
+            )
+            skipped_details.append({"trade_id": tid, "reason": detail})
+            continue
+        except (TypeError, ValueError) as exc:
+            skipped_details.append({"trade_id": tid, "reason": str(exc)})
+            continue
+        except Exception as exc:
+            skipped_details.append(
+                {"trade_id": tid, "reason": f"unexpected audit error: {str(exc)}"}
+            )
+            continue
+
+    if touched_strategy_ids or touched_account_ids:
+        _replay_touched_scopes(
+            db,
+            strategy_ids=touched_strategy_ids,
+            account_ids=touched_account_ids,
+        )
+    return LiveTradeAuditConfirmOut(
+        requested=int(len(req_ids)),
+        updated=int(len(updated_trade_ids)),
+        skipped=int(len(req_ids) - len(updated_trade_ids)),
+        updated_trade_ids=updated_trade_ids,
+        skipped_details=skipped_details,
+    )
 
 
 @router.delete("/trades/{trade_id}")

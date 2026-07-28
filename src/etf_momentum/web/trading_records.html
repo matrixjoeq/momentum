@@ -675,6 +675,46 @@
       </div>
     </div>
 
+    <div class="panel">
+      <h3>成交数量与费用审计</h3>
+      <div class="muted" style="margin-bottom: 8px">
+        按当前账户/策略范围审计成交数量和交易费用是否符合预设规则；可逐条、部分勾选或全部确认自动修正。
+      </div>
+      <div class="row no-print" style="gap: 8px; margin-bottom: 8px">
+        <button id="tradeAuditRunBtn" type="button">运行审计</button>
+        <button id="tradeAuditApplySelectedBtn" type="button">
+          确认修正已勾选
+        </button>
+        <button id="tradeAuditApplyAllBtn" type="button">确认修正全部</button>
+        <button id="tradeAuditClearSelectionBtn" type="button">清空勾选</button>
+      </div>
+      <div id="tradeAuditSummary" class="muted">尚未运行审计</div>
+      <table id="tradeAuditTable" style="margin-top: 8px">
+        <thead>
+          <tr>
+            <th>
+              <input id="tradeAuditSelectAll" type="checkbox" />
+            </th>
+            <th>ID</th>
+            <th>日期</th>
+            <th>时间</th>
+            <th>代码</th>
+            <th>方向</th>
+            <th>数量</th>
+            <th>费用</th>
+            <th>问题</th>
+            <th>建议修正</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="tradeAuditTbody">
+          <tr>
+            <td colspan="11" class="muted">暂无审计结果</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <div id="reasonModal" class="modal-backdrop" aria-hidden="true">
       <div class="modal-card" role="dialog" aria-modal="true">
         <h3 id="reasonModalTitle">填写理由</h3>
@@ -811,6 +851,9 @@
       let editingTradeId = null;
       let strategyMetaById = new Map();
       let tradesRowsCache = [];
+      let tradeAuditRowsCache = [];
+      let tradeAuditScopeKey = "";
+      let tradeAuditSelection = new Set();
       let holdingsRowsCache = [];
       let navRowsCache = [];
       let roundsRowsCache = [];
@@ -949,6 +992,39 @@
         const amt = Number(amount);
         if (!Number.isFinite(amt) || amt <= 0) return 0;
         return roundHalfUp(amt * REPO_FEE_RATE, 2);
+      }
+
+      function shouldAutoFeeInEditMode(row) {
+        if (!row || typeof row !== "object") return true;
+        const feeRaw = Number(row.fee);
+        if (!Number.isFinite(feeRaw) || feeRaw <= 0) return true;
+        const strategyType = strategyTypeById(row.strategy_id);
+        let expected = null;
+        if (strategyType === "bond_repo") {
+          const action = String(row.repo_action || "").toUpperCase();
+          if (action === "BUYBACK") {
+            expected = 0;
+          } else {
+            const principal = Number(row.repo_principal_amount);
+            const amount = Number(row.amount);
+            const qty = Number(row.quantity);
+            const fallbackPrincipal =
+              Number.isFinite(qty) && qty > 0 ? qty * REPO_LOT_AMOUNT : NaN;
+            const basis =
+              Number.isFinite(principal) && principal > 0
+                ? principal
+                : Number.isFinite(amount) && amount > 0
+                  ? amount
+                  : fallbackPrincipal;
+            expected = calcDefaultRepoFee(basis);
+          }
+        } else {
+          expected = calcDefaultTradeFee(row.price, row.quantity);
+        }
+        if (!Number.isFinite(Number(expected))) return false;
+        const feeNorm = roundHalfUp(feeRaw, 2);
+        const expNorm = roundHalfUp(Number(expected), 2);
+        return Math.abs(feeNorm - expNorm) <= 0.01;
       }
 
       function applyTradeFeeDefault(force = false) {
@@ -1918,6 +1994,8 @@
         $("tradeEditHint").style.display = "";
         $("tradeEditHint").textContent =
           `正在修改成交 #${row.id}（保存时需填写修改理由）`;
+        tradeFeeAuto = shouldAutoFeeInEditMode(row);
+        if (tradeFeeAuto) applyTradeFeeDefault(true);
       }
 
       function buildTradePayloadFromForm(aid, sid, hid, qty) {
@@ -2289,6 +2367,172 @@
         }
         if (prevBtn) prevBtn.disabled = !total || tradesPage <= 1;
         if (nextBtn) nextBtn.disabled = !total || tradesPage >= totalPages;
+      }
+
+      function _tradeAuditScopeKey(scope) {
+        if (!scope || !scope.scope_id) return "";
+        return `${scope.scope_type}:${scope.scope_id}`;
+      }
+
+      function _tradeAuditIssueText(row) {
+        const arr = Array.isArray(row?.mismatches) ? row.mismatches : [];
+        if (!arr.length) return "-";
+        return arr
+          .map((m) => {
+            if (String(m?.field || "") === "audit") {
+              const detail = String(m?.detail || "未知审计错误");
+              return `审计错误: ${detail}`;
+            }
+            const field = m?.field === "quantity" ? "数量" : "费用";
+            const expected = m?.expected == null ? "-" : String(m.expected);
+            const current = m?.current == null ? "-" : String(m.current);
+            return `${field}: 当前=${current}, 应为=${expected}`;
+          })
+          .join("；");
+      }
+
+      function _tradeAuditPatchText(row) {
+        const p =
+          row && row.suggested_patch && typeof row.suggested_patch === "object"
+            ? row.suggested_patch
+            : null;
+        if (!p) return "仅人工核对";
+        const parts = [];
+        if (p.quantity != null)
+          parts.push(`数量→${fmtInt(p.quantity) ?? String(p.quantity)}`);
+        if (p.fee != null) parts.push(`费用→${fmtNum(p.fee, 2)}`);
+        return parts.length ? parts.join("，") : "仅人工核对";
+      }
+
+      function renderTradeAuditRows(rows) {
+        const tbody = $("tradeAuditTbody");
+        if (!tbody) return;
+        const list = Array.isArray(rows) ? rows : [];
+        if (!list.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="11" class="muted">未发现数量/费用不匹配记录</td></tr>';
+          return;
+        }
+        tbody.innerHTML = list
+          .map((x) => {
+            const id = Number(x.trade_id || 0);
+            const checked = tradeAuditSelection.has(id) ? "checked" : "";
+            const patchable =
+              x &&
+              x.suggested_patch &&
+              Object.keys(x.suggested_patch).length > 0;
+            return `
+              <tr>
+                <td><input type="checkbox" data-audit-check="1" data-trade-id="${id}" ${checked} /></td>
+                <td>${id}</td>
+                <td>${x.trade_date || ""}</td>
+                <td>${x.trade_time || ""}</td>
+                <td>${x.code || ""}</td>
+                <td>${x.side || ""}</td>
+                <td>${fmtInt(x.quantity)}</td>
+                <td>${fmtNum(x.fee, 2)}</td>
+                <td>${esc(_tradeAuditIssueText(x))}</td>
+                <td>${esc(_tradeAuditPatchText(x))}</td>
+                <td>
+                  ${
+                    patchable
+                      ? `<button type="button" data-audit-apply-one="${id}">确认修正</button>`
+                      : `<span class="muted">仅手工</span>`
+                  }
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      function renderTradeAuditSummary(data) {
+        const el = $("tradeAuditSummary");
+        if (!el) return;
+        if (!data || typeof data !== "object") {
+          el.textContent = "尚未运行审计";
+          return;
+        }
+        const total = Number(data.total_trades || 0);
+        const mismatch = Number(data.mismatch_trades || 0);
+        el.textContent = `审计范围 ${data.scope_type || "-"}#${
+          data.scope_id || "-"
+        }：总成交 ${total} 条，不匹配 ${mismatch} 条。`;
+      }
+
+      function clearTradeAuditState(summaryText = "尚未运行审计") {
+        tradeAuditRowsCache = [];
+        tradeAuditSelection = new Set();
+        tradeAuditScopeKey = "";
+        if ($("tradeAuditSummary"))
+          $("tradeAuditSummary").textContent = summaryText;
+        if ($("tradeAuditTbody")) {
+          $("tradeAuditTbody").innerHTML =
+            '<tr><td colspan="11" class="muted">暂无审计结果</td></tr>';
+        }
+        if ($("tradeAuditSelectAll")) $("tradeAuditSelectAll").checked = false;
+      }
+
+      async function runTradeAudit() {
+        const scope = currentScope();
+        if (!scope.scope_id) throw new Error("请先选择账户或策略");
+        const key = _tradeAuditScopeKey(scope);
+        const out = await api(
+          `/trades/audit/fee-quantity?scope_type=${scope.scope_type}&scope_id=${scope.scope_id}`,
+        );
+        tradeAuditScopeKey = key;
+        tradeAuditRowsCache = Array.isArray(out?.mismatch_rows)
+          ? out.mismatch_rows
+          : [];
+        const validIds = new Set(
+          tradeAuditRowsCache
+            .map((x) => Number(x?.trade_id || 0))
+            .filter((x) => Number.isFinite(x) && x > 0),
+        );
+        tradeAuditSelection = new Set(
+          Array.from(tradeAuditSelection).filter((id) => validIds.has(id)),
+        );
+        renderTradeAuditSummary(out);
+        renderTradeAuditRows(tradeAuditRowsCache);
+        if ($("tradeAuditSelectAll")) $("tradeAuditSelectAll").checked = false;
+      }
+
+      async function applyTradeAuditFixesByIds(tradeIds) {
+        const ids = Array.from(
+          new Set(
+            (tradeIds || [])
+              .map((x) => Number(x))
+              .filter((x) => Number.isFinite(x) && x > 0),
+          ),
+        );
+        if (!ids.length) throw new Error("请先选择要确认修正的审计条目");
+        const reason = await askReasonInput({
+          title: `确认审计修正（${ids.length} 条）`,
+          hint: "请填写本次审计修正理由（必填）",
+          confirmText: "确认修正",
+        });
+        if (reason == null) return;
+        const scope = currentScope();
+        if (!scope.scope_id) throw new Error("请先选择账户或策略");
+        const out = await api(
+          `/trades/audit/fee-quantity/confirm?scope_type=${scope.scope_type}&scope_id=${scope.scope_id}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ trade_ids: ids, reason }),
+          },
+        );
+        await refreshTradeRelatedViews();
+        await runTradeAudit();
+        const skipped = Array.isArray(out?.skipped_details)
+          ? out.skipped_details
+          : [];
+        const skippedHint = skipped.length
+          ? `；跳过 ${skipped.length} 条（${skipped
+              .slice(0, 3)
+              .map((x) => `#${x.trade_id}:${x.reason}`)
+              .join("；")}${skipped.length > 3 ? "；..." : ""}）`
+          : "";
+        msg(`审计修正完成：更新 ${out.updated || 0} 条${skippedHint}`);
       }
 
       function renderHoldingsRows(rows) {
@@ -3227,6 +3471,7 @@
         if (!aid && !sid) {
           tradesRowsCache = [];
           tradesPage = 1;
+          clearTradeAuditState("暂无账户，请先创建账户后再审计。");
           holdingsRowsCache = [];
           holdingsPage = 1;
           navRowsCache = [];
@@ -3252,6 +3497,10 @@
           msg("暂无账户，请先创建账户、策略和股东账号。");
           return;
         }
+        const nextAuditScopeKey = _tradeAuditScopeKey(currentScope());
+        if (tradeAuditScopeKey && tradeAuditScopeKey !== nextAuditScopeKey) {
+          clearTradeAuditState("范围已切换，请重新运行审计。");
+        }
         await Promise.all([
           loadTrades(),
           loadHoldings(),
@@ -3274,6 +3523,16 @@
           loadRoundsAndStats(),
           loadOverviewCashflowRecords(),
         ]);
+        if (
+          tradeAuditScopeKey &&
+          tradeAuditScopeKey === _tradeAuditScopeKey(s)
+        ) {
+          try {
+            await runTradeAudit();
+          } catch (_) {
+            // best-effort: keep main trade workflow non-blocking
+          }
+        }
       }
 
       function parseCsvTrades(text, aid, sid, hid) {
@@ -3656,6 +3915,75 @@
             }
             await refreshTradeRelatedViews();
             msg(`成交 #${row.id} 已删除`);
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("tradeAuditRunBtn").addEventListener("click", async () => {
+          try {
+            await runTradeAudit();
+            msg("成交数量/费用审计完成");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("tradeAuditApplySelectedBtn").addEventListener("click", async () => {
+          try {
+            await applyTradeAuditFixesByIds(Array.from(tradeAuditSelection));
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("tradeAuditApplyAllBtn").addEventListener("click", async () => {
+          try {
+            const allIds = (tradeAuditRowsCache || [])
+              .map((x) => Number(x?.trade_id || 0))
+              .filter((x) => Number.isFinite(x) && x > 0);
+            await applyTradeAuditFixesByIds(allIds);
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("tradeAuditClearSelectionBtn").addEventListener("click", () => {
+          tradeAuditSelection = new Set();
+          renderTradeAuditRows(tradeAuditRowsCache);
+          if ($("tradeAuditSelectAll"))
+            $("tradeAuditSelectAll").checked = false;
+        });
+        $("tradeAuditSelectAll").addEventListener("change", () => {
+          const checked = Boolean($("tradeAuditSelectAll").checked);
+          if (checked) {
+            tradeAuditSelection = new Set(
+              (tradeAuditRowsCache || [])
+                .map((x) => Number(x?.trade_id || 0))
+                .filter((x) => Number.isFinite(x) && x > 0),
+            );
+          } else {
+            tradeAuditSelection = new Set();
+          }
+          renderTradeAuditRows(tradeAuditRowsCache);
+        });
+        $("tradeAuditTbody").addEventListener("change", (evt) => {
+          const chk =
+            evt.target && evt.target.matches
+              ? evt.target.matches("input[data-audit-check='1']")
+              : false;
+          if (!chk) return;
+          const id = Number(evt.target.getAttribute("data-trade-id") || 0);
+          if (!Number.isFinite(id) || id <= 0) return;
+          if (evt.target.checked) tradeAuditSelection.add(id);
+          else tradeAuditSelection.delete(id);
+        });
+        $("tradeAuditTbody").addEventListener("click", async (evt) => {
+          const btn =
+            evt.target && evt.target.closest
+              ? evt.target.closest("button[data-audit-apply-one]")
+              : null;
+          if (!btn) return;
+          const id = Number(btn.getAttribute("data-audit-apply-one") || 0);
+          if (!Number.isFinite(id) || id <= 0) return;
+          try {
+            await applyTradeAuditFixesByIds([id]);
           } catch (e) {
             msg(e.message, true);
           }

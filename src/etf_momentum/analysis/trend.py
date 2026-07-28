@@ -1754,6 +1754,24 @@ def _dist_stats(values: list[float]) -> dict[str, Any]:
     }
 
 
+def _holding_asset_count_stats_from_weights(
+    weights: pd.Series | pd.DataFrame, *, eps: float = 1e-12
+) -> dict[str, Any]:
+    if isinstance(weights, pd.Series):
+        wdf = weights.to_frame(name=str(weights.name or "__SINGLE__"))
+    elif isinstance(weights, pd.DataFrame):
+        wdf = weights.copy()
+    else:
+        return _dist_stats([])
+    if wdf.empty:
+        return _dist_stats([])
+    ww = wdf.astype(float).fillna(0.0)
+    counts_s = (ww.abs() > float(abs(eps))).sum(axis=1).astype(float)
+    # Only count non-empty holding days (exclude pure-cash days).
+    counts = counts_s[counts_s > 0.0].tolist()
+    return _dist_stats(counts)
+
+
 def _max_drawdown_from_trade_returns(values: list[float]) -> float | None:
     arr = np.asarray(
         [float(x) for x in (values or []) if np.isfinite(float(x))], dtype=float
@@ -9378,6 +9396,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     single_semi_variance_stats = _semi_variance_run_stats_from_returns(
         strat_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
     )
+    single_holding_asset_count_stats = _holding_asset_count_stats_from_weights(
+        w.reindex(nav.index).astype(float).fillna(0.0)
+    )
     trade_stats = {
         "overall": _trade_stats_from_returns(
             trade_one.get("returns", []),
@@ -9409,6 +9430,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         dict((trade_extreme_stats.get("by_code") or {}).get(str(code)) or {})
     )
     trade_stats["overall"]["semi_variance"] = dict(single_semi_variance_stats)
+    trade_stats["overall"]["holding_asset_count_stats"] = dict(
+        single_holding_asset_count_stats
+    )
     trade_stats["by_code"][str(code)]["semi_variance"] = dict(
         single_semi_variance_stats
     )
@@ -13352,6 +13376,9 @@ def compute_trend_portfolio_backtest(
     portfolio_semi_variance_overall = _semi_variance_run_stats_from_returns(
         port_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
     )
+    portfolio_holding_asset_count_stats = _holding_asset_count_stats_from_weights(
+        w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0)
+    )
     ret_exec_for_runs = (
         ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0)
     )
@@ -13409,6 +13436,9 @@ def compute_trend_portfolio_backtest(
         if isinstance(trade_stats["by_code"].get(ck), dict):
             trade_stats["by_code"][ck].update(dict(by_code_extreme.get(ck) or {}))
     trade_stats["overall"]["semi_variance"] = dict(portfolio_semi_variance_overall)
+    trade_stats["overall"]["holding_asset_count_stats"] = dict(
+        portfolio_holding_asset_count_stats
+    )
     for c in codes:
         code_key = str(c)
         one = trade_stats["by_code"].get(code_key)

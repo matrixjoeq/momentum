@@ -618,6 +618,14 @@
         口径：hfq（后复权）。横纵坐标为标的编号（见下方映射）。
       </div>
       <div class="row no-print" style="gap: 8px; margin-top: 8px">
+        <div>
+          <label>相关性算法</label>
+          <select id="corrMethod" style="min-width: 260px">
+            <option value="pearson_log" selected>线性相关（对数收益率）</option>
+            <option value="spearman_simple">秩相关（基础收益率）</option>
+          </select>
+        </div>
+        <button id="corrAutoPickBtn">自动筛选低相关组合（3Y≤0.4）</button>
         <button id="corrRange1m">近一月</button>
         <button id="corrRange3m">近三月</button>
         <button id="corrRange6m">近六月</button>
@@ -629,6 +637,8 @@
         <span id="corrRangeHint" class="muted" style="margin-left: 6px"></span>
       </div>
       <div id="corrLegend" class="muted" style="margin-top: 6px"></div>
+      <div id="corrAutoPickSummary" class="muted" style="margin-top: 6px"></div>
+      <table id="corrAutoPickTable" style="margin-top: 8px"></table>
       <div id="corrHeatmap" style="width: 100%; height: 1000px"></div>
     </div>
 
@@ -10064,6 +10074,7 @@
 
       let lastBaseline = null; // latest baseline analysis payload (for client-side correlation re-slicing)
       let corrRangeKey = "all";
+      let corrMethodKey = "pearson_log";
 
       function openMetricModal(key, metrics) {
         const h = metricHelp[key] || {
@@ -10255,6 +10266,7 @@
         { dates, codes, seriesByCode },
         startIdx,
         minObs = 20,
+        method = "pearson_log",
       ) {
         const endIdx = dates.length - 1;
         const n = codes.length;
@@ -10268,9 +10280,20 @@
           for (let i = 1; i < nav.length; i++) {
             const a = Number(nav[i - 1]);
             const b = Number(nav[i]);
-            if (!Number.isFinite(a) || !Number.isFinite(b) || a === 0)
+            if (
+              !Number.isFinite(a) ||
+              !Number.isFinite(b) ||
+              a <= 0 ||
+              b <= 0
+            ) {
               r.push(NaN);
-            else r.push(b / a - 1.0);
+              continue;
+            }
+            if (method === "pearson_log") {
+              r.push(Math.log(b / a));
+            } else {
+              r.push(b / a - 1.0);
+            }
           }
           return r;
         });
@@ -10279,7 +10302,7 @@
           Array.from({ length: n }, () => null),
         );
 
-        const corrPair = (x, y) => {
+        const _pearson = (x, y) => {
           let nObs = 0;
           let sx = 0,
             sy = 0;
@@ -10313,6 +10336,43 @@
           if (sxx <= 0 || syy <= 0) return { nObs, value: null };
           return { nObs, value: sxy / Math.sqrt(sxx * syy) };
         };
+        const _avgRank = (arr) => {
+          const nArr = arr.length;
+          const pairs = arr
+            .map((v, idx) => ({ v, idx }))
+            .sort((a, b) => a.v - b.v);
+          const rank = Array.from({ length: nArr }, () => NaN);
+          let i = 0;
+          while (i < nArr) {
+            let j = i;
+            while (j + 1 < nArr && pairs[j + 1].v === pairs[i].v) j += 1;
+            const r = (i + j + 2) / 2; // rank starts at 1
+            for (let k = i; k <= j; k++) rank[pairs[k].idx] = r;
+            i = j + 1;
+          }
+          return rank;
+        };
+        const _spearman = (x, y) => {
+          const xv = [];
+          const yv = [];
+          for (let i = 0; i < t; i++) {
+            const xi = x[i],
+              yi = y[i];
+            if (Number.isFinite(xi) && Number.isFinite(yi)) {
+              xv.push(xi);
+              yv.push(yi);
+            }
+          }
+          const nObs = xv.length;
+          if (nObs < Math.max(3, Number(minObs || 20)))
+            return { nObs, value: null };
+          const xr = _avgRank(xv);
+          const yr = _avgRank(yv);
+          const p = _pearson(xr, yr);
+          return { nObs, value: p.value };
+        };
+        const corrPair = (x, y) =>
+          method === "spearman_simple" ? _spearman(x, y) : _pearson(x, y);
 
         let nObsMin = null;
         for (let i = 0; i < n; i++) {
@@ -10331,6 +10391,189 @@
           matrix: corr,
           nObsMin: nObsMin == null ? 0 : nObsMin,
         };
+      }
+
+      function _maxCliquePairwiseLowCorr(codes, matrix, absThreshold = 0.4) {
+        const n = Array.isArray(codes) ? codes.length : 0;
+        if (!n || !Array.isArray(matrix) || matrix.length !== n) return [];
+        const adj = Array.from({ length: n }, () =>
+          Array.from({ length: n }, () => false),
+        );
+        for (let i = 0; i < n; i++) {
+          for (let j = i + 1; j < n; j++) {
+            const v = Number(matrix[i] && matrix[i][j]);
+            const ok = Number.isFinite(v) && Math.abs(v) <= absThreshold;
+            adj[i][j] = ok;
+            adj[j][i] = ok;
+          }
+        }
+
+        let best = [];
+        const colorSort = (p) => {
+          const order = [];
+          const bounds = [];
+          const classes = [];
+          for (const v of p) {
+            let c = 0;
+            for (;;) {
+              if (!classes[c]) {
+                classes[c] = [v];
+                break;
+              }
+              let compatible = true;
+              for (const u of classes[c]) {
+                if (!adj[v][u]) {
+                  compatible = false;
+                  break;
+                }
+              }
+              if (compatible) {
+                classes[c].push(v);
+                break;
+              }
+              c += 1;
+            }
+          }
+          for (let c = 0; c < classes.length; c++) {
+            const cls = classes[c] || [];
+            for (const v of cls) {
+              order.push(v);
+              bounds.push(c + 1);
+            }
+          }
+          return { order, bounds };
+        };
+
+        const expand = (r, p) => {
+          if (p.length === 0) {
+            if (r.length > best.length) best = r.slice();
+            return;
+          }
+          const { order, bounds } = colorSort(p);
+          for (let i = order.length - 1; i >= 0; i--) {
+            if (r.length + bounds[i] <= best.length) return;
+            const v = order[i];
+            const nextR = r.concat(v);
+            const nextP = [];
+            for (let j = 0; j < i; j++) {
+              const u = order[j];
+              if (adj[v][u]) nextP.push(u);
+            }
+            if (nextR.length + nextP.length <= best.length) continue;
+            if (nextP.length === 0) {
+              if (nextR.length > best.length) best = nextR.slice();
+            } else {
+              expand(nextR, nextP);
+            }
+          }
+        };
+
+        const vertices = Array.from({ length: n }, (_, i) => i);
+        vertices.sort((a, b) => {
+          const da = adj[a].reduce((s, x) => s + (x ? 1 : 0), 0);
+          const db = adj[b].reduce((s, x) => s + (x ? 1 : 0), 0);
+          return db - da;
+        });
+        expand([], vertices);
+        best.sort((a, b) => a - b);
+        return best;
+      }
+
+      function _computeCorrAutoPick3y() {
+        if (!lastBaseline || !lastBaseline.nav || !lastBaseline.codes) {
+          return { ok: false, error: "请先完成一次持有策略回测。" };
+        }
+        const codes = lastBaseline.codes || [];
+        const dates = (lastBaseline.nav && lastBaseline.nav.dates) || [];
+        if (!codes.length || !dates.length) {
+          return { ok: false, error: "当前回测缺少相关性所需数据。" };
+        }
+        const end = isoToDate(dates[dates.length - 1]);
+        if (!end) return { ok: false, error: "无法识别回测结束日期。" };
+        const spec = _corrRangeSpec("3y");
+        const threshold = spec.threshold ? spec.threshold(end) : null;
+        const startIdx = _findStartIndexByThreshold(dates, threshold);
+        if (startIdx >= dates.length) {
+          return { ok: false, error: "当前回测区间不足3年，无法执行筛选。" };
+        }
+
+        const seriesByCode = {};
+        for (const c of codes) seriesByCode[c] = lastBaseline.nav.series[c];
+        const minObs =
+          (lastBaseline &&
+            lastBaseline.correlation &&
+            Number(lastBaseline.correlation.min_pair_obs)) ||
+          20;
+        const corrData = _corrMatrixFromNav(
+          { dates, codes, seriesByCode },
+          startIdx,
+          minObs,
+          corrMethodKey,
+        );
+        if (!corrData.ok || !corrData.matrix) {
+          return { ok: false, error: "3年相关性矩阵计算失败。" };
+        }
+
+        const pickedIdx = _maxCliquePairwiseLowCorr(
+          codes,
+          corrData.matrix,
+          0.4,
+        );
+        const pickedCodes = pickedIdx.map((i) => codes[i]);
+        let maxAbsCorr = null;
+        for (let i = 0; i < pickedIdx.length; i++) {
+          for (let j = i + 1; j < pickedIdx.length; j++) {
+            const a = pickedIdx[i];
+            const b = pickedIdx[j];
+            const v = Number(corrData.matrix[a] && corrData.matrix[a][b]);
+            if (!Number.isFinite(v)) continue;
+            const av = Math.abs(v);
+            if (maxAbsCorr == null || av > maxAbsCorr) maxAbsCorr = av;
+          }
+        }
+        return {
+          ok: true,
+          startDate: dates[startIdx],
+          endDate: dates[dates.length - 1],
+          pickedCodes,
+          universeSize: codes.length,
+          pickedSize: pickedCodes.length,
+          maxAbsCorr,
+        };
+      }
+
+      function renderCorrAutoPick(result) {
+        const summaryEl = $("corrAutoPickSummary");
+        const tableEl = $("corrAutoPickTable");
+        if (!summaryEl || !tableEl) return;
+        if (!result || !result.ok) {
+          const msg = (result && result.error) || "暂无筛选结果";
+          summaryEl.textContent = msg;
+          tableEl.innerHTML = "";
+          return;
+        }
+        const methodLabel =
+          corrMethodKey === "spearman_simple"
+            ? "秩相关（基础收益率）"
+            : "线性相关（对数收益率）";
+        summaryEl.textContent =
+          `自动筛选结果：${result.startDate} ~ ${result.endDate}，` +
+          `规则 |rho|<=0.4，算法 ${methodLabel}，` +
+          `入选 ${result.pickedSize}/${result.universeSize}；` +
+          `子集内最大|rho|=${
+            result.maxAbsCorr == null
+              ? "-"
+              : Number(result.maxAbsCorr).toFixed(3)
+          }`;
+        const nameByCode = new Map((pool || []).map((x) => [x.code, x.name]));
+        tableEl.innerHTML =
+          "<tr><th>#</th><th>代码</th><th>名称</th></tr>" +
+          result.pickedCodes
+            .map(
+              (c, i) =>
+                `<tr><td>${i + 1}</td><td>${c}</td><td>${nameByCode.get(c) || ""}</td></tr>`,
+            )
+            .join("");
       }
 
       function refreshCorrelationForRange(key) {
@@ -10361,16 +10604,22 @@
           { dates, codes, seriesByCode },
           startIdx,
           minObs,
+          corrMethodKey,
         );
         if (!calc.ok) return;
+        const methodLabel =
+          corrMethodKey === "spearman_simple"
+            ? "秩相关（基础收益率）"
+            : "线性相关（对数收益率）";
 
         const startDate = dates[startIdx];
         const endDate = dates[dates.length - 1];
         $("corrRangeTitle").textContent =
           `· ${spec.label}（${startDate} ~ ${endDate}）`;
-        $("corrRangeHint").textContent = `样本数(最小对)：${calc.nObsMin}`;
+        $("corrRangeHint").textContent =
+          `算法：${methodLabel}；样本数(最小对)：${calc.nObsMin}`;
         plotCorrelation({
-          method: "pearson",
+          method: corrMethodKey,
           codes,
           matrix: calc.matrix,
           n_obs: calc.nObsMin,
@@ -24770,6 +25019,7 @@
         const minPossibleOverall = _obj(s.min_possible_return_stats);
         const minPossibleProfit = _obj(s.min_possible_return_profit_stats);
         const minPossibleLoss = _obj(s.min_possible_return_loss_stats);
+        const holdingAssetCountOverall = _obj(s.holding_asset_count_stats);
         const holdingDaysPack = _obj(s.holding_days_stats);
         const holdingDaysOverall = _obj(holdingDaysPack.overall);
         const holdingDaysProfit = _obj(holdingDaysPack.profit_trades);
@@ -24803,6 +25053,7 @@
           _hasDist(minPossibleOverall) ||
           _hasDist(minPossibleProfit) ||
           _hasDist(minPossibleLoss) ||
+          _hasDist(holdingAssetCountOverall) ||
           _hasDist(holdingDaysOverall) ||
           _hasDist(holdingDaysProfit) ||
           _hasDist(holdingDaysLoss) ||
@@ -24824,6 +25075,11 @@
               _distRows("最小可能收益率（总体）", minPossibleOverall, _v) +
               _distRows("最小可能收益率（盈利交易）", minPossibleProfit, _v) +
               _distRows("最小可能收益率（亏损交易）", minPossibleLoss, _v) +
+              _distRows(
+                "持仓标的数量（日度）",
+                holdingAssetCountOverall,
+                _num,
+              ) +
               _distRows("持仓时长(交易日)（总体）", holdingDaysOverall, _num) +
               _distRows(
                 "持仓时长(交易日)（盈利交易）",
@@ -37479,6 +37735,10 @@
         window.__distBaselineCache = window.__distBaselineCache || {};
         window.__distBaselineCache[ADJUST_USED] = data;
         corrRangeKey = "all";
+        renderCorrAutoPick({
+          ok: false,
+          error: "点击“自动筛选低相关组合（3Y≤0.4）”生成结果。",
+        });
         const _pickBaselineMode = (m) => {
           const by = data.metrics_by_portfolio || {};
           const mode = (m || "EW").toUpperCase();
@@ -41030,6 +41290,23 @@
       wireCorrBtn("5y", "corrRange5y");
       wireCorrBtn("10y", "corrRange10y");
       wireCorrBtn("all", "corrRangeAll");
+      if ($("corrAutoPickBtn")) {
+        $("corrAutoPickBtn").addEventListener("click", () => {
+          const picked = _computeCorrAutoPick3y();
+          renderCorrAutoPick(picked);
+        });
+      }
+      if ($("corrMethod")) {
+        $("corrMethod").value = corrMethodKey;
+        $("corrMethod").addEventListener("change", () => {
+          corrMethodKey = String($("corrMethod").value || "pearson_log");
+          refreshCorrelationForRange(corrRangeKey);
+          const tableEl = $("corrAutoPickTable");
+          if (tableEl && tableEl.rows && tableEl.rows.length > 0) {
+            renderCorrAutoPick(_computeCorrAutoPick3y());
+          }
+        });
+      }
 
       // Re-plot histograms when metric selection changes (if mc already rendered)
       $("mcEwMetric").addEventListener("change", () => {
