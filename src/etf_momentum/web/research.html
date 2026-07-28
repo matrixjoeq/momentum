@@ -24688,6 +24688,13 @@
         return arr[lo] + (arr[hi] - arr[lo]) * (pos - lo);
       }
 
+      function _percentileRankRatio(vals, v) {
+        const arr = vals.filter((x) => Number.isFinite(x));
+        if (!arr.length || !Number.isFinite(v)) return NaN;
+        const leCount = arr.filter((x) => x <= v).length;
+        return leCount / arr.length;
+      }
+
       function _dailyReturnsFromNav(nav, dates) {
         const outSimple = [];
         const outLog = [];
@@ -26077,6 +26084,7 @@
         const std = _std(xs);
         const minV = Math.min(...xs);
         const maxV = Math.max(...xs);
+        const q01 = _percentile(xs, 1);
         const q05 = _percentile(xs, 5);
         const q10 = _percentile(xs, 10);
         const q25 = _percentile(xs, 25);
@@ -26084,6 +26092,7 @@
         const q75 = _percentile(xs, 75);
         const q90 = _percentile(xs, 90);
         const q95 = _percentile(xs, 95);
+        const q99 = _percentile(xs, 99);
         const cv =
           Number.isFinite(mean) &&
           Math.abs(mean) > 1e-12 &&
@@ -26097,6 +26106,11 @@
           Number.isFinite(q75) && Number.isFinite(q25) ? q75 - q25 : NaN;
         const p90p10 =
           Number.isFinite(q90) && Number.isFinite(q10) ? q90 - q10 : NaN;
+        const currentValue = xs[xs.length - 1];
+        const currentLabel = dateLabels.length
+          ? String(dateLabels[dateLabels.length - 1])
+          : "";
+        const currentPercentile = _percentileRankRatio(xs, currentValue);
         return {
           window_n: windowN,
           sample_size: xs.length,
@@ -26109,6 +26123,7 @@
           cv,
           min: minV,
           max: maxV,
+          q01,
           q05,
           q10,
           q25,
@@ -26116,6 +26131,7 @@
           q75,
           q90,
           q95,
+          q99,
           iqr,
           p90p10,
           skewness: _skewness(xs),
@@ -26123,6 +26139,9 @@
           neg_ratio: negRatio,
           ge_16_ratio: ge16Ratio,
           ge_20_ratio: ge20Ratio,
+          current_value: currentValue,
+          current_label: currentLabel,
+          current_percentile_ratio: currentPercentile,
         };
       }
 
@@ -26180,9 +26199,11 @@
           `<tr><td>最小 / 最大</td><td>${n(s.min)} / ${n(s.max)}</td></tr>` +
           `<tr><td>均值 / 标准差</td><td>${n(s.mean)} / ${n(s.std)}</td></tr>` +
           `<tr><td>偏度 / 峰度(超额)</td><td>${n(s.skewness)} / ${n(s.kurtosis_excess)}</td></tr>` +
-          `<tr><td>P05 / P10 / P25</td><td>${n(s.q05)} / ${n(s.q10)} / ${n(s.q25)}</td></tr>` +
-          `<tr><td>P50 / P75 / P90 / P95</td><td>${n(s.q50)} / ${n(s.q75)} / ${n(s.q90)} / ${n(s.q95)}</td></tr>` +
+          `<tr><td>P01 / P05 / P10</td><td>${n(s.q01)} / ${n(s.q05)} / ${n(s.q10)}</td></tr>` +
+          `<tr><td>P25 / P50 / P75</td><td>${n(s.q25)} / ${n(s.q50)} / ${n(s.q75)}</td></tr>` +
+          `<tr><td>P90 / P95 / P99</td><td>${n(s.q90)} / ${n(s.q95)} / ${n(s.q99)}</td></tr>` +
           `<tr><td>IQR(P75-P25) / P90-P10</td><td>${n(s.iqr)} / ${n(s.p90p10)}</td></tr>` +
+          `<tr><td>当前近100次SQN值（全历史百分位）</td><td>${n(s.current_value)}（${p(s.current_percentile_ratio)}）</td></tr>` +
           `<tr><td>负SQN占比 / SQN≥1.6占比 / SQN≥2.0占比</td><td>${p(s.neg_ratio)} / ${p(s.ge_16_ratio)} / ${p(s.ge_20_ratio)}</td></tr>` +
           `<tr><td>变异系数CV(Std/|Mean|)</td><td>${n(s.cv)}</td></tr>`;
       }
