@@ -265,3 +265,28 @@ def test_runtime_schema_adds_pair_chart_prefs_column(tmp_path) -> None:
     ensure_runtime_schema(engine)
     cols = {c["name"] for c in inspect(engine).get_columns("off_fund_research_state")}
     assert "pair_chart_prefs_json" in cols
+
+
+def test_runtime_schema_adds_global_benchmark_series_kind_without_futures_table(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "legacy_global_benchmark.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE etf_pool (id INTEGER PRIMARY KEY)"))
+        conn.execute(text("CREATE TABLE ingestion_batch (id INTEGER PRIMARY KEY)"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE global_benchmark_pool (
+                    id INTEGER PRIMARY KEY,
+                    code VARCHAR(64) NOT NULL,
+                    name VARCHAR(128) NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+    ensure_runtime_schema(engine)
+    cols = {c["name"] for c in inspect(engine).get_columns("global_benchmark_pool")}
+    assert "series_kind" in cols

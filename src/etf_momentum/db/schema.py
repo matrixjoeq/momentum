@@ -233,6 +233,55 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 continue
             _add_column(engine, "live_closed_round", ddl)
 
+    if inspect(engine).has_table("global_benchmark_pool"):
+        gb_pool_cols = {
+            "series_kind": "series_kind VARCHAR(32)",
+            "code_format": "code_format VARCHAR(32)",
+            "provider_hint": "provider_hint VARCHAR(32)",
+            "provider_symbol": "provider_symbol VARCHAR(64)",
+            "source_locked": "source_locked BOOLEAN",
+            "fallback_sources_json": "fallback_sources_json TEXT",
+            "start_date": "start_date VARCHAR(8)",
+            "end_date": "end_date VARCHAR(8)",
+            "last_fetch_at": "last_fetch_at DATETIME",
+            "last_fetch_status": "last_fetch_status VARCHAR(32)",
+            "last_fetch_message": "last_fetch_message VARCHAR(512)",
+            "last_data_start_date": "last_data_start_date VARCHAR(8)",
+            "last_data_end_date": "last_data_end_date VARCHAR(8)",
+            "updated_at": "updated_at DATETIME",
+        }
+        for col, ddl in gb_pool_cols.items():
+            if _has_column(engine, "global_benchmark_pool", col):
+                continue
+            _add_column(engine, "global_benchmark_pool", ddl)
+        if _has_column(engine, "global_benchmark_pool", "series_kind"):
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE global_benchmark_pool SET series_kind='price' "
+                        "WHERE series_kind IS NULL OR TRIM(series_kind) = ''"
+                    )
+                )
+
+    if inspect(engine).has_table("global_benchmark_prices"):
+        gb_price_cols = {
+            "series_kind": "series_kind VARCHAR(32)",
+            "provider_hint": "provider_hint VARCHAR(32)",
+            "provider_symbol": "provider_symbol VARCHAR(64)",
+        }
+        for col, ddl in gb_price_cols.items():
+            if _has_column(engine, "global_benchmark_prices", col):
+                continue
+            _add_column(engine, "global_benchmark_prices", ddl)
+        if _has_column(engine, "global_benchmark_prices", "series_kind"):
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE global_benchmark_prices SET series_kind='price' "
+                        "WHERE series_kind IS NULL OR TRIM(series_kind) = ''"
+                    )
+                )
+
     if not inspect(engine).has_table("futures_pool"):
         return
     futures_pool_cols = {

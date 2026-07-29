@@ -82,6 +82,11 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("h30269", "512890"),
     ),
     RegressionFactorSpec(
+        key="CSIHL_QUALITY",
+        label="红利质量",
+        aliases=("931468", "159758"),
+    ),
+    RegressionFactorSpec(
         key="CSI_300_GROWTH_INNOVATION",
         label="300成长创新",
         aliases=("931589", "159523"),
