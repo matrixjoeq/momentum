@@ -5127,6 +5127,7 @@
             <option value="macd_cross">MACD金叉死叉</option>
             <option value="macd_zero_filter">MACD零轴过滤</option>
             <option value="macd_v">MACD-V</option>
+            <option value="cci">CCI</option>
           </select>
         </div>
       </div>
@@ -5241,6 +5242,11 @@
         <div>
           <label>MACD-V柱最小高度</label
           ><input id="trendMacdVHistMin" value="0.0" />
+        </div>
+      </div>
+      <div class="row" style="margin-top: 8px; align-items: end">
+        <div>
+          <label>CCI窗口</label><input id="trendCciWindow" value="14" />
         </div>
       </div>
       <div class="row" style="margin-top: 8px; align-items: end">
@@ -8439,6 +8445,7 @@
           "trendMacdVScale",
           "trendMacdHistMin",
           "trendMacdVHistMin",
+          "trendCciWindow",
           "trendEventBucketProfile",
           "trendTraceN",
           "trendTraceView",
@@ -11604,6 +11611,7 @@
           "trendMacdVScale",
           "trendMacdHistMin",
           "trendMacdVHistMin",
+          "trendCciWindow",
           "trendAtrStopMode",
           "trendAtrStopBasis",
           "trendAtrStopReentry",
@@ -11754,6 +11762,7 @@
             "trendMacdVScale",
             "trendMacdVHistMin",
           ],
+          cci: ["trendCciWindow"],
         };
         const enabled = new Set([
           ...(byStrat[strat] || []),
@@ -11786,6 +11795,7 @@
           macd_cross: "MACD金叉死叉：MACD线上穿信号线入场，下穿离场。",
           macd_zero_filter: "MACD零轴过滤：MACD>0 持有，<=0 空仓。",
           macd_v: "MACD-V：用ATR归一化的MACD强度进行择时。",
+          cci: "CCI策略：CCI首次上穿-100或100入场，首次下穿-100或100离场。",
         };
         const execDesc = {
           ma_filter:
@@ -11807,6 +11817,7 @@
             "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           macd_v:
             "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          cci: "信号在 T 日收盘后根据 CCI 对 ±100 阈值的首次上穿/下穿确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
         };
         const paramDesc = {
           trendSmaWin: "均线窗口：均线/回归窗口长度（交易日）。",
@@ -11872,6 +11883,8 @@
             "MACD柱最小高度：仅当 |H|=|2*(DIF-DEA)| 达到阈值时才确认金叉/死叉信号；0=不过滤。",
           trendMacdVHistMin:
             "MACD-V柱最小高度：仅当 |H_v|=|2*(MACD-V-DEA_v)| 达到阈值时才确认信号；0=不过滤。",
+          trendCciWindow:
+            "CCI窗口：CCI计算窗口，范围[2,100]，默认14；入场=首次上穿-100或100，离场=首次下穿-100或100。",
           trendAtrStopMode:
             "通用ATR止损模式：关闭/静态/动态跟随/动态收紧。关闭时若开启R乘数止盈或浮盈降仓，本行「ATR周期」「止损倍数n」仍生效，用于定义R的计量基准。",
           trendAtrStopBasis:
@@ -33086,6 +33099,7 @@
           macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
           macd_hist_min: Number(($("trendMacdHistMin").value || "0").trim()),
           macd_v_hist_min: Number(($("trendMacdVHistMin").value || "0").trim()),
+          cci_window: Number(($("trendCciWindow").value || "14").trim()),
           random_hold_days: Number(
             ($("trendRandomHoldDays").value || "20").trim(),
           ),
@@ -33579,6 +33593,7 @@
           macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
           macd_hist_min: Number(($("trendMacdHistMin").value || "0").trim()),
           macd_v_hist_min: Number(($("trendMacdVHistMin").value || "0").trim()),
+          cci_window: Number(($("trendCciWindow").value || "14").trim()),
           random_hold_days: Number(
             ($("trendRandomHoldDays").value || "20").trim(),
           ),

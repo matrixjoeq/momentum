@@ -2904,7 +2904,7 @@ class TrendBacktestRequest(BaseModel):
     )
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry (long/cash); ma_filter uses ma_type sma|ema|kama",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|cci|random_entry (long/cash); ma_filter uses ma_type sma|ema|kama",
     )
     position_sizing: str = Field(
         default="equal", description="equal|vol_target|fixed_ratio|risk_budget"
@@ -3252,6 +3252,12 @@ class TrendBacktestRequest(BaseModel):
         ge=0.0,
         description="MACD-V histogram minimum absolute height filter for macd_v (0 disables)",
     )
+    cci_window: int = Field(
+        default=14,
+        ge=2,
+        le=100,
+        description="CCI lookback window for cci strategy",
+    )
     er_filter: bool = Field(
         default=False,
         description="Universal ER entry filter switch (when true, allow entry only if ER >= threshold)",
@@ -3399,7 +3405,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     )
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry; ma_filter uses ma_type sma|ema|kama",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|cci|random_entry; ma_filter uses ma_type sma|ema|kama",
     )
     position_sizing: str = Field(
         default="equal", description="equal|vol_target|fixed_ratio|risk_budget"
@@ -3671,6 +3677,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     macd_v_scale: float = Field(default=100.0, gt=0.0)
     macd_hist_min: float = Field(default=0.0, ge=0.0)
     macd_v_hist_min: float = Field(default=0.0, ge=0.0)
+    cci_window: int = Field(default=14, ge=2, le=100)
     er_filter: bool = Field(
         default=False, description="Universal ER entry filter switch"
     )
@@ -3934,7 +3941,7 @@ class TrendOosBootstrapRequest(BaseModel):
     )
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|cci|random_entry",
     )
     cost_bps: float = Field(default=2.0, ge=0.0)
     exec_price: Literal["open", "close"] = Field(

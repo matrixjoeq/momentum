@@ -2926,10 +2926,23 @@ def test_trend_macd_family_smoke(session_factory):
                 cost_bps=0.0,
             ),
         )
+        out_cci = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="cci",
+                cci_window=5,
+                cost_bps=0.0,
+            ),
+        )
     assert out_cross["meta"]["strategy"] == "macd_cross"
     assert out_zero["meta"]["strategy"] == "macd_zero_filter"
     assert out_v["meta"]["strategy"] == "macd_v"
+    assert out_cci["meta"]["strategy"] == "cci"
     assert len(out_v["signals"]["position"]) == len(out_v["nav"]["dates"])
+    assert len(out_cci["signals"]["position"]) == len(out_cci["nav"]["dates"])
 
 
 def test_macd_hist_threshold_gate_delays_and_switches_pending_direction() -> None:
@@ -3073,6 +3086,7 @@ def test_trend_excludes_decision_day_return_for_all_strategies(session_factory):
                 "macd_v_scale": 100.0,
             },
         ),
+        ("cci", {"cci_window": 2}),
     ]
     with sf() as db:
         for d, p in zip(dates, pxs):

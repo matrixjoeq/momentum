@@ -50,6 +50,7 @@ TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "macd_cross": "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_zero_filter": "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_v": "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "cci": "信号在 T 日收盘后根据 CCI 对 ±100 阈值的首次上穿/下穿确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "random_entry": "信号在 T 日收盘后仅当当前无持仓时抛硬币随机决定是否入场（1=入场，0=空仓）；入场后按持有交易日数到期离场，均在 T+1 日执行；策略收益不包含决策日(T日)当日收益。",
 }
 
@@ -246,7 +247,7 @@ class TrendInputs:
     )
     exec_price: str = "open"  # open|close
     # strategy selection
-    strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | random_entry
+    strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | cci | random_entry
     # parameters
     sma_window: int = 200  # ma_filter
     fast_window: int = 50  # ma_cross
@@ -314,6 +315,7 @@ class TrendInputs:
     macd_v_scale: float = 100.0
     macd_hist_min: float = 0.0
     macd_v_hist_min: float = 0.0
+    cci_window: int = 14
     random_hold_days: int = 20
     random_seed: int | None = 42
     position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
@@ -469,6 +471,7 @@ class TrendPortfolioInputs:
     macd_v_scale: float = 100.0
     macd_hist_min: float = 0.0
     macd_v_hist_min: float = 0.0
+    cci_window: int = 14
     random_hold_days: int = 20
     random_seed: int | None = 42
     group_enforce: bool = False
@@ -4942,6 +4945,19 @@ def _atr_from_hlc(
     )
 
 
+def _cci_from_hlc(
+    high: pd.Series, low: pd.Series, close: pd.Series, *, window: int
+) -> pd.Series:
+    w = max(2, int(window))
+    tp = ((high.astype(float) + low.astype(float) + close.astype(float)) / 3.0).astype(
+        float
+    )
+    tp_ma = tp.rolling(window=w, min_periods=w).mean().astype(float)
+    mean_dev = (tp - tp_ma).abs().rolling(window=w, min_periods=w).mean().astype(float)
+    denom = (0.015 * mean_dev).replace(0.0, np.nan)
+    return ((tp - tp_ma) / denom).replace([np.inf, -np.inf], np.nan).astype(float)
+
+
 def _compute_bias_v_series(
     *,
     close: pd.Series,
@@ -7446,6 +7462,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "macd_cross",
         "macd_zero_filter",
         "macd_v",
+        "cci",
         "random_entry",
     }:
         raise ValueError(f"invalid strategy={inp.strategy}")
@@ -7727,6 +7744,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("macd_hist_min must be finite and >= 0")
     if (not np.isfinite(macd_v_hist_min)) or macd_v_hist_min < 0.0:
         raise ValueError("macd_v_hist_min must be finite and >= 0")
+    cci_window = int(getattr(inp, "cci_window", 14) or 14)
+    if cci_window < 2 or cci_window > 100:
+        raise ValueError("cci_window must be in [2, 100]")
     er_filter = bool(getattr(inp, "er_filter", False))
     er_window = int(getattr(inp, "er_window", 10) or 10)
     er_threshold = float(getattr(inp, "er_threshold", 0.30) or 0.30)
@@ -7921,6 +7941,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             int(ma_entry_filter_slow),
             int(inp.donchian_entry),
             int(inp.mom_lookback),
+            int(inp.macd_slow),
+            int(inp.macd_v_atr_window),
+            int(cci_window),
             20,
         )
         + 60
@@ -8249,6 +8272,37 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             hist=2.0 * (macd_v - macd_v_sig),
             min_abs_hist=float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
         )
+    elif strat == "cci":
+        cci = _cci_from_hlc(
+            high_qfq.astype(float),
+            low_qfq.astype(float),
+            px_sig.astype(float),
+            window=cci_window,
+        )
+        pos = np.zeros(len(px_sig), dtype=float)
+        in_pos = False
+        prev = float("nan")
+        for i, d in enumerate(px_sig.index):
+            cur = float(cci.loc[d]) if np.isfinite(float(cci.loc[d])) else float("nan")
+            if not np.isfinite(cur):
+                pos[i] = 0.0
+                in_pos = False
+                prev = float("nan")
+                continue
+            if np.isfinite(prev):
+                if not in_pos:
+                    up_from_neg100 = prev <= -100.0 and cur > -100.0
+                    up_from_pos100 = prev <= 100.0 and cur > 100.0
+                    if up_from_neg100 or up_from_pos100:
+                        in_pos = True
+                else:
+                    down_from_neg100 = prev >= -100.0 and cur < -100.0
+                    down_from_pos100 = prev >= 100.0 and cur < 100.0
+                    if down_from_neg100 or down_from_pos100:
+                        in_pos = False
+            pos[i] = 1.0 if in_pos else 0.0
+            prev = cur
+        raw_pos = pd.Series(pos, index=px_sig.index, dtype=float)
     elif strat == "random_entry":
         raw_pos = _pos_from_random_entry_hold(
             px_sig.index,
@@ -9920,6 +9974,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "macd_v_scale": float(inp.macd_v_scale),
                 "macd_hist_min": float(getattr(inp, "macd_hist_min", 0.0) or 0.0),
                 "macd_v_hist_min": float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
+                "cci_window": int(getattr(inp, "cci_window", 14) or 14),
                 "random_hold_days": int(getattr(inp, "random_hold_days", 20)),
                 "random_seed": (
                     None
@@ -10676,6 +10731,9 @@ def compute_trend_portfolio_backtest(
         raise ValueError("macd_hist_min must be finite and >= 0")
     if (not np.isfinite(macd_v_hist_min)) or macd_v_hist_min < 0.0:
         raise ValueError("macd_v_hist_min must be finite and >= 0")
+    cci_window = int(getattr(inp, "cci_window", 14) or 14)
+    if cci_window < 2 or cci_window > 100:
+        raise ValueError("cci_window must be in [2, 100]")
     er_filter = bool(getattr(inp, "er_filter", False))
     er_window = int(getattr(inp, "er_window", 10) or 10)
     er_threshold = float(getattr(inp, "er_threshold", 0.30) or 0.30)
@@ -10741,6 +10799,7 @@ def compute_trend_portfolio_backtest(
         "macd_cross",
         "macd_zero_filter",
         "macd_v",
+        "cci",
         "random_entry",
     }:
         raise ValueError(f"invalid strategy={inp.strategy}")
@@ -10819,6 +10878,7 @@ def compute_trend_portfolio_backtest(
                 int(inp.mom_lookback),
                 int(inp.macd_slow),
                 int(inp.macd_v_atr_window),
+                int(cci_window),
                 20,
             )
             + 60
@@ -11403,6 +11463,43 @@ def compute_trend_portfolio_backtest(
                 min_abs_hist=float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
             )
             score = (macd_v - macd_v_sig).astype(float)
+        elif strat == "cci":
+            h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
+            low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
+            cci = _cci_from_hlc(
+                h.astype(float).fillna(px),
+                low_px.astype(float).fillna(px),
+                px,
+                window=cci_window,
+            )
+            pos_arr = np.zeros(len(px), dtype=float)
+            in_pos = False
+            prev = float("nan")
+            for i in range(len(px)):
+                cur = (
+                    float(cci.iloc[i])
+                    if np.isfinite(float(cci.iloc[i]))
+                    else float("nan")
+                )
+                if not np.isfinite(cur):
+                    in_pos = False
+                    pos_arr[i] = 0.0
+                    prev = float("nan")
+                    continue
+                if np.isfinite(prev):
+                    if not in_pos:
+                        if (prev <= -100.0 and cur > -100.0) or (
+                            prev <= 100.0 and cur > 100.0
+                        ):
+                            in_pos = True
+                    elif (prev >= -100.0 and cur < -100.0) or (
+                        prev >= 100.0 and cur < 100.0
+                    ):
+                        in_pos = False
+                pos_arr[i] = 1.0 if in_pos else 0.0
+                prev = cur
+            pos = pd.Series(pos_arr, index=px.index, dtype=float)
+            score = cci.astype(float)
         elif strat == "random_entry":
             seed_base_raw = getattr(inp, "random_seed", 42)
             code_seed = (
@@ -14529,6 +14626,7 @@ def compute_trend_portfolio_backtest(
                 "mom_lookback": int(inp.mom_lookback),
                 "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
                 "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),
+                "cci_window": int(getattr(inp, "cci_window", 14) or 14),
                 "random_hold_days": int(getattr(inp, "random_hold_days", 20)),
                 "random_seed": (
                     None

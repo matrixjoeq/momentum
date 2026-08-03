@@ -525,6 +525,7 @@ def test_trend_portfolio_excludes_decision_day_return_for_all_strategies(
                 "macd_v_scale": 100.0,
             },
         ),
+        ("cci", {"cci_window": 2}),
     ]
 
     with sf() as db:

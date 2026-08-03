@@ -1465,6 +1465,60 @@ def test_api_trend_portfolio_rejects_next_day_full_day_execution_time(api_client
     assert "full_day" in str(err) and "next_day" in str(err)
 
 
+def test_api_trend_single_cci_accepts_default_window(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240131",
+    )
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240131",
+            "strategy": "cci",
+            "cci_window": 14,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    meta = out.get("meta") or {}
+    params = meta.get("params") or {}
+    assert meta.get("strategy") == "cci"
+    assert int(params.get("cci_window") or 0) == 14
+
+
+def test_api_trend_portfolio_rejects_cci_window_above_upper_bound(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240131",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": _BASELINE_CODES,
+            "start": "20240102",
+            "end": "20240131",
+            "strategy": "cci",
+            "cci_window": 101,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "100" in str(err)
+
+
 def test_api_trend_single_rejects_risk_budget_pct_above_3_percent(api_client):
     c = api_client
     upsert_and_fetch_etfs(

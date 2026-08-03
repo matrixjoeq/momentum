@@ -98,6 +98,7 @@ _SUPPORTED_STRATEGIES = {
     "macd_cross",
     "macd_zero_filter",
     "macd_v",
+    "cci",
     "random_entry",
 }
 
@@ -111,6 +112,7 @@ TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "macd_cross": "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_zero_filter": "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_v": "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "cci": "信号在 T 日收盘后根据 CCI 对 ±100 阈值的首次上穿/下穿确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "random_entry": "信号在 T 日收盘后仅当当前无持仓时抛硬币随机决定是否入场（1=入场，0=空仓）；入场后按持有交易日数到期离场，均在 T+1 日执行；策略收益不包含决策日(T日)当日收益。",
 }
 
@@ -612,6 +614,20 @@ def _atr_from_hlc(
         return out_s.astype(float)
     except Exception:  # noqa: BLE001
         return legacy
+
+
+def _cci_from_hlc(
+    high: pd.Series, low: pd.Series, close: pd.Series, *, window: int
+) -> pd.Series:
+    h = _as_float_series(high)
+    l = _as_float_series(low).reindex(h.index).combine_first(h)  # noqa: E741
+    c = _as_float_series(close).reindex(h.index).combine_first(h)
+    w = max(2, int(window))
+    tp = ((h + l + c) / 3.0).astype(float)
+    tp_ma = tp.rolling(window=w, min_periods=w).mean().astype(float)
+    mean_dev = (tp - tp_ma).abs().rolling(window=w, min_periods=w).mean().astype(float)
+    denom = (0.015 * mean_dev).replace(0.0, np.nan)
+    return ((tp - tp_ma) / denom).replace([np.inf, -np.inf], np.nan).astype(float)
 
 
 def _rolling_linreg_slope(s: pd.Series, window: int) -> pd.Series:
@@ -3330,6 +3346,9 @@ def _validate_bt_single_inputs(inp: Any) -> None:
         raise ValueError("macd_hist_min must be finite and >= 0")
     if (not np.isfinite(macd_v_hist_min)) or macd_v_hist_min < 0.0:
         raise ValueError("macd_v_hist_min must be finite and >= 0")
+    cci_window = int(getattr(inp, "cci_window", 14) or 14)
+    if cci_window < 2 or cci_window > 100:
+        raise ValueError("cci_window must be in [2, 100]")
     kama_fast_window = int(getattr(inp, "kama_fast_window", 2) or 2)
     kama_slow_window = int(getattr(inp, "kama_slow_window", 30) or 30)
     if kama_fast_window >= kama_slow_window:
@@ -3607,6 +3626,7 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "macd_v_scale": float(getattr(inp, "macd_v_scale", 100.0) or 100.0),
         "macd_hist_min": float(getattr(inp, "macd_hist_min", 0.0) or 0.0),
         "macd_v_hist_min": float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
+        "cci_window": int(getattr(inp, "cci_window", 14) or 14),
         "random_hold_days": int(getattr(inp, "random_hold_days", 20) or 20),
         "random_seed": (
             None
@@ -4086,6 +4106,33 @@ def _build_signal_position(
             min_abs_hist=float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
         )
         score = (macd_v - macd_v_sig).replace([np.inf, -np.inf], np.nan).astype(float)
+    elif strat == "cci":
+        cci_window = int(getattr(inp, "cci_window", 14) or 14)
+        cci = _cci_from_hlc(signal_high, signal_low, px, window=cci_window)
+        pos = np.zeros(len(px), dtype=float)
+        in_pos = False
+        prev = float("nan")
+        for i, d in enumerate(px.index):
+            cur = float(cci.loc[d]) if np.isfinite(float(cci.loc[d])) else float("nan")
+            if not np.isfinite(cur):
+                pos[i] = 0.0
+                in_pos = False
+                prev = float("nan")
+                continue
+            if np.isfinite(prev):
+                if not in_pos:
+                    if (prev <= -100.0 and cur > -100.0) or (
+                        prev <= 100.0 and cur > 100.0
+                    ):
+                        in_pos = True
+                elif (prev >= -100.0 and cur < -100.0) or (
+                    prev >= 100.0 and cur < 100.0
+                ):
+                    in_pos = False
+            pos[i] = 1.0 if in_pos else 0.0
+            prev = cur
+        raw_pos = pd.Series(pos, index=px.index, dtype=float)
+        score = cci.replace([np.inf, -np.inf], np.nan).astype(float)
     elif strat == "random_entry":
         raw_pos = _pos_from_random_entry_hold(
             px.index,
@@ -6269,6 +6316,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         vol_ratio_contract_threshold=inp.vol_ratio_contract_threshold,
         vol_ratio_normal_threshold=inp.vol_ratio_normal_threshold,
         vol_ratio_extreme_threshold=getattr(inp, "vol_ratio_extreme_threshold", 2.20),
+        cci_window=getattr(inp, "cci_window", 14),
         atr_stop_execution_mode=getattr(inp, "atr_stop_execution_mode", "intraday"),
         atr_stop_execution_time=getattr(inp, "atr_stop_execution_time", None),
         r_take_profit_enabled=bool(getattr(inp, "r_take_profit_enabled", False)),
@@ -6342,6 +6390,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             int(getattr(inp, "mom_lookback", 252) or 252),
             int(getattr(inp, "macd_slow", 26) or 26),
             int(getattr(inp, "macd_v_atr_window", 26) or 26),
+            int(getattr(inp, "cci_window", 14) or 14),
             20,
         )
         + 60
@@ -6407,6 +6456,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             macd_signal=inp.macd_signal,
             macd_v_atr_window=inp.macd_v_atr_window,
             macd_v_scale=inp.macd_v_scale,
+            cci_window=getattr(inp, "cci_window", 14),
             random_hold_days=inp.random_hold_days,
             random_seed=code_seed,
             er_filter=inp.er_filter,

@@ -379,6 +379,8 @@ def test_bt_portfolio_semantic_parity_keys_and_core_metrics(engine):
         ("macd_zero_filter", "open", "risk_budget"),
         ("macd_v", "close", "equal"),
         ("macd_v", "open", "risk_budget"),
+        ("cci", "close", "equal"),
+        ("cci", "open", "risk_budget"),
     ],
 )
 def test_bt_single_semantic_parity_matrix(
@@ -458,6 +460,8 @@ def test_bt_single_semantic_parity_matrix(
         ("macd_zero_filter", "open", "risk_budget"),
         ("macd_v", "close", "equal"),
         ("macd_v", "open", "risk_budget"),
+        ("cci", "close", "equal"),
+        ("cci", "open", "risk_budget"),
     ],
 )
 def test_bt_portfolio_semantic_parity_matrix(
