@@ -2457,6 +2457,15 @@ class RotationBacktestRequest(BaseModel):
     )
     lookback_days: int = Field(default=20, ge=1)
     skip_days: int = Field(default=0, ge=0)
+    momentum_correction_enabled: bool = Field(
+        default=False,
+        description="Enable momentum correction: multiply base score by recent N-day return before ranking.",
+    )
+    momentum_correction_window: int = Field(
+        default=20,
+        ge=1,
+        description="N trading days used for momentum correction return term. Effective range when enabled: [3, skip_days].",
+    )
     score_method: str = Field(
         default="raw_mom",
         description="Ranking score: raw_mom | sharpe_mom | sortino_mom",
@@ -2728,6 +2737,16 @@ class RotationBacktestRequest(BaseModel):
             elif exec_time_v != "close":
                 raise ValueError(
                     "equity_budget stop only supports close execution (intraday-close or next_day-close)"
+                )
+        mom_corr_enabled = bool(getattr(self, "momentum_correction_enabled", False))
+        mom_corr_window = int(getattr(self, "momentum_correction_window", 20))
+        skip_days = int(getattr(self, "skip_days", 0))
+        if mom_corr_enabled:
+            if skip_days < 3:
+                raise ValueError("momentum_correction_enabled requires skip_days >= 3")
+            if mom_corr_window < 3 or mom_corr_window > skip_days:
+                raise ValueError(
+                    "momentum_correction_window must be in [3, skip_days] when momentum_correction_enabled=true"
                 )
         return self
 

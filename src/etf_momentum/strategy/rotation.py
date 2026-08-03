@@ -100,6 +100,8 @@ class RotationInputs:
     )
     lookback_days: int = 20
     skip_days: int = 0  # skip recent trading days (0 means no skip)
+    momentum_correction_enabled: bool = False
+    momentum_correction_window: int = 20
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0  # round-trip cost in bps per turnover, simple approximation
     slippage_rate: float = (
@@ -543,6 +545,12 @@ def _momentum_scores(
     lag = skip_days
     lb = lookback_days
     return close_qfq.shift(lag) / close_qfq.shift(lag + lb) - 1.0
+
+
+def _recent_return_scores(close_qfq: pd.DataFrame, *, window_days: int) -> pd.DataFrame:
+    # correction[t] = close[t]/close[t-window_days] - 1
+    w = max(1, int(window_days))
+    return close_qfq / close_qfq.shift(w) - 1.0
 
 
 def _rolling_prod_minus_1(gross: pd.DataFrame, *, window: int) -> pd.DataFrame:
@@ -1601,6 +1609,16 @@ def backtest_rotation(
         raise ValueError("exit_match_n must be >= 0")
     if inp.skip_days < 0:
         raise ValueError("skip_days must be >= 0")
+    mcw = int(inp.momentum_correction_window)
+    if mcw <= 0:
+        raise ValueError("momentum_correction_window must be > 0")
+    if bool(inp.momentum_correction_enabled):
+        if int(inp.skip_days) < 3:
+            raise ValueError("momentum_correction_enabled requires skip_days >= 3")
+        if mcw < 3 or mcw > int(inp.skip_days):
+            raise ValueError(
+                "momentum_correction_window must be in [3, skip_days] when momentum_correction_enabled=true"
+            )
     if not np.isfinite(float(inp.cost_bps)) or float(inp.cost_bps) < 0.0:
         raise ValueError("cost_bps must be finite and >= 0")
     if not np.isfinite(float(inp.slippage_rate)) or float(inp.slippage_rate) < 0.0:
@@ -2022,7 +2040,10 @@ def backtest_rotation(
             raise ValueError("floating benchmark start is after end date")
 
     # Need enough history for momentum + optional risk controls (using max window).
-    need_hist = inp.lookback_days + inp.skip_days + 60
+    corr_need = (
+        int(inp.momentum_correction_window) if inp.momentum_correction_enabled else 0
+    )
+    need_hist = max(inp.lookback_days + inp.skip_days, corr_need) + 60
     if inp.trend_filter:
         need_hist = max(need_hist, int(max(trend_windows)) + 60)
     if inp.bias_filter or inp.bias_exit_filter:
@@ -2297,7 +2318,7 @@ def backtest_rotation(
         close_qfq[rank_codes], lookback_days=inp.lookback_days, skip_days=inp.skip_days
     )
     if sm == "raw_mom":
-        scores = raw_mom_scores
+        base_scores = raw_mom_scores
     else:
         base_scores = _risk_adjusted_scores(
             close_qfq[rank_codes],
@@ -2306,6 +2327,13 @@ def backtest_rotation(
             method=inp.score_method,
             rf_annual=float(inp.risk_free_rate),
         )
+    if bool(inp.momentum_correction_enabled):
+        correction_scores = _recent_return_scores(
+            close_qfq[rank_codes],
+            window_days=int(inp.momentum_correction_window),
+        )
+        scores = base_scores * correction_scores
+    else:
         scores = base_scores
 
     # Pre-compute risk-control signals on qfq close (aligned to execution calendar).
@@ -6621,6 +6649,8 @@ def backtest_rotation(
             "end": dates[-1].strftime("%Y%m%d"),
         },
         "score_method": (inp.score_method or "raw_mom"),
+        "momentum_correction_enabled": bool(inp.momentum_correction_enabled),
+        "momentum_correction_window": int(inp.momentum_correction_window),
         "stop_scheme": str(stop_scheme),
         "equity_stop_risk_pct": float(equity_stop_risk_pct),
         "atr_stop_mode": atr_stop_mode,

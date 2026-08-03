@@ -437,6 +437,131 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert "excess_vs_risk_parity" in (data_rp.get("metrics") or {})
 
 
+def test_api_rotation_backtest_accepts_momentum_correction_params(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 3,
+            "momentum_correction_enabled": True,
+            "momentum_correction_window": 3,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert bool(data.get("momentum_correction_enabled")) is True
+    assert int(data.get("momentum_correction_window") or 0) == 3
+
+
+def test_api_rotation_backtest_rejects_invalid_momentum_correction_window(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "momentum_correction_enabled": True,
+            "momentum_correction_window": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "momentum_correction_window" in str(err)
+
+
+def test_api_rotation_backtest_rejects_momentum_correction_window_above_skip(
+    api_client,
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 5,
+            "momentum_correction_enabled": True,
+            "momentum_correction_window": 6,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "momentum_correction_window" in str(err)
+    assert "skip_days" in str(err)
+
+
+def test_api_rotation_backtest_rejects_momentum_correction_when_skip_too_small(
+    api_client,
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 2,
+            "momentum_correction_enabled": True,
+            "momentum_correction_window": 3,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "skip_days" in str(err)
+
+
 def test_api_rotation_capacity_estimate_has_three_scenarios(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
     # Construct alternating momentum leadership to create non-zero turnover windows.

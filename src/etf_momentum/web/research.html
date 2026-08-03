@@ -1921,6 +1921,41 @@
             </div>
             <div>
               <label
+                >动量修正项
+                <button
+                  class="helpBtn"
+                  data-metric="param_rot_mom_corr"
+                  title="查看说明"
+                  style="
+                    margin-left: 6px;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 50%;
+                    border: 1px solid #bbb;
+                    background: #fff;
+                    font-size: 12px;
+                    line-height: 16px;
+                    padding: 0;
+                    cursor: pointer;
+                  "
+                >
+                  ?
+                </button></label
+              >
+              <select
+                id="rotMomentumCorrectionEnabled"
+                style="min-width: 140px"
+              >
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>修正窗口N(交易日)</label>
+              <input id="rotMomentumCorrectionWindow" value="20" />
+            </div>
+            <div>
+              <label
                 >交易成本(bps)
                 <button
                   class="helpBtn"
@@ -8215,6 +8250,8 @@
           "rotScoreMethod",
           "rotLookback",
           "rotSkip",
+          "rotMomentumCorrectionEnabled",
+          "rotMomentumCorrectionWindow",
           "rotCost",
           "rotSlippage",
           "rotCapacityWindowYears",
@@ -9400,6 +9437,16 @@
             <div style="margin-top:8px"><b>用途</b>：降低短期反转/噪声影响。</div>
             <div style="margin-top:8px"><b>范围</b>：整数 ≥ 0。常用：21（约 1 个月）。</div>
             <div style="margin-top:8px"><b>示例</b>：lookback=252 且 skip=21 即 12-1 动量。</div>
+          `,
+        },
+        param_rot_mom_corr: {
+          title: "动量修正项（近N日收益）",
+          sub: "先算基础打分，再乘以近N日收益率后排序。",
+          body: `
+            <div><b>定义</b>：基础分数记为 \\(M_0\\)，修正项 \\(r=close_t/close_{t-N}-1\\)，最终排序分数 \\(M=M_0\\times r\\)。</div>
+            <div style="margin-top:8px"><b>用途</b>：过滤“长期动量仍高但短期已反转”的标的，优先保留长期和短期势头一致的标的。</div>
+            <div style="margin-top:8px"><b>参数</b>：N 为修正窗口（交易日），默认 20。启用修正项时必须满足 \\(N\\in[3,\\,skip\\_days]\\)，即至少包含近 3 日收益，且不能超过“跳过最近”天数。</div>
+            <div style="margin-top:8px"><b>说明</b>：修正作用于排序分数，不改变成交价口径与收益结算口径。</div>
           `,
         },
         param_rot_cost: {
@@ -31776,6 +31823,14 @@
             ($("rotLookback") && $("rotLookback").value) || 252,
           ),
           skip_days: Number(($("rotSkip") && $("rotSkip").value) || 0),
+          momentum_correction_enabled:
+            $("rotMomentumCorrectionEnabled") &&
+            $("rotMomentumCorrectionEnabled").value === "true",
+          momentum_correction_window: Number(
+            ($("rotMomentumCorrectionWindow") &&
+              $("rotMomentumCorrectionWindow").value) ||
+              20,
+          ),
           cost_bps: Number(($("rotCost") && $("rotCost").value) || 2),
           slippage_rate: Number(
             ($("rotSlippage") && $("rotSlippage").value) || 0.001,
@@ -31865,6 +31920,32 @@
         if (!ta) return;
         ta.value = JSON.stringify(_collectRotationParamsForExport(), null, 2);
         if (wrap) wrap.open = true;
+      }
+
+      function _readRotMomentumCorrection(skip_days) {
+        const enabled =
+          $("rotMomentumCorrectionEnabled") &&
+          $("rotMomentumCorrectionEnabled").value === "true";
+        const windowDays = Number(
+          (
+            ($("rotMomentumCorrectionWindow") &&
+              $("rotMomentumCorrectionWindow").value) ||
+            "20"
+          ).trim(),
+        );
+        if (!enabled) {
+          return { enabled: false, window_days: windowDays };
+        }
+        if (!Number.isFinite(skip_days) || skip_days < 3) {
+          return { __error: "开启动量修正项时，跳过天数需>=3" };
+        }
+        if (!Number.isFinite(windowDays) || windowDays < 3) {
+          return { __error: "动量修正窗口N需为>=3整数" };
+        }
+        if (windowDays > skip_days) {
+          return { __error: "动量修正窗口N不能大于跳过天数" };
+        }
+        return { enabled: true, window_days: windowDays };
       }
 
       async function runRotation() {
@@ -31968,10 +32049,12 @@
           return setMsg("出场满足任意N条需为>=0整数");
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
+        const momCorr = _readRotMomentumCorrection(skip_days);
         if (!Number.isFinite(lookback_days) || lookback_days < 1)
           return setMsg("动量回看天数需为>=1整数");
         if (!Number.isFinite(skip_days) || skip_days < 0)
           return setMsg("跳过天数需为>=0整数");
+        if (momCorr && momCorr.__error) return setMsg(momCorr.__error);
         const cost_bps = Number(($("rotCost").value || "2").trim());
         if (!Number.isFinite(cost_bps) || cost_bps < 0)
           return setMsg("成本（bps）需为>=0数字");
@@ -32556,6 +32639,10 @@
           exit_match_n,
           lookback_days,
           skip_days,
+          momentum_correction_enabled: !!(momCorr && momCorr.enabled),
+          momentum_correction_window: Number(
+            (momCorr && momCorr.window_days) || 20,
+          ),
           cost_bps,
           slippage_rate,
           capacity_window_years: Math.trunc(capacity_window_years),
@@ -34778,6 +34865,17 @@
             parsedRTpTiers.tiers.length === 0)
         )
           return setMsg("R止盈分层不能为空");
+        const lookback_days_plan = Number(
+          ($("rotLookback").value || "20").trim(),
+        );
+        const skip_days_plan = Number(($("rotSkip").value || "0").trim());
+        if (!Number.isFinite(lookback_days_plan) || lookback_days_plan < 1)
+          return setMsg("动量回看天数需为>=1整数");
+        if (!Number.isFinite(skip_days_plan) || skip_days_plan < 0)
+          return setMsg("跳过天数需为>=0整数");
+        const momCorrPlan = _readRotMomentumCorrection(skip_days_plan);
+        if (momCorrPlan && momCorrPlan.__error)
+          return setMsg(momCorrPlan.__error);
 
         let payload = null;
         if (
@@ -34853,8 +34951,12 @@
                 ? $("rotExitMatchN").value
                 : "0",
             ),
-            lookback_days: Number(($("rotLookback").value || "20").trim()),
-            skip_days: Number(($("rotSkip").value || "0").trim()),
+            lookback_days: lookback_days_plan,
+            skip_days: skip_days_plan,
+            momentum_correction_enabled: !!(momCorrPlan && momCorrPlan.enabled),
+            momentum_correction_window: Number(
+              (momCorrPlan && momCorrPlan.window_days) || 20,
+            ),
             cost_bps: Number(($("rotCost").value || "2").trim()),
             slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
             stop_scheme,
@@ -35024,8 +35126,12 @@
               ? $("rotExitMatchN").value
               : "0",
           ),
-          lookback_days: Number(($("rotLookback").value || "20").trim()),
-          skip_days: Number(($("rotSkip").value || "0").trim()),
+          lookback_days: lookback_days_plan,
+          skip_days: skip_days_plan,
+          momentum_correction_enabled: !!(momCorrPlan && momCorrPlan.enabled),
+          momentum_correction_window: Number(
+            (momCorrPlan && momCorrPlan.window_days) || 20,
+          ),
           cost_bps: Number(($("rotCost").value || "2").trim()),
           slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
           stop_scheme,
@@ -36078,6 +36184,8 @@
         );
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
+        const momCorr = _readRotMomentumCorrection(skip_days);
+        if (momCorr && momCorr.__error) return setMsg(momCorr.__error);
         const cost_bps = Number(($("rotCost").value || "2").trim());
         const slippage_rate = Number(
           ($("rotSlippage").value || "0.001").trim(),
@@ -36630,6 +36738,10 @@
             exit_match_n,
             lookback_days,
             skip_days,
+            momentum_correction_enabled: !!(momCorr && momCorr.enabled),
+            momentum_correction_window: Number(
+              (momCorr && momCorr.window_days) || 20,
+            ),
             cost_bps,
             slippage_rate,
             score_method,
@@ -40452,6 +40564,8 @@
         );
         const lookback_days = Number(($("rotLookback").value || "20").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
+        const momCorr = _readRotMomentumCorrection(skip_days);
+        if (momCorr && momCorr.__error) return setMsg(momCorr.__error);
         const cost_bps = Number(($("rotCost").value || "2").trim());
         const group_enforce =
           $("rotGroupEnforce") && $("rotGroupEnforce").value === "true";
@@ -40963,6 +41077,10 @@
               top_k,
               lookback_days,
               skip_days,
+              momentum_correction_enabled: !!(momCorr && momCorr.enabled),
+              momentum_correction_window: Number(
+                (momCorr && momCorr.window_days) || 20,
+              ),
               cost_bps,
               slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
               position_mode,

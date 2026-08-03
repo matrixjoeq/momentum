@@ -32,6 +32,8 @@ class RotationAnalysisInputs:
     exit_match_n: int = 0
     lookback_days: int = 20
     skip_days: int = 0
+    momentum_correction_enabled: bool = False
+    momentum_correction_window: int = 20
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
     slippage_rate: float = 0.001
@@ -132,6 +134,8 @@ def compute_rotation_backtest(
             exit_match_n=inp.exit_match_n,
             lookback_days=inp.lookback_days,
             skip_days=inp.skip_days,
+            momentum_correction_enabled=bool(inp.momentum_correction_enabled),
+            momentum_correction_window=int(inp.momentum_correction_window),
             risk_free_rate=inp.risk_free_rate,
             cost_bps=inp.cost_bps,
             slippage_rate=inp.slippage_rate,

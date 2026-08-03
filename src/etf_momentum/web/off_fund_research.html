@@ -198,7 +198,7 @@
     <div id="msg" class="msg"></div>
 
     <div class="panel">
-      <div id="navChart" style="width: 100%; height: 360px"></div>
+      <div id="navChart" style="width: 100%; height: 860px"></div>
       <table id="metricsTable"></table>
     </div>
     <div class="panel">
@@ -450,11 +450,11 @@
 
     <div class="panel two">
       <div>
-        <div class="muted">滚动收益率（60日）</div>
+        <div class="muted">滚动收益率（6个月/1年/2年/3年）</div>
         <div id="rollingRetChart" style="width: 100%; height: 300px"></div>
       </div>
       <div>
-        <div class="muted">滚动回撤（由净值推导）</div>
+        <div class="muted">滚动回撤（6个月/1年/2年/3年）</div>
         <div id="rollingDdChart" style="width: 100%; height: 300px"></div>
       </div>
     </div>
@@ -2514,6 +2514,338 @@
         }
         return out;
       }
+      function _emaSeries(values, windowSize, minPeriods = null) {
+        const n = (values || []).length;
+        const out = new Array(n).fill(null);
+        const w = Math.max(2, Math.floor(Number(windowSize) || 2));
+        const alpha = 2 / (w + 1);
+        const mp = Math.max(
+          1,
+          Math.floor(
+            Number.isFinite(Number(minPeriods))
+              ? Number(minPeriods)
+              : Math.max(2, Math.floor(w / 2)),
+          ),
+        );
+        let seeded = false;
+        let ema = 0;
+        let valid = 0;
+        for (let i = 0; i < n; i += 1) {
+          const x = Number(values[i]);
+          if (!Number.isFinite(x)) {
+            out[i] = null;
+            continue;
+          }
+          valid += 1;
+          if (!seeded) {
+            ema = x;
+            seeded = true;
+          } else {
+            ema = alpha * x + (1 - alpha) * ema;
+          }
+          out[i] = valid >= mp ? ema : null;
+        }
+        return out;
+      }
+      function _wilderAtrFromClose(close, windowSize) {
+        const n = (close || []).length;
+        const w = Math.max(2, Math.floor(Number(windowSize) || 2));
+        const out = new Array(n).fill(null);
+        if (!n) return out;
+        const tr = new Array(n).fill(null);
+        for (let i = 0; i < n; i += 1) {
+          const c = Number(close[i]);
+          if (!Number.isFinite(c) || c <= 0) {
+            tr[i] = null;
+            continue;
+          }
+          if (i === 0) {
+            tr[i] = 0;
+            continue;
+          }
+          const prev = Number(close[i - 1]);
+          if (!Number.isFinite(prev) || prev <= 0) {
+            tr[i] = null;
+            continue;
+          }
+          tr[i] = Math.abs(c - prev);
+        }
+        let atr = null;
+        let valid = 0;
+        const alpha = 1 / w;
+        for (let i = 0; i < n; i += 1) {
+          const v = Number(tr[i]);
+          if (!Number.isFinite(v)) {
+            out[i] = null;
+            continue;
+          }
+          valid += 1;
+          if (!Number.isFinite(atr)) atr = v;
+          else atr = atr + alpha * (v - atr);
+          out[i] = valid >= w ? atr : null;
+        }
+        return out;
+      }
+      function _computeOffPortfolioNavIndicators(nav) {
+        const close = (nav || []).map((x) => {
+          const v = Number(x);
+          return Number.isFinite(v) && v > 0 ? v : null;
+        });
+        const n = close.length;
+        const drawdown = drawdownSeries(close);
+        const ema12 = _emaSeries(close, 12);
+        const ema26 = _emaSeries(close, 26);
+        const macd = new Array(n).fill(null);
+        for (let i = 0; i < n; i += 1) {
+          const a = Number(ema12[i]);
+          const b = Number(ema26[i]);
+          macd[i] = Number.isFinite(a) && Number.isFinite(b) ? a - b : null;
+        }
+        const dea = _emaSeries(macd, 9);
+        const atr26 = _wilderAtrFromClose(close, 26);
+        const difV = new Array(n).fill(null);
+        for (let i = 0; i < n; i += 1) {
+          const d = Number(macd[i]);
+          const a = Number(atr26[i]);
+          difV[i] =
+            Number.isFinite(d) && Number.isFinite(a) && a > 0 ? d / a : null;
+        }
+        const deaV = _emaSeries(difV, 9);
+        const absHv = new Array(n).fill(null);
+        for (let i = 0; i < n; i += 1) {
+          const d = Number(difV[i]);
+          const s = Number(deaV[i]);
+          absHv[i] =
+            Number.isFinite(d) && Number.isFinite(s)
+              ? Math.abs(2 * (d - s))
+              : null;
+        }
+        const ma20 = _rollingMean(close, 20);
+        const atr20 = _wilderAtrFromClose(close, 20);
+        const biasV = new Array(n).fill(null);
+        for (let i = 0; i < n; i += 1) {
+          const c = Number(close[i]);
+          const m = Number(ma20[i]);
+          const a = Number(atr20[i]);
+          biasV[i] =
+            Number.isFinite(c) &&
+            Number.isFinite(m) &&
+            Number.isFinite(a) &&
+            a > 0
+              ? (c - m) / a
+              : null;
+        }
+        const rsi14 = _computeRsi14(close);
+        const rsi14Ma242 = _rollingMean(rsi14, 242);
+        return { drawdown, difV, deaV, absHv, biasV, rsi14, rsi14Ma242 };
+      }
+      function renderOffPortfolioNavChart({ dates, nav }) {
+        const ds = Array.isArray(dates) ? dates : [];
+        const nv = Array.isArray(nav) ? nav : [];
+        if (!window.Plotly || !ds.length || ds.length !== nv.length) return;
+        const ind = _computeOffPortfolioNavIndicators(nv);
+        const plotTheme = _offFundPairPlotThemeTokens();
+        const traces = [
+          {
+            x: ds,
+            y: nv,
+            mode: "lines",
+            name: "组合净值",
+            xaxis: "x",
+            yaxis: "y",
+            line: { color: "#5B8FF9", width: 1.8 },
+          },
+          {
+            x: ds,
+            y: ind.drawdown,
+            mode: "lines",
+            name: "净值回撤",
+            xaxis: "x2",
+            yaxis: "y2",
+            line: { color: "#d62728", width: 1.5 },
+          },
+          {
+            x: ds,
+            y: ind.difV,
+            mode: "lines",
+            name: "MACD-V DIF_v",
+            xaxis: "x3",
+            yaxis: "y3",
+            line: { color: "#f39c12", width: 1.4 },
+          },
+          {
+            x: ds,
+            y: ind.deaV,
+            mode: "lines",
+            name: "MACD-V DEA_v",
+            xaxis: "x3",
+            yaxis: "y3",
+            line: { color: "#9b59b6", width: 1.4 },
+          },
+          {
+            x: ds,
+            y: ind.absHv,
+            mode: "lines",
+            name: "MACD-V |H_v|",
+            xaxis: "x3",
+            yaxis: "y3",
+            line: { color: "#2ecc71", width: 1.2, dash: "dot" },
+          },
+          {
+            x: ds,
+            y: ind.biasV,
+            mode: "lines",
+            name: "BIAS-V",
+            xaxis: "x4",
+            yaxis: "y4",
+            line: { color: "#f59e0b", width: 1.5 },
+          },
+          {
+            x: ds,
+            y: ind.rsi14,
+            mode: "lines",
+            name: "RSI14",
+            xaxis: "x5",
+            yaxis: "y5",
+            line: { color: "#8ab4f8", width: 1.5 },
+          },
+          {
+            x: ds,
+            y: ind.rsi14Ma242,
+            mode: "lines",
+            name: "RSI14 MA242",
+            xaxis: "x5",
+            yaxis: "y5",
+            line: { color: "#2ca02c", width: 1.3, dash: "dot" },
+          },
+        ];
+        const layout = {
+          margin: { l: 58, r: 20, t: 96, b: 48 },
+          paper_bgcolor: plotTheme.plotBg,
+          plot_bgcolor: plotTheme.plotBg,
+          font: { color: plotTheme.plotFg },
+          legend: {
+            orientation: "h",
+            x: 0,
+            xanchor: "left",
+            y: 1.08,
+            yanchor: "bottom",
+          },
+          xaxis: {
+            domain: [0, 1],
+            anchor: "y",
+            showticklabels: false,
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis: {
+            domain: [0.83, 1],
+            type: "log",
+            title: "NAV",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          xaxis2: {
+            domain: [0, 1],
+            anchor: "y2",
+            matches: "x",
+            showticklabels: false,
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis2: {
+            domain: [0.66, 0.81],
+            title: "DD",
+            tickformat: ".0%",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          xaxis3: {
+            domain: [0, 1],
+            anchor: "y3",
+            matches: "x",
+            showticklabels: false,
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis3: {
+            domain: [0.46, 0.63],
+            title: "MACD-V",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          xaxis4: {
+            domain: [0, 1],
+            anchor: "y4",
+            matches: "x",
+            showticklabels: false,
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis4: {
+            domain: [0.24, 0.43],
+            title: "BIAS-V",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          xaxis5: {
+            domain: [0, 1],
+            anchor: "y5",
+            matches: "x",
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis5: {
+            domain: [0.03, 0.2],
+            title: "RSI",
+            range: [0, 100],
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          shapes: [
+            {
+              type: "line",
+              xref: "paper",
+              yref: "y5",
+              x0: 0,
+              x1: 1,
+              y0: 70,
+              y1: 70,
+              line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
+            },
+            {
+              type: "line",
+              xref: "paper",
+              yref: "y5",
+              x0: 0,
+              x1: 1,
+              y0: 30,
+              y1: 30,
+              line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
+            },
+          ],
+          title: "场外基金持有策略净值与附加指标（共享时间轴）",
+        };
+        window.Plotly.newPlot("navChart", traces, layout, {
+          responsive: true,
+          displaylogo: false,
+        });
+      }
       function rollingReturn(nav, win) {
         const w = Math.max(2, Math.floor(Number(win) || 60));
         const out = new Array((nav || []).length).fill(null);
@@ -2524,6 +2856,128 @@
             out[i] = b / a - 1;
         }
         return out;
+      }
+      function rollingDrawdown(nav, win) {
+        const w = Math.max(2, Math.floor(Number(win) || 60));
+        const src = (nav || []).map((x) => {
+          const v = Number(x);
+          return Number.isFinite(v) && v > 0 ? v : null;
+        });
+        const out = new Array(src.length).fill(null);
+        for (let i = w - 1; i < src.length; i += 1) {
+          const curr = Number(src[i]);
+          if (!Number.isFinite(curr) || curr <= 0) continue;
+          let peak = -Infinity;
+          for (let j = i - w + 1; j <= i; j += 1) {
+            const v = Number(src[j]);
+            if (!Number.isFinite(v) || v <= 0) continue;
+            if (v > peak) peak = v;
+          }
+          out[i] = Number.isFinite(peak) && peak > 0 ? curr / peak - 1 : null;
+        }
+        return out;
+      }
+      function _maxDrawdownRecoveryDays(nav) {
+        const xs = (nav || []).map((x) => Number(x)).filter(Number.isFinite);
+        if (!xs.length) return null;
+        let peak = xs[0];
+        let peakIdx = 0;
+        let worstDd = 0;
+        let worstPeakIdx = 0;
+        for (let i = 1; i < xs.length; i += 1) {
+          const v = xs[i];
+          if (v > peak) {
+            peak = v;
+            peakIdx = i;
+          }
+          const dd = peak > 0 ? v / peak - 1 : 0;
+          if (dd < worstDd) {
+            worstDd = dd;
+            worstPeakIdx = peakIdx;
+          }
+        }
+        if (!(worstDd < 0)) return 0;
+        const targetPeak = xs[worstPeakIdx];
+        for (let j = worstPeakIdx + 1; j < xs.length; j += 1) {
+          if (xs[j] >= targetPeak) return j - worstPeakIdx;
+        }
+        return null;
+      }
+      function renderRollingCharts({ dates, nav }) {
+        if (!window.Plotly) return;
+        const ds = Array.isArray(dates) ? dates : [];
+        const nv = Array.isArray(nav) ? nav : [];
+        if (!ds.length || ds.length !== nv.length) return;
+        const wins = [
+          { key: "6M", days: 126 },
+          { key: "1Y", days: 252 },
+          { key: "2Y", days: 504 },
+          { key: "3Y", days: 756 },
+        ];
+        const retColors = {
+          "6M": "#5B8FF9",
+          "1Y": "#5AD8A6",
+          "2Y": "#F6BD16",
+          "3Y": "#E8684A",
+        };
+        const ddColors = {
+          "6M": "#8ab4f8",
+          "1Y": "#34d399",
+          "2Y": "#f59e0b",
+          "3Y": "#ef4444",
+        };
+        const plotTheme = _offFundPairPlotThemeTokens();
+        const retTraces = wins.map((w) => ({
+          x: ds,
+          y: rollingReturn(nv, w.days),
+          mode: "lines",
+          name: w.key,
+          line: { width: 1.6, color: retColors[w.key] || "#5B8FF9" },
+        }));
+        const ddTraces = wins.map((w) => ({
+          x: ds,
+          y: rollingDrawdown(nv, w.days),
+          mode: "lines",
+          name: w.key,
+          line: { width: 1.6, color: ddColors[w.key] || "#ef4444" },
+        }));
+        const baseLayout = {
+          margin: { l: 52, r: 20, t: 34, b: 42 },
+          paper_bgcolor: plotTheme.plotBg,
+          plot_bgcolor: plotTheme.plotBg,
+          font: { color: plotTheme.plotFg },
+          legend: { orientation: "h", x: 0, y: 1.1 },
+          xaxis: {
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis: {
+            tickformat: ".0%",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+        };
+        Plotly.newPlot(
+          "rollingRetChart",
+          retTraces,
+          {
+            ...baseLayout,
+            title: "滚动收益率（6M/1Y/2Y/3Y）",
+          },
+          { responsive: true, displaylogo: false },
+        );
+        Plotly.newPlot(
+          "rollingDdChart",
+          ddTraces,
+          {
+            ...baseLayout,
+            title: "滚动回撤（当前回撤，6M/1Y/2Y/3Y）",
+          },
+          { responsive: true, displaylogo: false },
+        );
       }
       function rollingAnnVol(rs, win) {
         const w = Math.max(5, Math.floor(Number(win) || 60));
@@ -2629,13 +3083,39 @@
           if (v > peak) peak = v;
           mdd = Math.min(mdd, v / peak - 1);
         }
+        const downs = ex.map((x) => (x < 0 ? x : 0));
+        const downsideVar =
+          downs.reduce((a, b) => a + b * b, 0) / Math.max(1, n);
+        const downsideVol =
+          Math.sqrt(Math.max(0, downsideVar)) * Math.sqrt(252);
+        const sortino = downsideVol > 0 ? (exMean * 252) / downsideVol : null;
+        const calmar = mdd < 0 ? ann / Math.abs(mdd) : null;
+        const ddSeries = drawdownSeries(nav1)
+          .map((x) => Number(x))
+          .filter((x) => Number.isFinite(x));
+        const ulcerIndex =
+          ddSeries.length > 0
+            ? Math.sqrt(
+                ddSeries.reduce((a, b) => a + b * b, 0) / ddSeries.length,
+              )
+            : null;
+        const ulcerPerformanceIndex =
+          Number.isFinite(ulcerIndex) && ulcerIndex > 0
+            ? (ann - Number(rfAnnual || 0)) / ulcerIndex
+            : null;
+        const maxDrawdownRecoveryDays = _maxDrawdownRecoveryDays(nav1);
         return {
           nav: nav1,
           cumulative_return: cum,
           annualized_return: ann,
           annualized_volatility: vol,
           sharpe_ratio: sharpe,
+          sortino_ratio: sortino,
+          calmar_ratio: calmar,
+          ulcer_index: ulcerIndex,
+          ulcer_performance_index: ulcerPerformanceIndex,
           max_drawdown: mdd,
+          max_drawdown_recovery_days: maxDrawdownRecoveryDays,
           sample_days: n,
         };
       }
@@ -4267,12 +4747,7 @@
           backtestSig,
         };
 
-        Plotly.newPlot(
-          "navChart",
-          [{ x: datesRet, y: m.nav, mode: "lines", name: "Holding" }],
-          { margin: { t: 20 }, title: "场外基金持有策略净值" },
-          { responsive: true },
-        );
+        renderOffPortfolioNavChart({ dates: datesRet, nav: m.nav });
         window.__offRegimeSeries = {
           dates: datesRet.slice(),
           close: m.nav.slice(),
@@ -4300,8 +4775,8 @@
           window.__offRegimeBound = true;
         }
         $("metricsTable").innerHTML =
-          `<tr><th>样本日</th><th>累计收益</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>夏普</th></tr>` +
-          `<tr><td>${m.sample_days}</td><td>${fmtPct(m.cumulative_return)}</td><td>${fmtPct(m.annualized_return)}</td><td>${fmtPct(m.annualized_volatility)}</td><td>${fmtPct(m.max_drawdown)}</td><td>${fmtNum(m.sharpe_ratio, 3)}</td></tr>`;
+          `<tr><th>样本日</th><th>累计收益</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>最大回撤修复时长(日)</th><th>夏普</th><th>索提诺</th><th>卡玛</th><th>溃疡指标</th><th>溃疡绩效</th></tr>` +
+          `<tr><td>${m.sample_days}</td><td>${fmtPct(m.cumulative_return)}</td><td>${fmtPct(m.annualized_return)}</td><td>${fmtPct(m.annualized_volatility)}</td><td>${fmtPct(m.max_drawdown)}</td><td>${m.max_drawdown_recovery_days == null ? "未修复" : m.max_drawdown_recovery_days}</td><td>${fmtNum(m.sharpe_ratio, 3)}</td><td>${fmtNum(m.sortino_ratio, 3)}</td><td>${fmtNum(m.calmar_ratio, 3)}</td><td>${fmtNum(m.ulcer_index, 3)}</td><td>${fmtNum(m.ulcer_performance_index, 3)}</td></tr>`;
 
         const fwRows = Object.keys(finalW)
           .sort()
@@ -4353,29 +4828,7 @@
             )
             .join("");
 
-        const rollWin = 60;
-        const rollR = rollingReturn(m.nav, rollWin);
-        const dd = drawdownSeries(m.nav);
-        Plotly.newPlot(
-          "rollingRetChart",
-          [{ x: datesRet, y: rollR, mode: "lines", name: "R60" }],
-          {
-            margin: { t: 20 },
-            yaxis: { tickformat: ".0%" },
-            title: `滚动收益率（窗口=${rollWin}）`,
-          },
-          { responsive: true },
-        );
-        Plotly.newPlot(
-          "rollingDdChart",
-          [{ x: datesRet, y: dd, mode: "lines", name: "DD" }],
-          {
-            margin: { t: 20 },
-            yaxis: { tickformat: ".0%" },
-            title: "滚动回撤（由净值推导）",
-          },
-          { responsive: true },
-        );
+        renderRollingCharts({ dates: datesRet, nav: m.nav });
 
         offPeriodState.weekly.rows = periodReturns(datesRet, m.nav, "weekly");
         offPeriodState.monthly.rows = periodReturns(datesRet, m.nav, "monthly");
@@ -4733,6 +5186,22 @@
         scheduleRenderAllOffFundPairCards(30);
         if (offClsExposureSelectedCode) {
           _renderClsExposureChartByCode(offClsExposureSelectedCode);
+        }
+        if (
+          lastCtx &&
+          Array.isArray(lastCtx.datesRet) &&
+          Array.isArray(lastCtx.nav) &&
+          lastCtx.datesRet.length === lastCtx.nav.length &&
+          lastCtx.datesRet.length > 1
+        ) {
+          renderOffPortfolioNavChart({
+            dates: lastCtx.datesRet,
+            nav: lastCtx.nav,
+          });
+          renderRollingCharts({
+            dates: lastCtx.datesRet,
+            nav: lastCtx.nav,
+          });
         }
       });
       offPairPrefsByCard = loadOffFundPairPrefsLocal();

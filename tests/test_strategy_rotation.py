@@ -942,6 +942,73 @@ def test_rotation_negative_top_k_selects_lower_momentum_names(session_factory):
     assert last_p_inv == ["BBB"]
 
 
+def test_rotation_momentum_correction_reorders_ranking(session_factory):
+    """Momentum correction multiplies base score by recent N-day return before ranking."""
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=40, freq="B")]
+    aaa = [100.0 + 2.0 * i for i in range(len(dates))]
+    bbb = [100.0 + 1.0 * i for i in range(len(dates))]
+    # Keep medium-term momentum of AAA stronger, but force a short-term pullback
+    # so correction term can flip the final ranking to BBB.
+    aaa[-2] = 160.0
+    aaa[-1] = 150.0
+    with sf() as db:
+        for d, pa, pb in zip(dates, aaa, bbb):
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(pa),
+                open_price=float(pa),
+                high=float(pa),
+                low=float(pa),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(pb),
+                open_price=float(pb),
+                high=float(pb),
+                low=float(pb),
+            )
+        db.commit()
+
+        base = dict(
+            codes=["AAA", "BBB"],
+            start=dates[0],
+            end=dates[-1],
+            rebalance="daily",
+            top_k=1,
+            lookback_days=6,
+            skip_days=4,
+            exec_price="close",
+            cost_bps=0.0,
+            slippage_rate=0.0,
+            score_method="raw_mom",
+        )
+        out_base = backtest_rotation(db, RotationInputs(**base))
+        out_corr = backtest_rotation(
+            db,
+            RotationInputs(
+                **{
+                    **base,
+                    "momentum_correction_enabled": True,
+                    "momentum_correction_window": 3,
+                }
+            ),
+        )
+
+    periods_base = out_base.get("holdings") or []
+    periods_corr = out_corr.get("holdings") or []
+    assert periods_base and periods_corr
+    last_base = sorted([str(x) for x in (periods_base[-1].get("picks") or [])])
+    last_corr = sorted([str(x) for x in (periods_corr[-1].get("picks") or [])])
+    assert last_base == ["AAA"]
+    assert last_corr == ["BBB"]
+
+
 def test_rotation_top_k_zero_raises(session_factory):
     sf = session_factory
     start = dt.date(2024, 1, 1)
@@ -970,6 +1037,57 @@ def test_rotation_top_k_zero_raises(session_factory):
                     skip_days=0,
                     cost_bps=0.0,
                     slippage_rate=0.0,
+                ),
+            )
+
+
+def test_rotation_momentum_correction_window_range_validation(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [start + dt.timedelta(days=i) for i in range(6)]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + float(i)
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=px,
+                open_price=px,
+                high=px,
+                low=px,
+            )
+        db.commit()
+        with pytest.raises(ValueError, match="skip_days >= 3"):
+            backtest_rotation(
+                db,
+                RotationInputs(
+                    codes=["AAA"],
+                    start=dates[0],
+                    end=dates[-1],
+                    rebalance="daily",
+                    top_k=1,
+                    lookback_days=2,
+                    skip_days=2,
+                    momentum_correction_enabled=True,
+                    momentum_correction_window=3,
+                    cost_bps=0.0,
+                ),
+            )
+        with pytest.raises(ValueError, match="\\[3, skip_days\\]"):
+            backtest_rotation(
+                db,
+                RotationInputs(
+                    codes=["AAA"],
+                    start=dates[0],
+                    end=dates[-1],
+                    rebalance="daily",
+                    top_k=1,
+                    lookback_days=2,
+                    skip_days=4,
+                    momentum_correction_enabled=True,
+                    momentum_correction_window=5,
+                    cost_bps=0.0,
                 ),
             )
 

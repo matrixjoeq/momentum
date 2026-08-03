@@ -2198,6 +2198,12 @@ def _rotation_inputs_from_payload(
         exit_match_n=payload.exit_match_n,
         lookback_days=payload.lookback_days,
         skip_days=payload.skip_days,
+        momentum_correction_enabled=bool(
+            getattr(payload, "momentum_correction_enabled", False)
+        ),
+        momentum_correction_window=int(
+            getattr(payload, "momentum_correction_window", 20)
+        ),
         score_method=payload.score_method,
         cost_bps=payload.cost_bps,
         slippage_rate=payload.slippage_rate,
@@ -4424,6 +4430,12 @@ def rotation_next_execution_plan(
             "position_mode": str(req.position_mode),
             "lookback_days": int(req.lookback_days),
             "skip_days": int(req.skip_days),
+            "momentum_correction_enabled": bool(
+                getattr(req, "momentum_correction_enabled", False)
+            ),
+            "momentum_correction_window": int(
+                getattr(req, "momentum_correction_window", 20)
+            ),
             "score_method": str(req.score_method),
             "cost_bps": float(req.cost_bps),
             "entry_backfill": bool(req.entry_backfill),
@@ -4506,6 +4518,14 @@ def rotation_next_execution_plan(
             "entry_match_n": int(req.entry_match_n),
             "exit_match_n": int(req.exit_match_n),
             "lookback_days": int(req.lookback_days),
+            "skip_days": int(req.skip_days),
+            "momentum_correction_enabled": bool(
+                getattr(req, "momentum_correction_enabled", False)
+            ),
+            "momentum_correction_window": int(
+                getattr(req, "momentum_correction_window", 20)
+            ),
+            "score_method": str(req.score_method),
         },
     }
 
