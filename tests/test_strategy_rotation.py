@@ -1092,6 +1092,89 @@ def test_rotation_momentum_correction_window_range_validation(session_factory):
             )
 
 
+def test_rotation_bias_exit_rules_stack_partial_reduction(session_factory):
+    sf = session_factory
+    start = dt.date(2023, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=140, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = float(100.0 * (1.02**i))
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=px,
+                open_price=px,
+                high=px,
+                low=px,
+            )
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["AAA"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=5,
+                top_k=1,
+                lookback_days=5,
+                skip_days=3,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                bias_exit_filter=True,
+                asset_bias_rules=[
+                    {
+                        "code": "*",
+                        "stage": "exit",
+                        "bias_type": "bias",
+                        "bias_ma_window": 20,
+                        "threshold_type": "fixed",
+                        "fixed_value": 10,
+                        "op": ">",
+                        "reduce_position_ratio": 0.5,
+                    },
+                    {
+                        "code": "*",
+                        "stage": "exit",
+                        "bias_type": "bias",
+                        "bias_ma_window": 20,
+                        "threshold_type": "fixed",
+                        "fixed_value": 15,
+                        "op": ">",
+                        "reduce_position_ratio": 0.5,
+                    },
+                    {
+                        "code": "*",
+                        "stage": "exit",
+                        "bias_type": "bias",
+                        "bias_ma_window": 60,
+                        "threshold_type": "fixed",
+                        "fixed_value": 20,
+                        "op": ">",
+                        "reduce_position_ratio": 0.5,
+                    },
+                ],
+            ),
+        )
+
+    events = list(out.get("daily_exit_events") or [])
+    assert events
+    first = events[0]
+    assert str(first.get("action") or "") == "partial_reduce"
+    assert float(first.get("from_weight") or 0.0) == pytest.approx(1.0, abs=1e-12)
+    assert float(first.get("to_weight") or 0.0) == pytest.approx(0.5, abs=1e-12)
+    ratios = []
+    for ev in events:
+        fw = float(ev.get("from_weight") or 0.0)
+        tw = float(ev.get("to_weight") or 0.0)
+        if fw > 1e-12:
+            ratios.append(tw / fw)
+    assert any(r <= 0.125 + 1e-12 for r in ratios)
+
+
 def test_rotation_topk_larger_than_pool_still_runs(session_factory):
     sf = session_factory
     start = dt.date(2024, 1, 1)

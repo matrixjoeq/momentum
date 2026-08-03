@@ -1296,6 +1296,64 @@ def test_trend_portfolio_standard_mode_keeps_event_day_weights_nonzero(session_f
     assert float(w_std.iloc[-1].sum()) > 0.0
 
 
+def test_trend_portfolio_standard_mode_turnover_rebalances_without_transition(
+    session_factory,
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=12, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            a = 100.0 + i * 1.0
+            b = (95.0 + i * 0.8) if i < len(dates) - 1 else 60.0
+            _add_price_hl(
+                db,
+                code="A1",
+                day=d,
+                close=float(a),
+                high=float(a + 1.0),
+                low=float(a - 1.0),
+            )
+            _add_price_hl(
+                db,
+                code="A2",
+                day=d,
+                close=float(b),
+                high=float(max(2.0, b + 1.0)),
+                low=float(max(1.0, b - 1.0)),
+            )
+        db.commit()
+        out_std = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                position_sizing="risk_budget",
+                risk_budget_atr_window=2,
+                risk_budget_pct=0.03,
+                risk_budget_overcap_policy="scale",
+                risk_budget_rebalance_mode="standard",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    next_plan = out_std.get("next_plan") or {}
+    eff = next_plan.get("effective_weights_last_close") or {}
+    dec = next_plan.get("decision_weights_next_exec") or {}
+    delta = next_plan.get("weight_delta_next_exec_by_code") or {}
+
+    assert float(eff.get("A2") or 0.0) > 0.0
+    assert float(dec.get("A2") or 0.0) == 0.0
+    assert float(delta.get("A2") or 0.0) < 0.0
+    # Standard + scale should rebalance survivors on turnover events even if
+    # overcap status remains overcap before/after the turnover.
+    assert float(dec.get("A1") or 0.0) > float(eff.get("A1") or 0.0) + 1e-9
+    assert float(delta.get("A1") or 0.0) > 0.0
+
+
 def test_trend_portfolio_monthly_risk_budget_blocks_entries(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]

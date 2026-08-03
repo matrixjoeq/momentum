@@ -7226,46 +7226,49 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                         desired_row.loc[c] = 0.0
                 desired_total = float(desired_row.sum())
                 overcap_now = bool(desired_total > 1.0 + eps)
-                if prev_rb_overcap_state is not None and bool(
-                    prev_rb_overcap_state
-                ) != bool(overcap_now):
+                prev_overcap_state = prev_rb_overcap_state
+                if overcap_now:
+                    pre_scale = desired_row.copy().astype(float)
+                    w_row = (desired_row * (1.0 / desired_total)).astype(float)
+                    overcap_scale_total += 1
+                    _inc_overcap_daily("scale", 1)
+                    for cc in w_row.index:
+                        key_cc = str(cc)
+                        before = (
+                            float(pre_scale.loc[cc])
+                            if np.isfinite(float(pre_scale.loc[cc]))
+                            else 0.0
+                        )
+                        after = (
+                            float(w_row.loc[cc])
+                            if np.isfinite(float(w_row.loc[cc]))
+                            else 0.0
+                        )
+                        if before > after + eps:
+                            overcap_scale_by_code[key_cc] = int(
+                                overcap_scale_by_code.get(key_cc, 0) + 1
+                            )
+                    standard_event_scale_down_total += 1
+                else:
+                    w_row = desired_row.astype(float)
+                    standard_event_scale_up_total += 1
+                standard_event_rebalance_total += 1
+                if prev_overcap_state is not None and bool(prev_overcap_state) != bool(
+                    overcap_now
+                ):
                     if overcap_now:
-                        pre_scale = desired_row.copy().astype(float)
-                        w_row = (desired_row * (1.0 / desired_total)).astype(float)
-                        overcap_scale_total += 1
-                        _inc_overcap_daily("scale", 1)
-                        for cc in w_row.index:
-                            key_cc = str(cc)
-                            before = (
-                                float(pre_scale.loc[cc])
-                                if np.isfinite(float(pre_scale.loc[cc]))
-                                else 0.0
-                            )
-                            after = (
-                                float(w_row.loc[cc])
-                                if np.isfinite(float(w_row.loc[cc]))
-                                else 0.0
-                            )
-                            if before > after + eps:
-                                overcap_scale_by_code[key_cc] = int(
-                                    overcap_scale_by_code.get(key_cc, 0) + 1
-                                )
-                        standard_event_scale_down_total += 1
                         standard_transition_under_to_over_total += 1
                     else:
-                        w_row = desired_row.astype(float)
-                        standard_event_scale_up_total += 1
                         standard_transition_over_to_under_total += 1
-                    standard_event_rebalance_total += 1
-                    for key_cc in wdf.columns:
-                        kk = str(key_cc)
-                        if bool(overcap_skip_episode_active.get(kk, False)):
-                            overcap_skip_episode_active[kk] = False
-                    wdf.loc[d] = w_row.to_numpy(dtype=float)
-                    prev_rb_w = w_row.copy()
-                    prev_rb_active_set = set(active_set)
-                    prev_rb_overcap_state = bool(overcap_now)
-                    continue
+                for key_cc in wdf.columns:
+                    kk = str(key_cc)
+                    if bool(overcap_skip_episode_active.get(kk, False)):
+                        overcap_skip_episode_active[kk] = False
+                wdf.loc[d] = w_row.to_numpy(dtype=float)
+                prev_rb_w = w_row.copy()
+                prev_rb_active_set = set(active_set)
+                prev_rb_overcap_state = bool(overcap_now)
+                continue
                 prev_rb_overcap_state = bool(overcap_now)
 
             for c in active_codes:

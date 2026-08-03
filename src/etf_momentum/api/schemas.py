@@ -2273,6 +2273,15 @@ class AssetBiasRule(BaseModel):
         le=2520,
         description="Minimum observations before quantile threshold becomes active",
     )
+    reduce_position_ratio: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "Exit-stage partial reduction ratio per matched rule. "
+            "1.0 means full exit; 0.5 means reduce half."
+        ),
+    )
 
 
 class AssetRsiRule(BaseModel):

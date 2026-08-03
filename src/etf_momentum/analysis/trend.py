@@ -11991,48 +11991,49 @@ def compute_trend_portfolio_backtest(
                         desired_row.loc[c] = 0.0
                 desired_total = float(desired_row.sum())
                 overcap_now = bool(desired_total > 1.0 + 1e-12)
-                if prev_rb_overcap_state is not None and bool(
-                    prev_rb_overcap_state
-                ) != bool(overcap_now):
+                prev_overcap_state = prev_rb_overcap_state
+                if overcap_now:
+                    pre_scale = desired_row.copy().astype(float)
+                    w_row = (desired_row * (1.0 / desired_total)).astype(float)
+                    risk_budget_overcap_scale_count += 1
+                    _inc_overcap_daily("scale", 1)
+                    for cc in w_row.index:
+                        key_cc = str(cc)
+                        before = (
+                            float(pre_scale.loc[cc])
+                            if np.isfinite(float(pre_scale.loc[cc]))
+                            else 0.0
+                        )
+                        after = (
+                            float(w_row.loc[cc])
+                            if np.isfinite(float(w_row.loc[cc]))
+                            else 0.0
+                        )
+                        if before > after + 1e-12:
+                            risk_budget_overcap_scale_by_code[key_cc] = int(
+                                risk_budget_overcap_scale_by_code.get(key_cc, 0) + 1
+                            )
+                    risk_budget_standard_event_scale_down_count += 1
+                else:
+                    w_row = desired_row.astype(float)
+                    risk_budget_standard_event_scale_up_count += 1
+                risk_budget_standard_event_rebalance_count += 1
+                if prev_overcap_state is not None and bool(prev_overcap_state) != bool(
+                    overcap_now
+                ):
                     if overcap_now:
-                        pre_scale = desired_row.copy().astype(float)
-                        w_row = (desired_row * (1.0 / desired_total)).astype(float)
-                        risk_budget_overcap_scale_count += 1
-                        _inc_overcap_daily("scale", 1)
-                        for cc in w_row.index:
-                            key_cc = str(cc)
-                            before = (
-                                float(pre_scale.loc[cc])
-                                if np.isfinite(float(pre_scale.loc[cc]))
-                                else 0.0
-                            )
-                            after = (
-                                float(w_row.loc[cc])
-                                if np.isfinite(float(w_row.loc[cc]))
-                                else 0.0
-                            )
-                            if before > after + 1e-12:
-                                risk_budget_overcap_scale_by_code[key_cc] = int(
-                                    risk_budget_overcap_scale_by_code.get(key_cc, 0) + 1
-                                )
-                        risk_budget_standard_event_scale_down_count += 1
                         risk_budget_standard_transition_under_to_over_count += 1
                     else:
-                        w_row = desired_row.astype(float)
-                        risk_budget_standard_event_scale_up_count += 1
                         risk_budget_standard_transition_over_to_under_count += 1
-                    risk_budget_standard_event_rebalance_count += 1
-                    for cc in codes:
-                        key_cc = str(cc)
-                        if bool(
-                            risk_budget_overcap_skip_episode_active_by_code.get(
-                                key_cc, False
-                            )
-                        ):
-                            risk_budget_overcap_skip_episode_active_by_code[key_cc] = (
-                                False
-                            )
-                    did_standard_event_rebalance = True
+                for cc in codes:
+                    key_cc = str(cc)
+                    if bool(
+                        risk_budget_overcap_skip_episode_active_by_code.get(
+                            key_cc, False
+                        )
+                    ):
+                        risk_budget_overcap_skip_episode_active_by_code[key_cc] = False
+                did_standard_event_rebalance = True
                 prev_rb_overcap_state = bool(overcap_now)
 
             if not did_standard_event_rebalance:

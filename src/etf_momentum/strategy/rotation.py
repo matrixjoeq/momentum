@@ -812,17 +812,18 @@ def _effective_rules_for_code(
     c = str(code or "").strip()
     if not c:
         return []
-    default_rule: dict[str, Any] | None = None
+    default_rules: list[dict[str, Any]] = []
     specifics: list[dict[str, Any]] = []
     for r in rules:
         rc = str((r or {}).get("code") or "").strip()
         if rc == "*":
-            default_rule = dict(r or {})
+            default_rules.append(dict(r or {}))
         elif rc == c:
             specifics.append(dict(r or {}))
     if specifics:
-        return [_merge_rule(default_rule, r) for r in specifics]
-    return [dict(default_rule)] if default_rule else []
+        default_template = default_rules[-1] if default_rules else None
+        return [_merge_rule(default_template, r) for r in specifics]
+    return [dict(x) for x in default_rules]
 
 
 def _normalize_cmp_op(op: Any) -> str:
@@ -5250,6 +5251,8 @@ def backtest_rotation(
                         continue
                     hit_map: dict[str, bool] = {}
                     momentum_score: float | None = None
+                    bias_keep_ratio: float = 1.0
+                    bias_hit_rules: list[dict[str, Any]] = []
 
                     # 1) momentum-based exit: condition hit => trigger candidate exit
                     if use_floor_rules and c in scores.columns:
@@ -5341,7 +5344,7 @@ def backtest_rotation(
                                     "op": ">",
                                 }
                             ]
-                        bias_hit = True
+                        bias_hits: list[dict[str, Any]] = []
                         for r in bias_rules:
                             bty = (
                                 str((r or {}).get("bias_type") or b_type)
@@ -5405,8 +5408,7 @@ def backtest_rotation(
                                 or sig_d not in bdf.index
                                 or sig_d not in tdf.index
                             ):
-                                bias_hit = False
-                                break
+                                continue
                             sig = (
                                 None
                                 if pd.isna(bdf.loc[sig_d, c])
@@ -5423,12 +5425,32 @@ def backtest_rotation(
                                 or (not np.isfinite(sig))
                                 or (not np.isfinite(thr))
                             ):
-                                bias_hit = False
-                                break
+                                continue
                             if not _compare_with_op(float(sig), float(thr), op):
-                                bias_hit = False
-                                break
-                        hit_map["bias_rule"] = bool(bias_hit)
+                                continue
+                            rr = float((r or {}).get("reduce_position_ratio", 1.0))
+                            if not np.isfinite(rr):
+                                rr = 1.0
+                            rr = float(np.clip(rr, 0.0, 1.0))
+                            bias_keep_ratio *= float(1.0 - rr)
+                            bias_hits.append(
+                                {
+                                    "bias_type": str(bty),
+                                    "bias_ma_window": int(win),
+                                    "level_window": str(lvw),
+                                    "threshold_type": str(tt),
+                                    "quantile": float(qv),
+                                    "fixed_value": float(fvv),
+                                    "min_periods": int(mp),
+                                    "op": str(op),
+                                    "signal": float(sig),
+                                    "threshold": float(thr),
+                                    "reduce_position_ratio": float(rr),
+                                }
+                            )
+                        bias_hit_rules = list(bias_hits)
+                        bias_keep_ratio = float(np.clip(bias_keep_ratio, 0.0, 1.0))
+                        hit_map["bias_rule"] = bool(bias_hit_rules)
 
                     hit_count = int(sum(1 for v in hit_map.values() if bool(v)))
                     hit_conditions = [k for k, v in hit_map.items() if bool(v)]
@@ -5466,6 +5488,21 @@ def backtest_rotation(
                                     else None
                                 ),
                             },
+                            "bias_keep_ratio": (
+                                float(bias_keep_ratio)
+                                if bool(use_bias_exit) and ("bias_rule" in hit_map)
+                                else None
+                            ),
+                            "bias_reduce_ratio": (
+                                float(1.0 - bias_keep_ratio)
+                                if bool(use_bias_exit) and ("bias_rule" in hit_map)
+                                else None
+                            ),
+                            "bias_hit_rules": (
+                                list(bias_hit_rules)
+                                if bool(use_bias_exit) and ("bias_rule" in hit_map)
+                                else []
+                            ),
                         }
                     )
                     if int(exit_required) <= 0 or hit_count < int(exit_required):
@@ -5473,26 +5510,41 @@ def backtest_rotation(
                     if not hit_conditions:
                         continue
                     primary_type = hit_conditions[0]
+                    is_bias_only = bool(
+                        hit_conditions
+                        and all(str(x) == "bias_rule" for x in hit_conditions)
+                    )
+                    to_weight = 0.0
+                    if is_bias_only and bool(hit_map.get("bias_rule")):
+                        to_weight = float(prev_wt) * float(
+                            np.clip(bias_keep_ratio, 0.0, 1.0)
+                        )
+                    if to_weight < 1e-12:
+                        to_weight = 0.0
                     ev: dict[str, Any] = {
                         "type": str(primary_type),
                         "code": str(c),
                         "decision_date": sig_d.date().isoformat(),
                         "execution_date": exec_d.date().isoformat(),
                         "from_weight": float(prev_wt),
-                        "to_weight": 0.0,
-                        "delta_weight": float(-prev_wt),
+                        "to_weight": float(to_weight),
+                        "delta_weight": float(float(to_weight) - float(prev_wt)),
                         "hit_count": int(hit_count),
                         "required": int(exit_required),
                         "hit_conditions": [str(x) for x in hit_conditions],
+                        "action": (
+                            "partial_reduce" if float(to_weight) > 0.0 else "full_exit"
+                        ),
                     }
                     if momentum_score is not None and np.isfinite(
                         float(momentum_score)
                     ):
                         ev["score"] = float(momentum_score)
-                    w.loc[exec_d : dates[end_i], c] = 0.0
+                    w.loc[exec_d : dates[end_i], c] = float(to_weight)
                     daily_exit_meta["events"].append(ev)
                     daily_exit_events.append(ev)
-                    cur_risk_set.remove(c)
+                    if float(to_weight) <= 1e-12:
+                        cur_risk_set.remove(c)
                 if day_checks:
                     daily_exit_meta["checks_by_day"].append(
                         {

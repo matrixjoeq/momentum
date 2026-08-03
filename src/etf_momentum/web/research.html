@@ -23,6 +23,21 @@
       select {
         min-width: 180px;
       }
+      .rules-table-wrap {
+        width: 100%;
+        overflow-x: auto;
+      }
+      #rotBiasRulesTable,
+      #rotBiasExitRulesTable {
+        min-width: 100%;
+        width: max-content;
+      }
+      #rotBiasRulesTable input,
+      #rotBiasRulesTable select,
+      #rotBiasExitRulesTable input,
+      #rotBiasExitRulesTable select {
+        min-width: 96px;
+      }
       #chart,
       #rollingReturns,
       #rollingDD {
@@ -2534,18 +2549,21 @@
                 >默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。仅在需要“个别标的覆盖默认”时才添加单标的规则。</span
               >
             </div>
-            <table id="rotBiasRulesTable" style="margin-top: 10px">
-              <tr>
-                <th>标的代码</th>
-                <th>判断条件</th>
-                <th>MA窗口</th>
-                <th>回看窗口</th>
-                <th>阈值类型</th>
-                <th>阈值</th>
-                <th>最小样本数</th>
-                <th>操作</th>
-              </tr>
-            </table>
+            <div class="rules-table-wrap">
+              <table id="rotBiasRulesTable" style="margin-top: 10px">
+                <tr>
+                  <th>标的代码</th>
+                  <th>指标类型</th>
+                  <th>判断条件</th>
+                  <th>MA窗口</th>
+                  <th>回看窗口</th>
+                  <th>阈值类型</th>
+                  <th>阈值</th>
+                  <th>最小样本数</th>
+                  <th>操作</th>
+                </tr>
+              </table>
+            </div>
           </div>
         </div>
 
@@ -2562,7 +2580,8 @@
               说明：按标的配置 BIAS/BIAS-V
               出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如
               95）；固定值在 BIAS 下表示偏离百分比（如 10=10%），在 BIAS-V
-              下表示 ATR 倍数（如 1.5=1.5x ATR）。
+              下表示 ATR 倍数（如 1.5=1.5x ATR）。可为每条规则单独设置减仓比例，
+              同日命中多条规则时按剩余仓位乘法叠加。
             </div>
           </div>
           <div class="panel" style="margin-top: 10px">
@@ -2572,19 +2591,28 @@
               <span class="muted"
                 >默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。仅在需要“个别标的覆盖默认”时才添加单标的规则。</span
               >
+              <span class="muted"
+                >固定提示：默认出场规则为（1）Bias(20)&gt;10
+                减仓50%（2）Bias(20)&gt;15 减仓50%（3）Bias(60)&gt;20
+                减仓50%。同日多条命中按剩余仓位乘法叠加：100%→50%→25%→12.5%。</span
+              >
             </div>
-            <table id="rotBiasExitRulesTable" style="margin-top: 10px">
-              <tr>
-                <th>标的代码</th>
-                <th>判断条件</th>
-                <th>MA窗口</th>
-                <th>回看窗口</th>
-                <th>阈值类型</th>
-                <th>阈值</th>
-                <th>最小样本数</th>
-                <th>操作</th>
-              </tr>
-            </table>
+            <div class="rules-table-wrap">
+              <table id="rotBiasExitRulesTable" style="margin-top: 10px">
+                <tr>
+                  <th>标的代码</th>
+                  <th>判断条件</th>
+                  <th>判断符号</th>
+                  <th>MA窗口</th>
+                  <th>回看窗口</th>
+                  <th>阈值类型</th>
+                  <th>阈值</th>
+                  <th>减仓比例(%)</th>
+                  <th>最小样本数</th>
+                  <th>操作</th>
+                </tr>
+              </table>
+            </div>
           </div>
           <div class="muted" style="margin-top: 8px">
             说明：仅用于出场条件，在持仓期间按日检查；触发后次日执行。
@@ -8764,6 +8792,7 @@
           level_window: _tableInputValue(tr, ".rotBiasWin", "all"),
           threshold_type: _tableInputValue(tr, ".rotBiasThrType", "quantile"),
           threshold_value: _tableInputValue(tr, ".rotBiasThrVal", "95"),
+          reduce_ratio_pct: _tableInputValue(tr, ".rotBiasReducePct", "100"),
           min_periods: _tableInputValue(tr, ".rotBiasMinP", "20"),
         }));
         const volIdx = _tableRows("rotVolIdxRulesTable").map((tr) => ({
@@ -8852,6 +8881,12 @@
                   r.threshold_type === "quantile" ? r.threshold_value : 95,
                 fixed_value:
                   r.threshold_type === "fixed" ? r.threshold_value : 10,
+                reduce_ratio_pct:
+                  r.reduce_ratio_pct != null
+                    ? r.reduce_ratio_pct
+                    : r.reduce_position_ratio != null
+                      ? Number(r.reduce_position_ratio) * 100
+                      : 100,
                 min_periods: r.min_periods,
               },
               { tableId: "rotBiasExitRulesTable" },
@@ -39365,7 +39400,7 @@
           ["3y", "近3年"],
           ["5y", "近5年"],
           ["10y", "近10年"],
-          ["all", "全区间扩展（expanding，无前视）"],
+          ["all", "全区间扩展"],
         ];
         return opts
           .map(
@@ -39407,6 +39442,7 @@
       function _rotBiasAddRuleRow(rule, opts) {
         const o = opts || {};
         const tableId = String(o.tableId || "rotBiasRulesTable");
+        const isExitTable = tableId.toLowerCase().includes("exit");
         const tbl = $(tableId);
         if (!tbl) return;
         const r = rule || {};
@@ -39422,8 +39458,18 @@
           .toLowerCase();
         const qv = (r.quantile == null ? 95 : r.quantile).toString();
         const fv = (r.fixed_value == null ? 10 : r.fixed_value).toString();
+        const reducePct = (
+          r.reduce_ratio_pct == null
+            ? r.reduce_position_ratio == null
+              ? 100
+              : Number(r.reduce_position_ratio) * 100
+            : r.reduce_ratio_pct
+        ).toString();
         const minp = (r.min_periods == null ? 20 : r.min_periods).toString();
         const thrShow = thrType === "fixed" ? fv : qv;
+        const reduceTd = isExitTable
+          ? `<td><input class="rotBiasReducePct" value="${reducePct}" placeholder="50" style="min-width:110px;" /></td>`
+          : "";
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td><input class="rotBiasCode" value="${code}" placeholder="如 * 或 513100" style="min-width:120px;" /></td>
@@ -39459,6 +39505,7 @@
             <input class="rotBiasThrVal" value="${thrShow}" placeholder="95 或 10/1.5" style="min-width:120px;" />
             <div class="muted rotBiasThrTypeHint" style="font-size:11px; margin-top:2px;"></div>
           </td>
+          ${reduceTd}
           <td><input class="rotBiasMinP" value="${minp}" placeholder="20" style="min-width:90px;" /></td>
           <td><button class="rotBiasRemove">删除</button></td>
         `;
@@ -39481,6 +39528,50 @@
       }
       function _rotBiasResetDefaultRules(tableId) {
         _rotBiasClearRuleRows(tableId);
+        const isExitTable = String(tableId || "")
+          .toLowerCase()
+          .includes("exit");
+        if (isExitTable) {
+          const defaults = [
+            {
+              code: "*",
+              bias_type: "bias",
+              op: ">",
+              bias_ma_window: 20,
+              level_window: "all",
+              threshold_type: "fixed",
+              fixed_value: 10,
+              reduce_ratio_pct: 50,
+              min_periods: 20,
+            },
+            {
+              code: "*",
+              bias_type: "bias",
+              op: ">",
+              bias_ma_window: 20,
+              level_window: "all",
+              threshold_type: "fixed",
+              fixed_value: 15,
+              reduce_ratio_pct: 50,
+              min_periods: 20,
+            },
+            {
+              code: "*",
+              bias_type: "bias",
+              op: ">",
+              bias_ma_window: 60,
+              level_window: "all",
+              threshold_type: "fixed",
+              fixed_value: 20,
+              reduce_ratio_pct: 50,
+              min_periods: 20,
+            },
+          ];
+          for (const rule of defaults) {
+            _rotBiasAddRuleRow(rule, { tableId });
+          }
+          return;
+        }
         _rotBiasAddRuleRow(
           {
             code: "*",
@@ -39559,6 +39650,12 @@
                 : "20",
             ),
           );
+          const reduce_ratio_pct = Number(
+            tr.querySelector(".rotBiasReducePct") &&
+              tr.querySelector(".rotBiasReducePct").value
+              ? tr.querySelector(".rotBiasReducePct").value
+              : "100",
+          );
           if (!Number.isFinite(bias_ma_window) || bias_ma_window <= 1)
             return { __error: "乖离率过滤：MA窗口必须>1" };
           if (!["=", "!=", ">", "<", ">=", "<="].includes(op))
@@ -39579,6 +39676,19 @@
               __error:
                 "乖离率过滤：固定阈值必须 >= 0（BIAS=偏离%，BIAS-V=ATR倍数）",
             };
+          let reduce_position_ratio = 1.0;
+          if (String(stageName || "").toLowerCase() === "exit") {
+            if (!Number.isFinite(reduce_ratio_pct))
+              return { __error: "乖离率出场：减仓比例必须是数字" };
+            reduce_position_ratio =
+              reduce_ratio_pct > 1
+                ? reduce_ratio_pct / 100.0
+                : reduce_ratio_pct;
+            if (reduce_position_ratio <= 0 || reduce_position_ratio > 1)
+              return {
+                __error: "乖离率出场：减仓比例需在 (0,100%]（可填 50 或 0.5）",
+              };
+          }
           if (!Number.isFinite(min_periods) || min_periods < 2)
             return { __error: "乖离率过滤：最小样本数必须 >= 2" };
           out.push({
@@ -39591,6 +39701,7 @@
             threshold_type,
             quantile: threshold_type === "quantile" ? threshold_value : 95,
             fixed_value: threshold_type === "fixed" ? threshold_value : 10,
+            reduce_position_ratio,
             min_periods,
           });
         }
@@ -42201,6 +42312,15 @@
               fixed_value: Number(
                 tr.querySelector(".rotBiasThrVal")?.value || "10",
               ),
+              reduce_position_ratio:
+                Number(tr.querySelector(".rotBiasReducePct")?.value || "100") >
+                1
+                  ? Number(
+                      tr.querySelector(".rotBiasReducePct")?.value || "100",
+                    ) / 100
+                  : Number(
+                      tr.querySelector(".rotBiasReducePct")?.value || "100",
+                    ),
               min_periods: Number(
                 tr.querySelector(".rotBiasMinP")?.value || "20",
               ),
