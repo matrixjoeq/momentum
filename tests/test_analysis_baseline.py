@@ -118,9 +118,7 @@ def test_compute_baseline_supports_dca_metrics(session_factory):
     m = out["metrics"]
     assert bool(m.get("dca_enabled")) is True
     expected_invested = 100.0 + 20.0 * (len(dates) - 1)
-    assert float(m["dca_total_invested"]) == pytest.approx(
-        expected_invested, rel=1e-12
-    )
+    assert float(m["dca_total_invested"]) == pytest.approx(expected_invested, rel=1e-12)
     assert float(m["dca_final_value"]) > expected_invested
     assert float(m["dca_cumulative_return"]) == pytest.approx(
         float(m["dca_final_value"]) / float(m["dca_total_invested"]) - 1.0,
@@ -140,16 +138,12 @@ def test_compute_baseline_supports_dca_metrics(session_factory):
         mdd = min(mdd, float(v) / peak - 1.0)
     assert float(m["max_drawdown"]) == pytest.approx(float(mdd), rel=1e-12)
     strat_cum = float(out["nav"]["series"]["EW"][-1] - 1.0)
-    assert float(m["dca_time_weighted_return"]) == pytest.approx(
-        strat_cum, rel=1e-12
-    )
+    assert float(m["dca_time_weighted_return"]) == pytest.approx(strat_cum, rel=1e-12)
     assert float(m["cumulative_return"]) != pytest.approx(strat_cum, rel=1e-9, abs=1e-9)
     assert np.isfinite(float(m["dca_money_weighted_return"]))
     dca = out.get("dca") or {}
     assert bool(dca.get("enabled")) is True
-    assert len((dca.get("series") or {}).get("dates") or []) == len(
-        out["nav"]["dates"]
-    )
+    assert len((dca.get("series") or {}).get("dates") or []) == len(out["nav"]["dates"])
     dca_by = out.get("dca_by_portfolio") or {}
     assert float(
         (dca_by.get("EW") or {}).get("metrics", {}).get("dca_total_invested")
@@ -160,8 +154,8 @@ def test_compute_baseline_includes_price_bias_distribution(session_factory):
     sf = session_factory
     with sf() as db:
         code = "AAA"
-        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(40)]
-        closes = [100.0 + float(i) for i in range(40)]
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(80)]
+        closes = [100.0 + float(i) for i in range(80)]
         for d, c in zip(dates, closes, strict=True):
             db.add(
                 EtfPrice(
@@ -190,12 +184,27 @@ def test_compute_baseline_includes_price_bias_distribution(session_factory):
 
     pdist = out["period_distributions"][code]
     assert "daily_bias" in pdist
+    assert "daily_bias_20" in pdist
+    assert "daily_bias_60" in pdist
     bias = pdist["daily_bias"]
+    bias20 = pdist["daily_bias_20"]
+    bias60 = pdist["daily_bias_60"]
     assert bias["count"] > 0
+    assert bias20["count"] > 0
+    assert bias60["count"] > 0
     assert bias["current_date"] == dates[-1].isoformat()
+    assert bias20["current_date"] == dates[-1].isoformat()
+    assert bias60["current_date"] == dates[-1].isoformat()
     ma20_last = sum(closes[-20:]) / 20.0
-    expected = closes[-1] / ma20_last - 1.0
-    assert bias["current"] == pytest.approx(expected, rel=1e-12)
+    ma60_last = sum(closes[-60:]) / 60.0
+    expected20 = closes[-1] / ma20_last - 1.0
+    expected60 = closes[-1] / ma60_last - 1.0
+    assert bias["current"] == pytest.approx(expected20, rel=1e-12)
+    assert bias20["current"] == pytest.approx(expected20, rel=1e-12)
+    assert bias60["current"] == pytest.approx(expected60, rel=1e-12)
+    # Legacy alias must match explicit BIAS(20)
+    assert bias["current"] == bias20["current"]
+    assert bias["count"] == bias20["count"]
 
 
 def test_compute_baseline_lppl_library_unavailable(

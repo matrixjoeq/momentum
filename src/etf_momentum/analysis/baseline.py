@@ -1876,12 +1876,13 @@ def _compute_periodic_returns_and_volatility(
     - Yearly volatility (resampled)
 
     Also supports (when `daily_close` is provided):
-    - Price deviation (BIAS) distributions (end-of-period), where
-        bias_t = close_t / MA252(close)_t - 1
-      This measures how far price deviates from a long-term trendline (252 trading days).
+    - Price deviation (log) distributions (end-of-period), where
+        price_dev_t = log(close)_t - MA_n(log(close))_t
+      with n matching the period horizon (e.g. daily n=252).
     - Price BIAS distributions (end-of-period), where
-        bias_t = close_t / MA20(close)_t - 1
-      This follows a short/medium-term MA(20) reference used by the research UI.
+        bias_t = close_t / MA_w(close)_t - 1
+      for windows w=20 and w=60 (keys: `{freq}_bias_20`, `{freq}_bias_60`;
+      `{freq}_bias` remains an alias of MA20 for backward compatibility).
     - BIAS-V distributions (by frequency), where
         BIAS-V_t = (close_t - MA20(close)_t) / ATR(20)_t
       This standardizes MA20 deviation by ATR20 to support cross-asset comparability.
@@ -2384,12 +2385,12 @@ def _compute_periodic_returns_and_volatility(
                 _add_dev("quarterly", _log_dev(px_q, n=4))
                 _add_dev("yearly", _log_dev(px_y, n=3))
 
-                # Price BIAS: close / MA20(close) - 1
-                def _add_bias(kind: str, s: pd.Series) -> None:
+                # Price BIAS: close / MA_w(close) - 1 (w=20,60)
+                def _add_bias(kind: str, key: str, s: pd.Series) -> None:
                     if s is None or s.empty:
                         return
                     xs = s.to_numpy(dtype=float)
-                    code_result[f"{kind}_bias"] = {
+                    code_result[f"{kind}_{key}"] = {
                         "hist": _histogram_from_samples(xs),
                         "quantiles": _quantiles_from_samples(xs),
                         "mean": float(np.mean(xs)),
@@ -2401,7 +2402,10 @@ def _compute_periodic_returns_and_volatility(
                         "current_date": pd.to_datetime(s.index[-1]).date().isoformat(),
                     }
 
-                def _bias_ma20(s: pd.Series) -> pd.Series:
+                def _bias_ma(s: pd.Series, window: int) -> pd.Series:
+                    w = int(window)
+                    if w <= 1:
+                        return pd.Series([], dtype=float)
                     s2 = (
                         pd.to_numeric(s, errors="coerce")
                         .astype(float)
@@ -2410,15 +2414,25 @@ def _compute_periodic_returns_and_volatility(
                     )
                     if s2.empty:
                         return pd.Series([], dtype=float)
-                    ma20 = s2.rolling(window=20, min_periods=5).mean()
-                    out = (s2 / ma20 - 1.0).replace([np.inf, -np.inf], np.nan).dropna()
+                    # Keep the historical MA20 floor of min_periods=5; scale for longer windows.
+                    min_periods = max(5, w // 4)
+                    ma = s2.rolling(window=w, min_periods=min_periods).mean()
+                    out = (s2 / ma - 1.0).replace([np.inf, -np.inf], np.nan).dropna()
                     return out
 
-                _add_bias("daily", _bias_ma20(px_d))
-                _add_bias("weekly", _bias_ma20(px_w))
-                _add_bias("monthly", _bias_ma20(px_m))
-                _add_bias("quarterly", _bias_ma20(px_q))
-                _add_bias("yearly", _bias_ma20(px_y))
+                for _kind, _px in (
+                    ("daily", px_d),
+                    ("weekly", px_w),
+                    ("monthly", px_m),
+                    ("quarterly", px_q),
+                    ("yearly", px_y),
+                ):
+                    bias20 = _bias_ma(_px, 20)
+                    bias60 = _bias_ma(_px, 60)
+                    # Legacy key `*_bias` == BIAS(20)
+                    _add_bias(_kind, "bias", bias20)
+                    _add_bias(_kind, "bias_20", bias20)
+                    _add_bias(_kind, "bias_60", bias60)
 
                 # BIAS-V: (close - MA20(close)) / ATR(20)
                 def _add_bias_v(

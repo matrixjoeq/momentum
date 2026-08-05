@@ -710,7 +710,7 @@
     <div class="panel">
       <h3>各标的收益率与波动率分布统计</h3>
       <div class="muted">
-        统计每个标的在不同周期（日度/周度/月度/季度/年度）下的收益率、波动率、价格BIAS、BIAS-V、成交活跃度与拥挤度指标分布直方图与分位数；并支持按<strong>周内交易日</strong>（周一至周五择一）、<strong>月内公历日</strong>（每月
+        统计每个标的在不同周期（日度/周度/月度/季度/年度）下的收益率、波动率、价格BIAS(20)/BIAS(60)、BIAS-V、成交活跃度与拥挤度指标分布直方图与分位数；并支持按<strong>周内交易日</strong>（周一至周五择一）、<strong>月内公历日</strong>（每月
         1～31 号择一）、<strong>公历年内按日序划分的周序号</strong>（第 1～52
         周择一）或<strong>公历年内的月份</strong>（1～12
         月择一）提取日度收盘收益序列、时间序列图与分布直方图，用于观察日历效应。<br />
@@ -750,14 +750,13 @@
             <option value="atr20_level">ATR%(20日) 波动性历史位置</option>
             <option value="mtr_atr20_multiple">当日波动MTR/ATR(20)</option>
             <option value="atr5_atr50_multiple">ATR(5)/ATR(50)</option>
-            <option value="bias">价格BIAS（close/MA20-1）</option>
+            <option value="bias_20">价格BIAS(20)（close/MA20-1）</option>
+            <option value="bias_60">价格BIAS(60)（close/MA60-1）</option>
             <option value="bias_v">BIAS-V（(close-MA20)/ATR20）</option>
             <option value="bb_width_atr20">布林带宽/ATR20（N=20,K=2）</option>
-            <option value="price_dev">价格偏离度（log价格-长期均值）</option>
             <option value="volume">成交活跃度（量/额）</option>
             <!-- variants / transforms -->
             <option value="log_return_dev">对数收益偏离(log(1+r)-MA20)</option>
-            <option value="log_volatility">对数波动率(log)</option>
             <option value="log_vol_dev">波动率对数偏离(log(vol)-MA20)</option>
             <option value="rvol">相对成交量(RVOL)</option>
             <option value="vol_dev">成交量偏离(log)</option>
@@ -18098,6 +18097,8 @@
           t === "return" ||
           t === "volatility" ||
           t === "bias" ||
+          t === "bias_20" ||
+          t === "bias_60" ||
           t === "atr20_level" ||
           t === "momentum_20_0";
         const _distTypeLabel = (t) =>
@@ -18113,38 +18114,40 @@
                     ? "当日波动MTR/ATR(20)"
                     : t === "atr5_atr50_multiple"
                       ? "ATR(5)/ATR(50)"
-                      : t === "bias"
-                        ? "价格BIAS"
-                        : t === "bias_v"
-                          ? "BIAS-V"
-                          : t === "bb_width_atr20"
-                            ? "布林带宽/ATR20"
-                            : t === "price_dev"
-                              ? "价格偏离度"
-                              : t === "log_volatility"
-                                ? "对数波动率(log)"
-                                : t === "log_return_dev"
-                                  ? "对数收益偏离"
-                                  : t === "log_vol_dev"
-                                    ? "波动率对数偏离"
-                                    : t === "volume"
-                                      ? "成交活跃度"
-                                      : t === "rvol"
-                                        ? "相对成交量(RVOL)"
-                                        : t === "macd_v_dif"
-                                          ? "MACD-V（DIF）"
-                                          : t === "macd_v_dea"
-                                            ? "MACD-V（DEA）"
-                                            : t === "macd_v_absh" ||
-                                                t === "macd_v_macd"
-                                              ? "MACD-V（|H|=|2*(DIF-DEA)|）"
-                                              : t === "macd_abs"
-                                                ? "标准MACD（|MACD|, 12/26/9）"
-                                                : t === "momentum_20_0"
-                                                  ? "动量因子强弱（固定20/0）"
-                                                  : t === "lppl"
-                                                    ? "LPPL崩盘预测"
-                                                    : "成交量偏离(log)";
+                      : t === "bias" || t === "bias_20"
+                        ? "价格BIAS(20)"
+                        : t === "bias_60"
+                          ? "价格BIAS(60)"
+                          : t === "bias_v"
+                            ? "BIAS-V"
+                            : t === "bb_width_atr20"
+                              ? "布林带宽/ATR20"
+                              : t === "price_dev"
+                                ? "价格偏离度"
+                                : t === "log_volatility"
+                                  ? "对数波动率(log)"
+                                  : t === "log_return_dev"
+                                    ? "对数收益偏离"
+                                    : t === "log_vol_dev"
+                                      ? "波动率对数偏离"
+                                      : t === "volume"
+                                        ? "成交活跃度"
+                                        : t === "rvol"
+                                          ? "相对成交量(RVOL)"
+                                          : t === "macd_v_dif"
+                                            ? "MACD-V（DIF）"
+                                            : t === "macd_v_dea"
+                                              ? "MACD-V（DEA）"
+                                              : t === "macd_v_absh" ||
+                                                  t === "macd_v_macd"
+                                                ? "MACD-V（|H|=|2*(DIF-DEA)|）"
+                                                : t === "macd_abs"
+                                                  ? "标准MACD（|MACD|, 12/26/9）"
+                                                  : t === "momentum_20_0"
+                                                    ? "动量因子强弱（固定20/0）"
+                                                    : t === "lppl"
+                                                      ? "LPPL崩盘预测"
+                                                      : "成交量偏离(log)";
 
         // cache per-code distributions/baseline payloads
         window.__distDistributionsByCode =
@@ -20998,8 +21001,10 @@
               ),
             );
           }
-          if (type === "bias") {
-            const ma = rollingMean(periodClose, 20, 5);
+          if (type === "bias" || type === "bias_20" || type === "bias_60") {
+            const win = type === "bias_60" ? 60 : 20;
+            const minP = Math.max(5, Math.floor(win / 4));
+            const ma = rollingMean(periodClose, win, minP);
             return pack(
               periodClose.map((v, i) =>
                 Number.isFinite(v) && Number.isFinite(ma[i]) && ma[i] !== 0
@@ -23549,7 +23554,13 @@
         const updateDisplay = () => {
           const code = codeSelect.value;
           const typeRaw = typeSelect.value;
-          const type = typeRaw === "macd_v_macd" ? "macd_v_absh" : typeRaw; // "return" | "volatility" | "bias" | "bias_v" | "bb_width_atr20" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev" | "macd_v_dif" | "macd_v_dea" | "macd_v_absh" | "macd_abs"
+          // Legacy persisted "bias" maps to explicit BIAS(20).
+          const type =
+            typeRaw === "macd_v_macd"
+              ? "macd_v_absh"
+              : typeRaw === "bias"
+                ? "bias_20"
+                : typeRaw; // "return" | "volatility" | "bias_20" | "bias_60" | "bias_v" | ...
           const period = periodSelect.value; // "daily", "weekly", "monthly", "quarterly", "yearly"
           _scheduleDistGarchPanel();
 
@@ -40359,6 +40370,21 @@
 
         _applyFields(SETTINGS_FIELD_IDS.global, globalSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.dist, distSaved || {});
+        // Legacy dist-type migrations (removed/renamed options).
+        try {
+          const dts = $("distTypeSelect");
+          const distType = String((dts && dts.value) || "").trim();
+          if (dts && distType === "bias") {
+            dts.value = "bias_20";
+          } else if (
+            dts &&
+            (distType === "price_dev" || distType === "log_volatility")
+          ) {
+            dts.value = "return";
+          }
+        } catch (_eDistTypeMig) {
+          /* ignore */
+        }
         _applyFields(SETTINGS_FIELD_IDS.ewCal, ewCalSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.rotation, rotationSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.rotCal, rotCalSaved || {});
