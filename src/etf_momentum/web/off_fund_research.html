@@ -160,6 +160,12 @@
         <button id="selAll">全选</button>
         <button id="selNone">取消全选</button>
         <button id="selInvert">反选</button>
+        <button id="addToPersistentGroup">加入当前大组</button>
+        <button id="removeFromPersistentGroup">从当前大组移除</button>
+        <label style="display: flex; align-items: center; gap: 6px; margin: 0">
+          <input id="showNonGroupCodes" type="checkbox" checked />
+          <span>显示非当前分组标的</span>
+        </label>
         <div>
           <label>当前小组ID</label><input id="activeGroup" value="S01" />
         </div>
@@ -766,6 +772,7 @@
       let offClsLastFactorOrder = [];
       let offClsExposureSelectedCode = "";
       let offClsExposureRangeKey = "all";
+      let showNonGroupCodes = true;
       const offClsFundNavCache = {};
       let offClsFundTechRenderSeq = 0;
       const pageSize = 12;
@@ -2888,8 +2895,7 @@
               line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
             },
           ],
-          title:
-            "场外基金持有策略净值与附加指标（含 BIAS-V(20)=(close-MA20)/ATR20，共享时间轴）",
+          title: "场外基金持有策略净值与附加指标",
         };
         window.Plotly.newPlot("navChart", traces, layout, {
           responsive: true,
@@ -3776,20 +3782,37 @@
         const inActive = new Set(
           validCodes(persistentGroups[activePersistentGroup] || []),
         );
-        const show = pool.filter((it) => inActive.has(String(it.code || "")));
+        const showOthers =
+          $("showNonGroupCodes") && $("showNonGroupCodes").checked;
+        const show = (Array.isArray(pool) ? pool.slice() : [])
+          .sort((a, b) => {
+            const ca = String((a && a.code) || "");
+            const cb = String((b && b.code) || "");
+            const ia = inActive.has(ca) ? 0 : 1;
+            const ib = inActive.has(cb) ? 0 : 1;
+            if (ia !== ib) return ia - ib;
+            return ca.localeCompare(cb);
+          })
+          .filter((it) => {
+            const c = String((it && it.code) || "");
+            if (!c) return false;
+            return showOthers ? true : inActive.has(c);
+          });
         for (const it of show) {
           const c = String(it.code || "");
           const g = codeGroup[c] || "";
+          const inGroup = inActive.has(c);
           rows.push(`<tr>
             <td><input type="checkbox" class="selCode" data-code="${esc(c)}" ${selected.has(c) ? "checked" : ""} /></td>
             <td>${esc(c)}</td>
             <td>${esc(it.name || "")}</td>
+            <td>${inGroup ? "是" : "否"}</td>
             <td>${esc(g || "-")}</td>
             <td>${esc(it.last_data_start_date || "-")} ~ ${esc(it.last_data_end_date || "-")}</td>
           </tr>`);
         }
         $("poolTable").innerHTML =
-          `<tr><th>选择</th><th>代码</th><th>名称</th><th>小组</th><th>已抓取区间(hfq)</th></tr>${rows.join("") || `<tr><td colspan="5" class="muted">当前大组无标的。请先保存/载入一个持久分组。</td></tr>`}`;
+          `<tr><th>选择</th><th>代码</th><th>名称</th><th>在当前大组</th><th>小组</th><th>已抓取区间(hfq)</th></tr>${rows.join("") || `<tr><td colspan="6" class="muted">候选池为空，请先抓取或维护候选池数据。</td></tr>`}`;
       }
 
       async function loadPool() {
@@ -5322,6 +5345,48 @@
         for (const c of nxt) selected.add(c);
         renderPool();
       });
+      $("addToPersistentGroup").addEventListener("click", () => {
+        const base = new Set(
+          validCodes(persistentGroups[activePersistentGroup] || []),
+        );
+        const poolCodes = new Set(pool.map((it) => String(it.code || "")));
+        const toAdd = Array.from(selected).filter((c) =>
+          poolCodes.has(String(c)),
+        );
+        if (!toAdd.length) return setMsg("请先在候选池勾选要加入大组的标的。");
+        for (const c of toAdd) {
+          base.add(String(c));
+          if (!codeGroup[c]) codeGroup[c] = "S01";
+        }
+        persistentGroups[activePersistentGroup] = validCodes(Array.from(base));
+        saveCurrentSubgroupState({ persist: "immediate" });
+        syncAssetGroupsText();
+        renderPool();
+        setMsg(
+          `已加入当前大组：${activePersistentGroup}（新增${toAdd.length}个，现共${persistentGroups[activePersistentGroup].length}个）`,
+        );
+      });
+      $("removeFromPersistentGroup").addEventListener("click", () => {
+        const base = new Set(
+          validCodes(persistentGroups[activePersistentGroup] || []),
+        );
+        const toRemove = Array.from(selected).filter((c) =>
+          base.has(String(c)),
+        );
+        if (!toRemove.length) return setMsg("请先勾选当前大组内要移除的标的。");
+        for (const c of toRemove) {
+          base.delete(String(c));
+          selected.delete(String(c));
+          delete codeGroup[c];
+        }
+        persistentGroups[activePersistentGroup] = validCodes(Array.from(base));
+        saveCurrentSubgroupState({ persist: "immediate" });
+        syncAssetGroupsText();
+        renderPool();
+        setMsg(
+          `已从当前大组移除：${activePersistentGroup}（移除${toRemove.length}个，现共${persistentGroups[activePersistentGroup].length}个）`,
+        );
+      });
       $("assignToGroup").addEventListener("click", () => {
         const g = String(($("activeGroup").value || "").trim() || "S01");
         if (!g) return;
@@ -5445,6 +5510,13 @@
         applyPersistentGroupSelection(nm);
         persistStateNow();
       });
+      if ($("showNonGroupCodes")) {
+        $("showNonGroupCodes").addEventListener("change", () => {
+          showNonGroupCodes = !!$("showNonGroupCodes").checked;
+          renderPool();
+        });
+        $("showNonGroupCodes").checked = !!showNonGroupCodes;
+      }
       $("applyPersistentGroup").addEventListener("click", () => {
         const nm =
           sanitizeGroupName($("persistentGroupSelect").value || "") ||
