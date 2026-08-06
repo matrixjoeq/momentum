@@ -2661,7 +2661,17 @@
         }
         const rsi14 = _computeRsi14(close);
         const rsi14Ma242 = _rollingMean(rsi14, 242);
-        return { drawdown, difV, deaV, absHv, biasV, rsi14, rsi14Ma242 };
+        const biasVMa242 = _rollingMean(biasV, 242);
+        return {
+          drawdown,
+          difV,
+          deaV,
+          absHv,
+          biasV,
+          biasVMa242,
+          rsi14,
+          rsi14Ma242,
+        };
       }
       function renderOffPortfolioNavChart({ dates, nav }) {
         const ds = Array.isArray(dates) ? dates : [];
@@ -2758,10 +2768,19 @@
             x: ds,
             y: ind.biasV,
             mode: "lines",
-            name: "BIAS-V(20)",
+            name: "BIAS-V",
             xaxis: "x4",
             yaxis: "y4",
             line: { color: "#f59e0b", width: 1.5 },
+          },
+          {
+            x: ds,
+            y: ind.biasVMa242,
+            mode: "lines",
+            name: "BIAS-V MA242",
+            xaxis: "x4",
+            yaxis: "y4",
+            line: { color: "#2ca02c", width: 1.3, dash: "dot" },
           },
           {
             x: ds,
@@ -2858,7 +2877,7 @@
           },
           yaxis4: {
             domain: [0.24, 0.43],
-            title: "BIAS-V(20)",
+            title: "BIAS-V",
             gridcolor: plotTheme.plotGrid,
             linecolor: plotTheme.plotGrid,
             zerolinecolor: plotTheme.plotGrid,
@@ -4080,10 +4099,19 @@
             x: dates,
             y: ind.biasV,
             mode: "lines",
-            name: "BIAS-V(20)",
+            name: "BIAS-V",
             xaxis: "x3",
             yaxis: "y3",
             line: { color: "#f59e0b", width: 1.5 },
+          },
+          {
+            x: dates,
+            y: ind.biasVMa242,
+            mode: "lines",
+            name: "BIAS-V MA242",
+            xaxis: "x3",
+            yaxis: "y3",
+            line: { color: "#2ca02c", width: 1.3, dash: "dot" },
           },
           {
             x: dates,
@@ -4165,7 +4193,7 @@
           },
           yaxis3: {
             domain: [0.29, 0.48],
-            title: "BIAS-V(20)",
+            title: "BIAS-V",
             gridcolor: plotTheme.plotGrid,
             linecolor: plotTheme.plotGrid,
             zerolinecolor: plotTheme.plotGrid,
