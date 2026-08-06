@@ -761,6 +761,70 @@ def test_trend_portfolio_risk_budget_position_sizing(session_factory):
         assert float(expo.max()) > 0.0
 
 
+def test_trend_portfolio_risk_budget_with_atr_stop_scales_per_asset_risk_by_active_count(
+    session_factory,
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=160, freq="B")]
+    first10 = [f"A{i:02d}" for i in range(1, 11)]
+    second10 = [f"B{i:02d}" for i in range(1, 11)]
+    all_codes = first10 + second10
+    with sf() as db:
+        for i, d in enumerate(dates):
+            for c in first10:
+                close = 100.0 + 0.5 * float(i)
+                _add_price_hl(
+                    db, code=c, day=d, close=close, high=close * 1.01, low=close * 0.99
+                )
+            for c in second10:
+                close = 100.0 if i < 80 else 100.0 + 1.2 * float(i - 79)
+                _add_price_hl(
+                    db, code=c, day=d, close=close, high=close * 1.01, low=close * 0.99
+                )
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=all_codes,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                position_sizing="risk_budget",
+                risk_budget_atr_window=5,
+                risk_budget_pct=0.01,
+                atr_stop_mode="static",
+                atr_stop_window=5,
+                atr_stop_n=2.0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    w = pd.DataFrame((out.get("weights") or {}).get("series") or {})
+    assert not w.empty
+    active_cnt = (w > 1e-12).sum(axis=1).astype(int)
+    # Expect two regimes: first only Axx active, later Axx+Bxx both active.
+    assert int(active_cnt.max()) >= 18
+    cnt_arr = active_cnt.to_numpy(dtype=int)
+    late_pos = int(np.where(cnt_arr >= 18)[0][0])
+    early_pos_candidates = np.where(cnt_arr <= 10)[0]
+    early_pos_candidates = early_pos_candidates[early_pos_candidates < late_pos]
+    assert early_pos_candidates.size > 0
+    early_pos = int(early_pos_candidates[-1])
+    early_mean = float(
+        w.iloc[early_pos, :][[c for c in first10 if c in w.columns]]
+        .astype(float)
+        .mean()
+    )
+    late_mean = float(
+        w.iloc[late_pos, :][[c for c in first10 if c in w.columns]].astype(float).mean()
+    )
+    assert early_mean > 0.0
+    # With ATR stop enabled, per-asset risk budget should shrink as active names increase.
+    assert late_mean < early_mean * 0.75
+
+
 def test_trend_portfolio_rejects_mutual_vol_regime_and_periodic_risk_mgmt(
     session_factory,
 ) -> None:

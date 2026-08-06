@@ -385,7 +385,7 @@ class TrendPortfolioInputs:
         10  # max number of concurrently held assets when position_sizing=fixed_ratio
     )
     risk_budget_atr_window: int = 20  # n-day ATR window for risk-budget sizing
-    risk_budget_pct: float = 0.01  # per-asset risk budget on total NAV (1% => 0.01)
+    risk_budget_pct: float = 0.01  # base risk budget on NAV (1% => 0.01)
     risk_budget_overcap_policy: str = (
         "scale"  # scale | skip_entry | replace_entry | leverage_entry
     )
@@ -5354,6 +5354,7 @@ def _build_r_profit_scaleout_plan(
     prev_base = 0.0
     entry_px = float("nan")
     initial_r_pct = float("nan")
+    entry_base_pos = float("nan")
     entry_i = -1
     remaining_frac = 1.0
     triggered_tier_idx: set[int] = set()
@@ -5363,6 +5364,7 @@ def _build_r_profit_scaleout_plan(
     addon_enabled = bool(breakeven_stop_enabled)
     breakeven_armed = False
     breakeven_exit_pending = False
+    breakeven_stop_px = float("nan")
     breakeven_arm_dates: list[str] = []
     breakeven_trigger_dates: list[str] = []
     breakeven_trigger_events: list[dict[str, Any]] = []
@@ -5415,6 +5417,7 @@ def _build_r_profit_scaleout_plan(
             waiting_base_reset = False
             entry_px = float("nan")
             initial_r_pct = float("nan")
+            entry_base_pos = float("nan")
             entry_i = -1
             remaining_frac = 1.0
             triggered_tier_idx = set()
@@ -5422,6 +5425,7 @@ def _build_r_profit_scaleout_plan(
             pending_arm_by_idx = set()
             breakeven_armed = False
             breakeven_exit_pending = False
+            breakeven_stop_px = float("nan")
             # No active base position means no scaleout effect should be applied.
             # Keep multiplier at 1.0 so this overlay is a strict no-op unless a
             # real scaleout trigger is recorded.
@@ -5439,11 +5443,15 @@ def _build_r_profit_scaleout_plan(
             waiting_base_reset = False
             entry_px = c
             initial_r_pct = _initial_r_pct(entry_px, a)
+            entry_base_pos = (
+                float(b) if np.isfinite(float(b)) and float(b) > eps else 1.0
+            )
             entry_i = i
             remaining_frac = 1.0
             triggered_tier_idx = set()
             breakeven_armed = False
             breakeven_exit_pending = False
+            breakeven_stop_px = float("nan")
             if (not np.isfinite(initial_r_pct)) or initial_r_pct <= eps:
                 invalid_r_entries += 1
                 initial_r_pct = float("nan")
@@ -5456,8 +5464,12 @@ def _build_r_profit_scaleout_plan(
             and entry_px > 0.0
             and np.isfinite(initial_r_pct)
             and initial_r_pct > eps
+            and np.isfinite(entry_base_pos)
+            and entry_base_pos > eps
             and bool(entry_i >= 0 and (i - int(entry_i)) >= 2)
         ):
+            base_pos_scale = float(max(0.0, float(b) / float(entry_base_pos)))
+            effective_r_pct = float(initial_r_pct) * float(max(base_pos_scale, eps))
             remaining_for_tier = float(max(0.0, remaining_frac))
             for t_idx, t in enumerate(tiers_v):
                 if t_idx in triggered_tier_idx:
@@ -5469,7 +5481,7 @@ def _build_r_profit_scaleout_plan(
                 if (not np.isfinite(reduce_raw)) or reduce_raw <= 0.0:
                     continue
                 trigger_px = float(entry_px) * (
-                    1.0 + float(r_mult) * float(initial_r_pct)
+                    1.0 + float(r_mult) * float(effective_r_pct)
                 )
                 triggered = False
                 if execution_v == "next_day":
@@ -5567,6 +5579,8 @@ def _build_r_profit_scaleout_plan(
                             "trigger_source": trigger_source,
                             "gap_open_triggered": bool(gap_open),
                             "r_multiple": float(r_mult),
+                            "base_pos_scale": float(base_pos_scale),
+                            "effective_r_pct": float(effective_r_pct),
                             "reduce_fraction": float(reduce_eff),
                             "requested_reduce_fraction": float(requested_reduce),
                         }
@@ -5586,6 +5600,8 @@ def _build_r_profit_scaleout_plan(
                             float(fill_px) if np.isfinite(fill_px) else None
                         ),
                         "r_multiple": float(r_mult),
+                        "base_pos_scale": float(base_pos_scale),
+                        "effective_r_pct": float(effective_r_pct),
                         "reduce_fraction": float(reduce_eff),
                         "requested_reduce_fraction": float(requested_reduce),
                     }
@@ -5601,7 +5617,24 @@ def _build_r_profit_scaleout_plan(
             and entry_px > eps
             and remaining_frac > eps
         ):
+            base_pos_scale_for_stop = 1.0
+            if np.isfinite(entry_base_pos) and entry_base_pos > eps:
+                base_pos_scale_for_stop = float(
+                    max(0.0, float(b) / float(entry_base_pos))
+                )
             stop_px = float(entry_px)
+            if np.isfinite(initial_r_pct) and initial_r_pct > eps:
+                stop_px = float(entry_px) * (
+                    1.0 + (1.0 - float(base_pos_scale_for_stop)) * float(initial_r_pct)
+                )
+                stop_px = float(max(eps, stop_px))
+            if np.isfinite(stop_px):
+                breakeven_stop_px = (
+                    float(stop_px)
+                    if (not np.isfinite(breakeven_stop_px))
+                    else float(max(float(breakeven_stop_px), float(stop_px)))
+                )
+                stop_px = float(breakeven_stop_px)
             if execution_v == "next_day":
                 triggered = bool(np.isfinite(c) and c <= stop_px)
             elif execution_time_v == "open":
@@ -5656,6 +5689,7 @@ def _build_r_profit_scaleout_plan(
                         remaining_frac = 0.0
                         breakeven_exit_pending = False
                     breakeven_armed = False
+                    breakeven_stop_px = float("nan")
                     breakeven_triggered_today = True
                     breakeven_trigger_dates.append(ds)
                     breakeven_trigger_events.append(
@@ -5679,6 +5713,7 @@ def _build_r_profit_scaleout_plan(
                             ),
                             "trigger_source": str(trigger_source),
                             "gap_open_triggered": bool(gap_open),
+                            "base_pos_scale": float(base_pos_scale_for_stop),
                             "requested_reduce_fraction": 1.0,
                             "reduce_fraction": float(reduce_eff),
                         }
@@ -5698,6 +5733,7 @@ def _build_r_profit_scaleout_plan(
                                 float(fill_px) if np.isfinite(fill_px) else None
                             ),
                             "trigger_type": "breakeven_stop",
+                            "base_pos_scale": float(base_pos_scale_for_stop),
                             "reduce_fraction": float(reduce_eff),
                             "requested_reduce_fraction": 1.0,
                         }
@@ -5708,6 +5744,7 @@ def _build_r_profit_scaleout_plan(
             waiting_base_reset = True
             breakeven_armed = False
             breakeven_exit_pending = False
+            breakeven_stop_px = float("nan")
         mult.iloc[i] = remaining_display
         breakeven_trace_last_rows.append(
             {
@@ -5747,6 +5784,9 @@ def _build_r_profit_scaleout_plan(
                 "initial_r_pct": (
                     float(initial_r_pct) if np.isfinite(initial_r_pct) else None
                 ),
+                "entry_base_pos": (
+                    float(entry_base_pos) if np.isfinite(entry_base_pos) else None
+                ),
                 "remaining_fraction": float(remaining_display),
                 "decision_pos": float(remaining_display * b),
                 "wait_next_entry_lock": bool(waiting_base_reset),
@@ -5770,6 +5810,7 @@ def _build_r_profit_scaleout_plan(
         "initial_r_mode": (
             "atr_stop_based" if bool(atr_stop_enabled) else "virtual_atr_fallback"
         ),
+        "r_reference_mode": "dynamic_base_position_scaled",
         "tiers": tiers_v,
         "trigger_count": int(len(trigger_events)),
         "trigger_dates": trigger_dates[:200],
@@ -6273,6 +6314,7 @@ def _apply_r_multiple_take_profit(
     wait_next_entry_lock = False
     entry_px = float("nan")
     initial_r_pct = float("nan")
+    entry_base_pos = float("nan")
     peak_profit_pct = float("nan")
     entry_i = -1
     invalid_r_entries = 0
@@ -6308,6 +6350,9 @@ def _apply_r_multiple_take_profit(
             entry_i = i
             initial_r_pct = (
                 float(atr_n) * a / c if (np.isfinite(a) and a > 0.0) else float("nan")
+            )
+            entry_base_pos = (
+                float(b) if np.isfinite(float(b)) and float(b) > eps else 1.0
             )
             if (not np.isfinite(initial_r_pct)) or initial_r_pct <= eps:
                 invalid_r_entries += 1
@@ -6356,6 +6401,7 @@ def _apply_r_multiple_take_profit(
             out[i] = 0.0
             entry_px = float("nan")
             initial_r_pct = float("nan")
+            entry_base_pos = float("nan")
             peak_profit_pct = float("nan")
             entry_i = -1
             trace_last_rows.append(
@@ -6413,12 +6459,20 @@ def _apply_r_multiple_take_profit(
         )
         if np.isfinite(cur_peak_profit_pct):
             peak_profit_pct = max(float(peak_profit_pct), float(cur_peak_profit_pct))
+        base_pos_scale = 1.0
+        if np.isfinite(entry_base_pos) and entry_base_pos > eps:
+            base_pos_scale = float(max(0.0, float(b) / float(entry_base_pos)))
+        effective_r_pct = (
+            float(initial_r_pct) * float(max(base_pos_scale, eps))
+            if np.isfinite(initial_r_pct) and initial_r_pct > eps
+            else float("nan")
+        )
         peak_r_mult = (
-            (float(peak_profit_pct) / float(initial_r_pct))
+            (float(peak_profit_pct) / float(effective_r_pct))
             if (
                 np.isfinite(peak_profit_pct)
-                and np.isfinite(initial_r_pct)
-                and initial_r_pct > eps
+                and np.isfinite(effective_r_pct)
+                and effective_r_pct > eps
             )
             else float("nan")
         )
@@ -6537,6 +6591,12 @@ def _apply_r_multiple_take_profit(
                         ),
                         "trigger_source": trigger_source,
                         "gap_open_triggered": bool(gap_open_triggered),
+                        "base_pos_scale": float(base_pos_scale),
+                        "effective_r_pct": (
+                            float(effective_r_pct)
+                            if np.isfinite(effective_r_pct)
+                            else None
+                        ),
                         "peak_r_multiple": (
                             float(peak_r_mult) if np.isfinite(peak_r_mult) else None
                         ),
@@ -6564,6 +6624,12 @@ def _apply_r_multiple_take_profit(
                     "atr_entry": None,
                     "initial_r_pct": (
                         float(initial_r_pct) if np.isfinite(initial_r_pct) else None
+                    ),
+                    "effective_r_pct": (
+                        float(effective_r_pct) if np.isfinite(effective_r_pct) else None
+                    ),
+                    "entry_base_pos": (
+                        float(entry_base_pos) if np.isfinite(entry_base_pos) else None
                     ),
                     "peak_profit_pct": (
                         float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None
@@ -6602,6 +6668,7 @@ def _apply_r_multiple_take_profit(
                 trace_last_rows = trace_last_rows[-120:]
             entry_px = float("nan")
             initial_r_pct = float("nan")
+            entry_base_pos = float("nan")
             peak_profit_pct = float("nan")
             entry_i = -1
             prev_base = b
@@ -6618,6 +6685,12 @@ def _apply_r_multiple_take_profit(
                 "atr_entry": None,
                 "initial_r_pct": (
                     float(initial_r_pct) if np.isfinite(initial_r_pct) else None
+                ),
+                "effective_r_pct": (
+                    float(effective_r_pct) if np.isfinite(effective_r_pct) else None
+                ),
+                "entry_base_pos": (
+                    float(entry_base_pos) if np.isfinite(entry_base_pos) else None
                 ),
                 "peak_profit_pct": (
                     float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None
@@ -6662,6 +6735,7 @@ def _apply_r_multiple_take_profit(
         "atr_n": float(atr_n),
         "fallback_mode_used": bool(not atr_stop_enabled),
         "initial_r_mode": ("atr_stop" if atr_stop_enabled else "virtual_atr_fallback"),
+        "r_reference_mode": "dynamic_base_position_scaled",
         "trigger_count": trigger_count,
         "trigger_dates": trigger_dates[:200],
         "trigger_events": trigger_events[:200],
@@ -12057,7 +12131,14 @@ def compute_trend_portfolio_backtest(
                     else float("nan")
                 )
                 if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
-                    return float(risk_budget_pct) * float(px) / float(a)
+                    # When ATR stop is enabled, allocate the risk budget across the
+                    # current active basket so total stop-risk does not scale linearly
+                    # with holding count.
+                    active_n = max(1, int(len(active_set)))
+                    per_asset_budget = float(risk_budget_pct)
+                    if str(atr_mode) != "none":
+                        per_asset_budget = float(risk_budget_pct) / float(active_n)
+                    return float(per_asset_budget) * float(px) / float(a)
                 return float("nan")
 
             # Exit when base signal is no longer active.
@@ -12134,6 +12215,19 @@ def compute_trend_portfolio_backtest(
                 prev_rb_overcap_state = bool(overcap_now)
 
             if not did_standard_event_rebalance:
+                if (
+                    has_constituent_event
+                    and str(atr_mode) != "none"
+                    and (not bool(vol_regime_risk_mgmt_enabled))
+                    and (not bool(periodic_enabled))
+                ):
+                    # For stop-managed risk budgets, rescale existing holdings when
+                    # basket size changes so aggregate stop-risk stays anchored to
+                    # strategy-level budget instead of growing with holding count.
+                    for c in active_codes:
+                        target_now = _base_target_for_code(str(c))
+                        if np.isfinite(target_now) and target_now > 0.0:
+                            w_row.loc[c] = float(target_now)
                 # Keep existing active positions at their entry-time risk-budget weight.
                 for c in active_codes:
                     px = (

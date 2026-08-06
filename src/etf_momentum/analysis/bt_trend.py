@@ -624,8 +624,8 @@ def _cci_from_hlc(
     c = _as_float_series(close).reindex(h.index).combine_first(h)
     w = max(2, int(window))
     tp = ((h + l + c) / 3.0).astype(float)
-    tp_ma = tp.rolling(window=w, min_periods=w).mean().astype(float)
-    mean_dev = (tp - tp_ma).abs().rolling(window=w, min_periods=w).mean().astype(float)
+    tp_ma = _rolling_sma(tp, window=w, min_periods=w).astype(float)
+    mean_dev = _rolling_sma((tp - tp_ma).abs().astype(float), window=w, min_periods=w)
     denom = (0.015 * mean_dev).replace(0.0, np.nan)
     return ((tp - tp_ma) / denom).replace([np.inf, -np.inf], np.nan).astype(float)
 
@@ -2592,6 +2592,7 @@ def _apply_r_multiple_take_profit(
     wait_next_entry_lock = False
     entry_px = float("nan")
     initial_r_pct = float("nan")
+    entry_base_pos = float("nan")
     peak_profit_pct = float("nan")
     entry_i = -1
     invalid_r_entries = 0
@@ -2627,6 +2628,9 @@ def _apply_r_multiple_take_profit(
             entry_i = i
             initial_r_pct = (
                 float(atr_n) * a / c if (np.isfinite(a) and a > 0.0) else float("nan")
+            )
+            entry_base_pos = (
+                float(b) if np.isfinite(float(b)) and float(b) > eps else 1.0
             )
             if (not np.isfinite(initial_r_pct)) or initial_r_pct <= eps:
                 invalid_r_entries += 1
@@ -2675,6 +2679,7 @@ def _apply_r_multiple_take_profit(
             out[i] = 0.0
             entry_px = float("nan")
             initial_r_pct = float("nan")
+            entry_base_pos = float("nan")
             peak_profit_pct = float("nan")
             entry_i = -1
             trace_last_rows.append(
@@ -2722,12 +2727,20 @@ def _apply_r_multiple_take_profit(
         )
         if np.isfinite(cur_peak_profit_pct):
             peak_profit_pct = max(float(peak_profit_pct), float(cur_peak_profit_pct))
+        base_pos_scale = 1.0
+        if np.isfinite(entry_base_pos) and entry_base_pos > eps:
+            base_pos_scale = float(max(0.0, float(b) / float(entry_base_pos)))
+        effective_r_pct = (
+            float(initial_r_pct) * float(max(base_pos_scale, eps))
+            if np.isfinite(initial_r_pct) and initial_r_pct > eps
+            else float("nan")
+        )
         peak_r_mult = (
-            (float(peak_profit_pct) / float(initial_r_pct))
+            (float(peak_profit_pct) / float(effective_r_pct))
             if (
                 np.isfinite(peak_profit_pct)
-                and np.isfinite(initial_r_pct)
-                and initial_r_pct > eps
+                and np.isfinite(effective_r_pct)
+                and effective_r_pct > eps
             )
             else float("nan")
         )
@@ -2789,6 +2802,10 @@ def _apply_r_multiple_take_profit(
                     ),
                     "trigger_source": trigger_source,
                     "gap_open_triggered": bool(gap_open_triggered),
+                    "base_pos_scale": float(base_pos_scale),
+                    "effective_r_pct": (
+                        float(effective_r_pct) if np.isfinite(effective_r_pct) else None
+                    ),
                     "peak_r_multiple": (
                         float(peak_r_mult) if np.isfinite(peak_r_mult) else None
                     ),
@@ -2816,6 +2833,12 @@ def _apply_r_multiple_take_profit(
                     "atr_entry": None,
                     "initial_r_pct": (
                         float(initial_r_pct) if np.isfinite(initial_r_pct) else None
+                    ),
+                    "effective_r_pct": (
+                        float(effective_r_pct) if np.isfinite(effective_r_pct) else None
+                    ),
+                    "entry_base_pos": (
+                        float(entry_base_pos) if np.isfinite(entry_base_pos) else None
                     ),
                     "peak_profit_pct": (
                         float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None
@@ -2854,6 +2877,7 @@ def _apply_r_multiple_take_profit(
                 trace_last_rows = trace_last_rows[-120:]
             entry_px = float("nan")
             initial_r_pct = float("nan")
+            entry_base_pos = float("nan")
             peak_profit_pct = float("nan")
             entry_i = -1
             prev_base = b
@@ -2870,6 +2894,12 @@ def _apply_r_multiple_take_profit(
                 "atr_entry": None,
                 "initial_r_pct": (
                     float(initial_r_pct) if np.isfinite(initial_r_pct) else None
+                ),
+                "effective_r_pct": (
+                    float(effective_r_pct) if np.isfinite(effective_r_pct) else None
+                ),
+                "entry_base_pos": (
+                    float(entry_base_pos) if np.isfinite(entry_base_pos) else None
                 ),
                 "peak_profit_pct": (
                     float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None
@@ -2914,6 +2944,7 @@ def _apply_r_multiple_take_profit(
         "atr_n": float(atr_n),
         "fallback_mode_used": bool(not atr_stop_enabled),
         "initial_r_mode": ("atr_stop" if atr_stop_enabled else "virtual_atr_fallback"),
+        "r_reference_mode": "dynamic_base_position_scaled",
         "trigger_count": trigger_count,
         "trigger_dates": trigger_dates[:200],
         "trigger_events": trigger_events[:200],
@@ -6997,6 +7028,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         eps = 1e-12
         risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
         risk_budget_atr_window = int(getattr(inp, "risk_budget_atr_window", 20) or 20)
+        atr_stop_mode_v = (
+            str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
+        )
         vol_regime_risk_mgmt_enabled = bool(
             getattr(inp, "vol_regime_risk_mgmt_enabled", False)
         )
@@ -7245,7 +7279,11 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                     else float("nan")
                 )
                 if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
-                    return float(risk_budget_pct) * float(px) / float(a)
+                    active_n = max(1, int(len(active_set)))
+                    per_asset_budget = float(risk_budget_pct)
+                    if str(atr_stop_mode_v) != "none":
+                        per_asset_budget = float(risk_budget_pct) / float(active_n)
+                    return float(per_asset_budget) * float(px) / float(a)
                 return float("nan")
 
             for c in wdf.columns:
@@ -7320,6 +7358,19 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 prev_rb_overcap_state = bool(overcap_now)
                 continue
                 prev_rb_overcap_state = bool(overcap_now)
+
+            if (
+                has_constituent_event
+                and str(atr_stop_mode_v) != "none"
+                and (not bool(vol_regime_risk_mgmt_enabled))
+                and (not bool(vol_periodic_risk_mgmt_enabled))
+            ):
+                # Keep stop-risk anchored to strategy-level budget when
+                # constituent count changes under stop-managed risk-budget mode.
+                for c in active_codes:
+                    target_now = _base_target_for_code(str(c))
+                    if np.isfinite(target_now) and target_now > 0.0:
+                        w_row.loc[c] = float(target_now)
 
             for c in active_codes:
                 px = float(

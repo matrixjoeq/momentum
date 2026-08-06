@@ -482,6 +482,153 @@ def test_r_profit_scaleout_breakeven_stop_next_day_reuses_parent_execution_mode(
     )
 
 
+def test_r_profit_scaleout_dynamic_r_and_breakeven_after_base_position_shrink() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 0.5, 0.5, 0.5], index=idx, dtype=float)
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    high = pd.Series([105.0, 105.0, 105.0, 106.0, 106.0, 106.0], index=idx, dtype=float)
+    low = pd.Series([95.0, 95.0, 95.0, 106.0, 104.0, 104.0], index=idx, dtype=float)
+
+    mult, stats = _build_r_profit_scaleout_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        execution_mode="intraday",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.0, "reduce_fraction": 0.5}],
+        atr_stop_enabled=True,
+        breakeven_stop_enabled=True,
+    )
+
+    # Base position shrank from 1.0 to 0.5: dynamic R threshold should shrink too.
+    assert float(mult.loc[idx[3]]) == pytest.approx(0.5, abs=1e-12)
+    # Breakeven line is lifted above entry after shrink, so low=104 can trigger exit.
+    assert float(mult.loc[idx[4]]) == pytest.approx(0.0, abs=1e-12)
+    be = (stats or {}).get("breakeven_stop") or {}
+    be_events = list(be.get("trigger_events") or [])
+    assert be_events
+    assert float(be_events[0].get("trigger_price") or 0.0) == pytest.approx(
+        105.0, abs=1e-12
+    )
+    assert str((stats or {}).get("r_reference_mode") or "") == (
+        "dynamic_base_position_scaled"
+    )
+
+
+def test_r_take_profit_dynamic_r_reference_after_base_position_shrink() -> None:
+    idx = pd.date_range("2024-01-01", periods=7, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5], index=idx, dtype=float)
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 100.0, 106.0, 104.0, 104.0, 104.0], index=idx)
+    high = pd.Series([105.0, 105.0, 105.0, 106.0, 106.0, 106.0, 106.0], index=idx)
+    low = pd.Series([95.0, 95.0, 95.0, 106.0, 104.0, 104.0, 104.0], index=idx)
+
+    out, stats = _apply_r_multiple_take_profit(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        execution_mode="intraday",
+        execution_time="full_day",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.0, "retrace_ratio": 0.3}],
+        atr_stop_enabled=True,
+    )
+
+    # With dynamic R scaling, the shrunken position can still reach 1R regime.
+    assert float(out.loc[idx[3]]) > 0.0
+    assert float(out.loc[idx[4]]) == pytest.approx(0.0, abs=1e-12)
+    ev = list((stats or {}).get("trigger_events") or [])
+    assert ev
+    assert float(ev[0].get("base_pos_scale") or 0.0) == pytest.approx(0.5, abs=1e-12)
+    assert str((stats or {}).get("r_reference_mode") or "") == (
+        "dynamic_base_position_scaled"
+    )
+
+
+def test_r_profit_scaleout_dynamic_r_threshold_expands_after_base_position_increase() -> (
+    None
+):
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 2.0, 2.0, 2.0], index=idx, dtype=float)
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    high = pd.Series([102.0, 102.0, 102.0, 106.0, 109.0, 109.0], index=idx, dtype=float)
+    low = pd.Series([98.0] * len(idx), index=idx, dtype=float)
+
+    mult, stats = _build_r_profit_scaleout_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        execution_mode="intraday",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.0, "reduce_fraction": 0.5}],
+        atr_stop_enabled=True,
+        breakeven_stop_enabled=False,
+    )
+
+    # When base position doubles, effective R should double too.
+    # Day idx[3] high=106 is below expanded trigger (~108), so no scaleout.
+    assert float(mult.loc[idx[3]]) == pytest.approx(1.0, abs=1e-12)
+    # Day idx[4] high=109 crosses expanded trigger, then first tier executes.
+    assert float(mult.loc[idx[4]]) == pytest.approx(0.5, abs=1e-12)
+    events = list((stats or {}).get("trigger_events") or [])
+    assert events
+    assert float(events[0].get("base_pos_scale") or 0.0) == pytest.approx(
+        2.0, abs=1e-12
+    )
+    assert float(events[0].get("effective_r_pct") or 0.0) > 0.07
+
+
+def test_r_profit_scaleout_breakeven_stop_is_monotonic_non_decreasing() -> None:
+    idx = pd.date_range("2024-01-01", periods=7, freq="B")
+    # Entry -> shrink (raise breakeven) -> re-expand (candidate would fall).
+    base_pos = pd.Series([0.0, 1.0, 1.0, 0.5, 1.5, 1.5, 1.5], index=idx, dtype=float)
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    high = pd.Series([105.0, 105.0, 105.0, 106.0, 106.0, 106.0, 106.0], index=idx)
+    low = pd.Series(
+        [95.0, 95.0, 95.0, 106.0, 104.0, 104.0, 104.0], index=idx, dtype=float
+    )
+
+    mult, stats = _build_r_profit_scaleout_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        execution_mode="intraday",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.0, "reduce_fraction": 0.5}],
+        atr_stop_enabled=True,
+        breakeven_stop_enabled=True,
+    )
+
+    # If breakeven could move down on re-expand, day idx[4] low=104 would not exit.
+    assert float(mult.loc[idx[4]]) == pytest.approx(0.0, abs=1e-12)
+    be = (stats or {}).get("breakeven_stop") or {}
+    events = list(be.get("trigger_events") or [])
+    assert events
+    assert float(events[0].get("trigger_price") or 0.0) == pytest.approx(
+        105.0, abs=1e-12
+    )
+
+
 def test_semi_variance_run_stats_split_continuous_profit_loss_segments() -> None:
     returns = [0.01, 0.02, -0.01, -0.02, -0.03, 0.05, 0.01, 0.0, -0.01]
     stats = _semi_variance_run_stats_from_returns(returns)
