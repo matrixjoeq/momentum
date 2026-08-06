@@ -2902,11 +2902,6 @@
               line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
             },
           ],
-          title: {
-            text: "场外基金持有策略净值与附加指标",
-            y: 0.96,
-            yanchor: "top",
-          },
         };
         window.Plotly.newPlot("navChart", traces, layout, {
           responsive: true,
@@ -4251,7 +4246,7 @@
           const dates = navPoints.map((x) => String(x.trade_date || ""));
           const nav = navPoints.map((x) => Number(x.nav));
           const traces = _buildOffClsFundTechTraces({ dates, nav });
-          const title = `${esc(row.code || "-")} ${esc(row.name || "")} · 净值+布林(MA242) / MACD-V / BIAS-V / RSI（hfq）`;
+          const title = `${esc(row.code || "-")} ${esc(row.name || "")}`;
           const layout = _buildOffClsFundTechLayout(title);
           await ensurePlotlyLoaded();
           if (seq !== offClsFundTechRenderSeq) return;
