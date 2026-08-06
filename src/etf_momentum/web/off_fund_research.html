@@ -2273,6 +2273,9 @@
             ) !== "0",
           drift_abs_threshold: clamp01(driftAbsRaw, 0.05),
           drift_rel_threshold: clamp01(driftRelRaw, 0.25),
+          show_non_group_codes: !!(
+            $("showNonGroupCodes") && $("showNonGroupCodes").checked
+          ),
           pair_chart_prefs_json: offFundPairPrefsToJson(offPairPrefsByCard),
         };
       }
@@ -2303,6 +2306,10 @@
           $("driftRelThreshold").value = String(
             s.drift_rel_threshold == null ? 0.25 : s.drift_rel_threshold,
           );
+        showNonGroupCodes =
+          s.show_non_group_codes == null ? true : !!s.show_non_group_codes;
+        if ($("showNonGroupCodes"))
+          $("showNonGroupCodes").checked = !!showNonGroupCodes;
         let pairPrefs = loadOffFundPairPrefsLocal();
         if (
           typeof s.pair_chart_prefs_json === "string" &&
@@ -2895,7 +2902,11 @@
               line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
             },
           ],
-          title: "场外基金持有策略净值与附加指标",
+          title: {
+            text: "场外基金持有策略净值与附加指标",
+            y: 0.96,
+            yanchor: "top",
+          },
         };
         window.Plotly.newPlot("navChart", traces, layout, {
           responsive: true,
@@ -5514,6 +5525,7 @@
         $("showNonGroupCodes").addEventListener("change", () => {
           showNonGroupCodes = !!$("showNonGroupCodes").checked;
           renderPool();
+          scheduleSaveOffParamState();
         });
         $("showNonGroupCodes").checked = !!showNonGroupCodes;
       }

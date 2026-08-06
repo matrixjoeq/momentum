@@ -191,6 +191,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
     if inspect(engine).has_table("off_fund_research_state"):
         off_fund_research_cols = {
             "pair_chart_prefs_json": "pair_chart_prefs_json TEXT",
+            "show_non_group_codes": "show_non_group_codes BOOLEAN NOT NULL DEFAULT 1",
         }
         for col, ddl in off_fund_research_cols.items():
             if _has_column(engine, "off_fund_research_state", col):

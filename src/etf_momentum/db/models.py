@@ -412,6 +412,9 @@ class OffFundResearchState(Base):
     drift_rel_threshold: Mapped[float] = mapped_column(
         Float, nullable=False, default=0.25
     )
+    show_non_group_codes: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
     pair_chart_prefs_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),

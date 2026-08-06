@@ -6145,6 +6145,7 @@ def _default_off_fund_research_state() -> OffFundResearchStateOut:
         drift_rebalance_enabled=True,
         drift_abs_threshold=0.05,
         drift_rel_threshold=0.25,
+        show_non_group_codes=True,
         pair_chart_prefs_json=None,
         meta=OffFundResearchStateMeta(),
     )
@@ -6309,6 +6310,11 @@ def get_off_fund_research_state_api(
         drift_rebalance_enabled=bool(st.drift_rebalance_enabled),
         drift_abs_threshold=float(st.drift_abs_threshold),
         drift_rel_threshold=float(st.drift_rel_threshold),
+        show_non_group_codes=bool(
+            st.show_non_group_codes
+            if st.show_non_group_codes is not None
+            else d.show_non_group_codes
+        ),
         pair_chart_prefs_json=pair_prefs_json,
         meta=_pair_meta(pair_warnings),
     )
@@ -6403,6 +6409,15 @@ def update_off_fund_research_state_api(
             st.drift_rel_threshold if st.drift_rel_threshold is not None else 0.25
         )
     )
+    show_non_group_codes = (
+        bool(payload.show_non_group_codes)
+        if "show_non_group_codes" in fields_set
+        else bool(
+            st.show_non_group_codes
+            if st.show_non_group_codes is not None
+            else _default_off_fund_research_state().show_non_group_codes
+        )
+    )
     obj = upsert_off_fund_research_state(
         db,
         start_date=(start_d or None),
@@ -6415,6 +6430,7 @@ def update_off_fund_research_state_api(
         drift_rebalance_enabled=drift_rebalance_enabled,
         drift_abs_threshold=drift_abs_threshold,
         drift_rel_threshold=drift_rel_threshold,
+        show_non_group_codes=show_non_group_codes,
         pair_chart_prefs_json=pair_prefs_json,
     )
     db.commit()
@@ -6438,6 +6454,11 @@ def update_off_fund_research_state_api(
         drift_rebalance_enabled=bool(obj.drift_rebalance_enabled),
         drift_abs_threshold=float(obj.drift_abs_threshold),
         drift_rel_threshold=float(obj.drift_rel_threshold),
+        show_non_group_codes=bool(
+            obj.show_non_group_codes
+            if obj.show_non_group_codes is not None
+            else _default_off_fund_research_state().show_non_group_codes
+        ),
         pair_chart_prefs_json=pair_out_json,
         meta=_pair_meta(pair_warnings + out_warnings),
     )

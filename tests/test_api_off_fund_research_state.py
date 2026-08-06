@@ -33,6 +33,7 @@ def test_off_fund_research_state_get_put_roundtrip(api_client: TestClient) -> No
             "drift_rebalance_enabled": False,
             "drift_abs_threshold": 0.12,
             "drift_rel_threshold": 0.31,
+            "show_non_group_codes": False,
             "pair_chart_prefs_json": '{"pair_slot_01":{"base":"CSI300","peer":"CSI500"}}',
         },
     )
@@ -48,6 +49,7 @@ def test_off_fund_research_state_get_put_roundtrip(api_client: TestClient) -> No
     assert s1["drift_rebalance_enabled"] is False
     assert s1["drift_abs_threshold"] == 0.12
     assert s1["drift_rel_threshold"] == 0.31
+    assert s1["show_non_group_codes"] is False
     assert (
         s1["pair_chart_prefs_json"]
         == '{"pair_slot_01":{"base":"CSI300","peer":"CSI500"}}'
@@ -61,6 +63,7 @@ def test_off_fund_research_state_get_put_roundtrip(api_client: TestClient) -> No
     assert s2["start_date"] == "20180101"
     assert s2["end_date"] == "20251231"
     assert s2["rebalance_cycle"] == "monthly"
+    assert s2["show_non_group_codes"] is False
     assert (
         s2["pair_chart_prefs_json"]
         == '{"pair_slot_01":{"base":"CSI300","peer":"CSI500"}}'
@@ -183,6 +186,7 @@ def test_off_fund_state_partial_put_keeps_unspecified_fields(
             "drift_rebalance_enabled": False,
             "drift_abs_threshold": 0.12,
             "drift_rel_threshold": 0.31,
+            "show_non_group_codes": False,
             "pair_chart_prefs_json": '{"pair_slot_01":{"base":"CSI300","peer":"CSI500"}}',
         },
     )
@@ -203,6 +207,7 @@ def test_off_fund_state_partial_put_keeps_unspecified_fields(
     assert out["drift_rebalance_enabled"] is False
     assert out["drift_abs_threshold"] == 0.12
     assert out["drift_rel_threshold"] == 0.31
+    assert out["show_non_group_codes"] is False
     assert (
         out["pair_chart_prefs_json"]
         == '{"pair_slot_01":{"base":"CSI300","peer":"CSI500"}}'
@@ -265,6 +270,7 @@ def test_runtime_schema_adds_pair_chart_prefs_column(tmp_path) -> None:
     ensure_runtime_schema(engine)
     cols = {c["name"] for c in inspect(engine).get_columns("off_fund_research_state")}
     assert "pair_chart_prefs_json" in cols
+    assert "show_non_group_codes" in cols
 
 
 def test_runtime_schema_adds_global_benchmark_series_kind_without_futures_table(

@@ -295,6 +295,7 @@ class OffFundResearchStateUpdate(BaseModel):
     drift_rebalance_enabled: bool = Field(default=True)
     drift_abs_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
     drift_rel_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+    show_non_group_codes: bool = Field(default=True)
     pair_chart_prefs_json: str | None = Field(default=None)
 
 
@@ -314,6 +315,7 @@ class OffFundResearchStateOut(BaseModel):
     drift_rebalance_enabled: bool = True
     drift_abs_threshold: float = 0.05
     drift_rel_threshold: float = 0.25
+    show_non_group_codes: bool = True
     pair_chart_prefs_json: str | None = None
     meta: OffFundResearchStateMeta = Field(default_factory=OffFundResearchStateMeta)
 

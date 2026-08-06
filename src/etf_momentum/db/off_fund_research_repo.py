@@ -39,6 +39,7 @@ def upsert_off_fund_research_state(
     drift_rebalance_enabled: bool,
     drift_abs_threshold: float,
     drift_rel_threshold: float,
+    show_non_group_codes: bool,
     pair_chart_prefs_json: str | None,
 ) -> OffFundResearchState:
     obj = get_off_fund_research_state(db)
@@ -52,6 +53,7 @@ def upsert_off_fund_research_state(
     obj.drift_rebalance_enabled = bool(drift_rebalance_enabled)
     obj.drift_abs_threshold = float(drift_abs_threshold)
     obj.drift_rel_threshold = float(drift_rel_threshold)
+    obj.show_non_group_codes = bool(show_non_group_codes)
     obj.pair_chart_prefs_json = (
         str(pair_chart_prefs_json) if pair_chart_prefs_json is not None else None
     )
