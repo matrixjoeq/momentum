@@ -207,6 +207,66 @@ def test_compute_baseline_includes_price_bias_distribution(session_factory):
     assert bias["count"] == bias20["count"]
 
 
+def test_compute_baseline_includes_bias_l_distribution(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code = "AAA"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(90)]
+        closes = [100.0 + 0.4 * i + (1.1 if (i % 5) < 2 else -0.7) for i in range(90)]
+        for d, c in zip(dates, closes, strict=True):
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=float(c),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+
+        out = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code,
+                adjust="qfq",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+            ),
+        )
+
+    pdist = out["period_distributions"][code]
+    assert "daily_bias_l_20" in pdist
+    assert "daily_bias_l_60" in pdist
+    bias_l20 = pdist["daily_bias_l_20"]
+    bias_l60 = pdist["daily_bias_l_60"]
+    assert bias_l20["count"] > 0
+    assert bias_l60["count"] > 0
+    assert bias_l20["current_date"] == dates[-1].isoformat()
+    assert bias_l60["current_date"] == dates[-1].isoformat()
+
+    idx = pd.to_datetime(dates)
+    close_s = pd.Series(closes, index=idx, dtype=float)
+    ema20 = close_s.ewm(span=20, adjust=False, min_periods=10).mean()
+    ema60 = close_s.ewm(span=60, adjust=False, min_periods=30).mean()
+    expected20 = float(
+        ((np.log(close_s) - np.log(ema20.replace(0.0, pd.NA))) * 100.0)
+        .dropna()
+        .iloc[-1]
+    )
+    expected60 = float(
+        ((np.log(close_s) - np.log(ema60.replace(0.0, pd.NA))) * 100.0)
+        .dropna()
+        .iloc[-1]
+    )
+    assert bias_l20["current"] == pytest.approx(expected20, rel=1e-12)
+    assert bias_l60["current"] == pytest.approx(expected60, rel=1e-12)
+
+
 def test_compute_baseline_lppl_library_unavailable(
     session_factory, monkeypatch: pytest.MonkeyPatch
 ):
@@ -378,15 +438,22 @@ def test_compute_baseline_includes_bias_v_distribution(session_factory):
 
     pdist = out["period_distributions"][code]
     assert "daily_bias_v" in pdist
+    assert "daily_bias_v_20" in pdist
+    assert "daily_bias_v_60" in pdist
     bias_v = pdist["daily_bias_v"]
+    bias_v20 = pdist["daily_bias_v_20"]
+    bias_v60 = pdist["daily_bias_v_60"]
     assert bias_v["count"] > 0
+    assert bias_v20["count"] > 0
+    assert bias_v60["count"] > 0
     assert bias_v["current_date"] == dates[-1].isoformat()
+    assert bias_v20["current_date"] == dates[-1].isoformat()
+    assert bias_v60["current_date"] == dates[-1].isoformat()
 
     idx = pd.to_datetime(dates)
     close_s = pd.Series(closes, index=idx, dtype=float)
     high_s = close_s * 1.01
     low_s = close_s * 0.99
-    ma20 = close_s.rolling(window=20, min_periods=5).mean()
     prev_close = close_s.shift(1)
     tr = pd.concat(
         [
@@ -396,9 +463,18 @@ def test_compute_baseline_includes_bias_v_distribution(session_factory):
         ],
         axis=1,
     ).max(axis=1)
+    ma20 = close_s.rolling(window=20, min_periods=5).mean()
     atr20 = tr.ewm(alpha=1.0 / 20.0, adjust=False, min_periods=20).mean()
     bias_v_s = ((close_s - ma20) / atr20.replace(0.0, pd.NA)).dropna()
+    ma60 = close_s.rolling(window=60, min_periods=15).mean()
+    atr60 = tr.ewm(alpha=1.0 / 60.0, adjust=False, min_periods=60).mean()
+    bias_v60_s = ((close_s - ma60) / atr60.replace(0.0, pd.NA)).dropna()
     assert bias_v["current"] == pytest.approx(float(bias_v_s.iloc[-1]), rel=1e-12)
+    assert bias_v20["current"] == pytest.approx(float(bias_v_s.iloc[-1]), rel=1e-12)
+    assert bias_v60["current"] == pytest.approx(float(bias_v60_s.iloc[-1]), rel=1e-12)
+    # Legacy alias must match explicit BIAS-V(20)
+    assert bias_v["current"] == bias_v20["current"]
+    assert bias_v["count"] == bias_v20["count"]
 
 
 def test_compute_baseline_includes_daily_log_return_acf(session_factory):

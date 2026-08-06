@@ -295,6 +295,14 @@
         style="width: 100%; height: 360px; margin-top: 8px"
       ></div>
       <table id="offClsExposureStats" style="margin-top: 8px"></table>
+      <div class="muted" style="margin-top: 10px">
+        所选基金净值技术图（hfq）：净值+布林带(MA242) 与 MACD-V / BIAS-V /
+        RSI（共享时间轴）
+      </div>
+      <div
+        id="offClsFundTechChart"
+        style="width: 100%; height: 900px; margin-top: 8px"
+      ></div>
     </div>
     <div class="panel">
       <h3 style="margin: 0 0 6px 0">市场状态划分（统一前端模块）</h3>
@@ -758,6 +766,8 @@
       let offClsLastFactorOrder = [];
       let offClsExposureSelectedCode = "";
       let offClsExposureRangeKey = "all";
+      const offClsFundNavCache = {};
+      let offClsFundTechRenderSeq = 0;
       const pageSize = 12;
       const offPeriodState = {
         weekly: { page: 1, rows: [] },
@@ -2644,6 +2654,18 @@
         const nv = Array.isArray(nav) ? nav : [];
         if (!window.Plotly || !ds.length || ds.length !== nv.length) return;
         const ind = _computeOffPortfolioNavIndicators(nv);
+        const navMa242 = _rollingMean(nv, 242);
+        const navStd242 = _rollingStd(nv, 242);
+        const navBbUpper = navMa242.map((m, i) =>
+          Number.isFinite(Number(m)) && Number.isFinite(Number(navStd242[i]))
+            ? Number(m) + 2 * Number(navStd242[i])
+            : null,
+        );
+        const navBbLower = navMa242.map((m, i) =>
+          Number.isFinite(Number(m)) && Number.isFinite(Number(navStd242[i]))
+            ? Number(m) - 2 * Number(navStd242[i])
+            : null,
+        );
         const plotTheme = _offFundPairPlotThemeTokens();
         const traces = [
           {
@@ -2654,6 +2676,33 @@
             xaxis: "x",
             yaxis: "y",
             line: { color: "#5B8FF9", width: 1.8 },
+          },
+          {
+            x: ds,
+            y: navMa242,
+            mode: "lines",
+            name: "NAV MA242(中轨)",
+            xaxis: "x",
+            yaxis: "y",
+            line: { color: "#ffb020", width: 1.5 },
+          },
+          {
+            x: ds,
+            y: navBbUpper,
+            mode: "lines",
+            name: "NAV 布林上轨(MA242+2σ)",
+            xaxis: "x",
+            yaxis: "y",
+            line: { color: "#2ecc71", width: 1.2, dash: "dot" },
+          },
+          {
+            x: ds,
+            y: navBbLower,
+            mode: "lines",
+            name: "NAV 布林下轨(MA242-2σ)",
+            xaxis: "x",
+            yaxis: "y",
+            line: { color: "#2ecc71", width: 1.2, dash: "dot" },
           },
           {
             x: ds,
@@ -2695,7 +2744,7 @@
             x: ds,
             y: ind.biasV,
             mode: "lines",
-            name: "BIAS-V",
+            name: "BIAS-V(20)",
             xaxis: "x4",
             yaxis: "y4",
             line: { color: "#f59e0b", width: 1.5 },
@@ -2795,7 +2844,7 @@
           },
           yaxis4: {
             domain: [0.24, 0.43],
-            title: "BIAS-V",
+            title: "BIAS-V(20)",
             gridcolor: plotTheme.plotGrid,
             linecolor: plotTheme.plotGrid,
             zerolinecolor: plotTheme.plotGrid,
@@ -2839,7 +2888,8 @@
               line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
             },
           ],
-          title: "场外基金持有策略净值与附加指标（共享时间轴）",
+          title:
+            "场外基金持有策略净值与附加指标（含 BIAS-V(20)=(close-MA20)/ATR20，共享时间轴）",
         };
         window.Plotly.newPlot("navChart", traces, layout, {
           responsive: true,
@@ -3877,6 +3927,309 @@
         const stats = $("offClsExposureStats");
         if (stats) stats.innerHTML = "";
       }
+      function _clearClsFundTechPanel(msg) {
+        const chart = $("offClsFundTechChart");
+        if (!chart) return;
+        chart.innerHTML = `<div class="muted" style="padding-top: 8px">${esc(String(msg || "暂无可用图表数据"))}</div>`;
+      }
+      function _isOffClsPortfolioRow(row) {
+        const code = String((row && row.code) || "")
+          .trim()
+          .toUpperCase();
+        const name = String((row && row.name) || "").trim();
+        return (
+          code === "__PORTFOLIO__" ||
+          code === "PORTFOLIO" ||
+          name === "组合净值"
+        );
+      }
+      async function _loadOffClsFundNavSeriesByCode(code) {
+        const c = String(code || "").trim();
+        if (!c) return [];
+        const start = String(($("start").value || "").trim() || "20110210");
+        const end = String(($("end").value || "").trim() || todayYmd());
+        const k = `${c}|hfq|${start}|${end}`;
+        if (Array.isArray(offClsFundNavCache[k])) return offClsFundNavCache[k];
+        const rows = await fetchNav(c, "hfq", start, end);
+        const out = (Array.isArray(rows) ? rows : [])
+          .map((x) => ({
+            trade_date: String((x && x.trade_date) || "").trim(),
+            nav: Number(x && x.nav),
+          }))
+          .filter(
+            (x) =>
+              x.trade_date &&
+              Number.isFinite(x.nav) &&
+              x.nav > 0 &&
+              /^\d{4}-\d{2}-\d{2}$/.test(x.trade_date),
+          )
+          .sort((a, b) =>
+            String(a.trade_date).localeCompare(String(b.trade_date)),
+          );
+        offClsFundNavCache[k] = out;
+        return out;
+      }
+      function _buildOffClsFundTechTraces({ dates, nav }) {
+        const ind = _computeOffPortfolioNavIndicators(nav);
+        const ma242 = _rollingMean(nav, 242);
+        const std242 = _rollingStd(nav, 242);
+        const bbUpper = ma242.map((m, i) =>
+          Number.isFinite(Number(m)) && Number.isFinite(Number(std242[i]))
+            ? Number(m) + 2 * Number(std242[i])
+            : null,
+        );
+        const bbLower = ma242.map((m, i) =>
+          Number.isFinite(Number(m)) && Number.isFinite(Number(std242[i]))
+            ? Number(m) - 2 * Number(std242[i])
+            : null,
+        );
+        return [
+          {
+            x: dates,
+            y: nav,
+            mode: "lines",
+            name: "基金净值(hfq)",
+            xaxis: "x",
+            yaxis: "y",
+            line: { color: "#5B8FF9", width: 1.9 },
+          },
+          {
+            x: dates,
+            y: ma242,
+            mode: "lines",
+            name: "MA242(中轨)",
+            xaxis: "x",
+            yaxis: "y",
+            line: { color: "#ffb020", width: 1.5 },
+          },
+          {
+            x: dates,
+            y: bbUpper,
+            mode: "lines",
+            name: "布林上轨(MA242+2σ)",
+            xaxis: "x",
+            yaxis: "y",
+            line: { color: "#2ecc71", width: 1.2, dash: "dot" },
+          },
+          {
+            x: dates,
+            y: bbLower,
+            mode: "lines",
+            name: "布林下轨(MA242-2σ)",
+            xaxis: "x",
+            yaxis: "y",
+            line: { color: "#2ecc71", width: 1.2, dash: "dot" },
+          },
+          {
+            x: dates,
+            y: ind.difV,
+            mode: "lines",
+            name: "MACD-V DIF_v",
+            xaxis: "x2",
+            yaxis: "y2",
+            line: { color: "#f39c12", width: 1.4 },
+          },
+          {
+            x: dates,
+            y: ind.deaV,
+            mode: "lines",
+            name: "MACD-V DEA_v",
+            xaxis: "x2",
+            yaxis: "y2",
+            line: { color: "#9b59b6", width: 1.4 },
+          },
+          {
+            x: dates,
+            y: ind.absHv,
+            mode: "lines",
+            name: "MACD-V |H_v|",
+            xaxis: "x2",
+            yaxis: "y2",
+            line: { color: "#2ecc71", width: 1.2, dash: "dot" },
+          },
+          {
+            x: dates,
+            y: ind.biasV,
+            mode: "lines",
+            name: "BIAS-V(20)",
+            xaxis: "x3",
+            yaxis: "y3",
+            line: { color: "#f59e0b", width: 1.5 },
+          },
+          {
+            x: dates,
+            y: ind.rsi14,
+            mode: "lines",
+            name: "RSI14",
+            xaxis: "x4",
+            yaxis: "y4",
+            line: { color: "#8ab4f8", width: 1.5 },
+          },
+          {
+            x: dates,
+            y: ind.rsi14Ma242,
+            mode: "lines",
+            name: "RSI14 MA242",
+            xaxis: "x4",
+            yaxis: "y4",
+            line: { color: "#2ca02c", width: 1.3, dash: "dot" },
+          },
+        ];
+      }
+      function _buildOffClsFundTechLayout(title) {
+        const plotTheme = _offFundPairPlotThemeTokens();
+        return {
+          margin: { l: 58, r: 20, t: 84, b: 48 },
+          paper_bgcolor: plotTheme.plotBg,
+          plot_bgcolor: plotTheme.plotBg,
+          font: { color: plotTheme.plotFg },
+          legend: {
+            orientation: "h",
+            x: 0,
+            xanchor: "left",
+            y: 1.08,
+            yanchor: "bottom",
+          },
+          xaxis: {
+            domain: [0, 1],
+            anchor: "y",
+            showticklabels: false,
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis: {
+            domain: [0.77, 1],
+            type: "log",
+            title: "NAV",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          xaxis2: {
+            domain: [0, 1],
+            anchor: "y2",
+            matches: "x",
+            showticklabels: false,
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis2: {
+            domain: [0.52, 0.73],
+            title: "MACD-V",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          xaxis3: {
+            domain: [0, 1],
+            anchor: "y3",
+            matches: "x",
+            showticklabels: false,
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis3: {
+            domain: [0.29, 0.48],
+            title: "BIAS-V(20)",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          xaxis4: {
+            domain: [0, 1],
+            anchor: "y4",
+            matches: "x",
+            type: "date",
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          yaxis4: {
+            domain: [0.03, 0.24],
+            title: "RSI",
+            range: [0, 100],
+            gridcolor: plotTheme.plotGrid,
+            linecolor: plotTheme.plotGrid,
+            zerolinecolor: plotTheme.plotGrid,
+          },
+          shapes: [
+            {
+              type: "line",
+              xref: "paper",
+              yref: "y4",
+              x0: 0,
+              x1: 1,
+              y0: 70,
+              y1: 70,
+              line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
+            },
+            {
+              type: "line",
+              xref: "paper",
+              yref: "y4",
+              x0: 0,
+              x1: 1,
+              y0: 30,
+              y1: 30,
+              line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
+            },
+          ],
+          title,
+        };
+      }
+      async function _renderClsFundTechChartByCode(code) {
+        const c = String(code || "").trim();
+        if (!c) {
+          _clearClsFundTechPanel("请选择基金后查看净值技术图。");
+          return;
+        }
+        const rows = Array.isArray(offClsLastRows) ? offClsLastRows : [];
+        const row =
+          rows.find((x) => String((x && x.code) || "") === String(c || "")) ||
+          null;
+        if (!row) {
+          _clearClsFundTechPanel("未找到该基金的回归结果。");
+          return;
+        }
+        if (_isOffClsPortfolioRow(row)) {
+          _clearClsFundTechPanel("当前选择为组合净值回归对象，不绘制该图。");
+          return;
+        }
+        const seq = ++offClsFundTechRenderSeq;
+        _clearClsFundTechPanel("加载基金净值与技术指标中...");
+        try {
+          const navRaw = await _loadOffClsFundNavSeriesByCode(c);
+          if (seq !== offClsFundTechRenderSeq) return;
+          const navPoints = _filterClsExposureSeriesByRange(
+            navRaw,
+            offClsExposureRangeKey,
+          );
+          if (!Array.isArray(navPoints) || navPoints.length < 20) {
+            _clearClsFundTechPanel("当前时间范围下基金净值样本不足（<20）。");
+            return;
+          }
+          const dates = navPoints.map((x) => String(x.trade_date || ""));
+          const nav = navPoints.map((x) => Number(x.nav));
+          const traces = _buildOffClsFundTechTraces({ dates, nav });
+          const title = `${esc(row.code || "-")} ${esc(row.name || "")} · 净值+布林(MA242) / MACD-V / BIAS-V / RSI（hfq）`;
+          const layout = _buildOffClsFundTechLayout(title);
+          await ensurePlotlyLoaded();
+          if (seq !== offClsFundTechRenderSeq) return;
+          await window.Plotly.newPlot("offClsFundTechChart", traces, layout, {
+            responsive: true,
+            displaylogo: false,
+          });
+        } catch (e) {
+          if (seq !== offClsFundTechRenderSeq) return;
+          _clearClsFundTechPanel(String((e && e.message) || e || "绘图失败"));
+        }
+      }
       function _filterClsExposureSeriesByRange(points, rangeKey) {
         const arr = Array.isArray(points) ? points : [];
         if (!arr.length) return [];
@@ -4049,6 +4402,7 @@
         if (!usable.length) {
           offClsExposureSelectedCode = "";
           _clearClsExposurePanel("本次回归无可用日度因子占比序列。");
+          _clearClsFundTechPanel("本次回归无可用基金用于绘制净值技术图。");
           return;
         }
         const sel = $("offClsExposureCode");
@@ -4069,6 +4423,7 @@
           })
           .join("");
         _renderClsExposureChartByCode(keep);
+        _renderClsFundTechChartByCode(keep);
       }
       function factorsTextFromList(factors) {
         const arr = Array.isArray(factors) ? factors : [];
@@ -4691,12 +5046,46 @@
           const minLen = Math.min(...validRows.map((r) => r.length));
           const aligned = validRows.map((r) => r.slice(r.length - minLen));
           let wIn = [];
+          const _pushGroupRiskContributionRows = () => {
+            if (codes.length <= 0) return;
+            // Single-asset group contributes all group risk by definition.
+            if (codes.length === 1) {
+              rcRows.push({ group: g, code: codes[0], rc: 1, w_in: wIn[0] });
+              return;
+            }
+            if (!(minLen >= 2)) {
+              for (let i = 0; i < codes.length; i++) {
+                rcRows.push({
+                  group: g,
+                  code: codes[i],
+                  rc: null,
+                  w_in: wIn[i],
+                });
+              }
+              return;
+            }
+            const cov = covMatrix(aligned);
+            const m = mv(cov, wIn);
+            const pvar = dot(wIn, m);
+            if (!(pvar > 0)) {
+              for (let i = 0; i < codes.length; i++) {
+                rcRows.push({
+                  group: g,
+                  code: codes[i],
+                  rc: null,
+                  w_in: wIn[i],
+                });
+              }
+              return;
+            }
+            for (let i = 0; i < codes.length; i++) {
+              const rc = (wIn[i] * m[i]) / pvar;
+              rcRows.push({ group: g, code: codes[i], rc, w_in: wIn[i] });
+            }
+          };
           if (innerMode === "custom") {
             const wByCode = normalizeWeights(innerCustomByCode, codes);
             wIn = codes.map((c) => Number(wByCode[c] || 0));
-            for (let i = 0; i < codes.length; i++) {
-              rcRows.push({ group: g, code: codes[i], rc: null, w_in: wIn[i] });
-            }
           } else if (
             innerMode === "equal" ||
             codes.length <= 1 ||
@@ -4706,13 +5095,8 @@
           } else {
             const cov = covMatrix(aligned);
             wIn = ercRiskParityWeights(cov);
-            const m = mv(cov, wIn);
-            const pvar = dot(wIn, m);
-            for (let i = 0; i < codes.length; i++) {
-              const rc = pvar > 0 ? (wIn[i] * m[i]) / pvar : null;
-              rcRows.push({ group: g, code: codes[i], rc, w_in: wIn[i] });
-            }
           }
+          _pushGroupRiskContributionRows();
           for (let i = 0; i < codes.length; i++)
             finalW[codes[i]] = (gw[g] || 0) * (wIn[i] || 0);
         }
@@ -4794,7 +5178,7 @@
                   `<tr><td>${esc(x.group)}</td><td>${esc(x.code)}</td><td>${esc(codeName(x.code) || "-")}</td><td>${fmtPct(x.w_in)}</td><td>${fmtPct(x.rc)}</td></tr>`,
               )
               .join("")
-          : `<tr><td colspan="5" class="muted">当前为等权模式、单标的组或样本不足，未展示ERC风险贡献。</td></tr>`;
+          : `<tr><td colspan="5" class="muted">风险贡献计算结果不可用。</td></tr>`;
         $("groupRcTable").innerHTML =
           `<tr><th>组</th><th>代码</th><th>名称</th><th>组内权重</th><th>风险贡献</th></tr>${rcOut}`;
 
@@ -5171,21 +5555,25 @@
         const code = String(($("offClsExposureCode").value || "").trim() || "");
         offClsExposureSelectedCode = code;
         _renderClsExposureChartByCode(code);
+        _renderClsFundTechChartByCode(code);
       });
       $("offClsExposureRange").addEventListener("change", () => {
         offClsExposureRangeKey = String(
           ($("offClsExposureRange").value || "all").trim() || "all",
         ).toLowerCase();
         _renderClsExposureChartByCode(offClsExposureSelectedCode);
+        _renderClsFundTechChartByCode(offClsExposureSelectedCode);
       });
       offClsExposureRangeKey = String(
         ($("offClsExposureRange").value || "all").trim() || "all",
       ).toLowerCase();
       _clearClsExposurePanel("请先运行基金分类回归。");
+      _clearClsFundTechPanel("请先运行基金分类回归。");
       window.addEventListener("momentum-theme-change", () => {
         scheduleRenderAllOffFundPairCards(30);
         if (offClsExposureSelectedCode) {
           _renderClsExposureChartByCode(offClsExposureSelectedCode);
+          _renderClsFundTechChartByCode(offClsExposureSelectedCode);
         }
         if (
           lastCtx &&

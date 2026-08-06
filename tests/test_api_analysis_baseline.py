@@ -341,11 +341,23 @@ def test_api_baseline_analysis_lppl_contract(api_client):
     assert "daily_bias" in pdist
     assert "daily_bias_20" in pdist
     assert "daily_bias_60" in pdist
+    assert "daily_bias_v" in pdist
+    assert "daily_bias_v_20" in pdist
+    assert "daily_bias_v_60" in pdist
     assert pdist["daily_bias"]["count"] == pdist["daily_bias_20"]["count"]
     assert pdist["daily_bias"]["current"] == pytest.approx(
         float(pdist["daily_bias_20"]["current"]), rel=1e-12
     )
     assert int(pdist["daily_bias_60"]["count"]) > 0
+    assert pdist["daily_bias_v"]["count"] == pdist["daily_bias_v_20"]["count"]
+    assert pdist["daily_bias_v"]["current"] == pytest.approx(
+        float(pdist["daily_bias_v_20"]["current"]), rel=1e-12
+    )
+    assert int(pdist["daily_bias_v_60"]["count"]) > 0
+    assert "daily_bias_l_20" in pdist
+    assert "daily_bias_l_60" in pdist
+    assert int(pdist["daily_bias_l_20"]["count"]) > 0
+    assert int(pdist["daily_bias_l_60"]["count"]) > 0
     lppl = pdist["daily_lppl"]
     assert "status" in lppl
     assert lppl["status"] in {

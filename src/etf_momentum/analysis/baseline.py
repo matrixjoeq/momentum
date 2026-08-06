@@ -1884,8 +1884,15 @@ def _compute_periodic_returns_and_volatility(
       for windows w=20 and w=60 (keys: `{freq}_bias_20`, `{freq}_bias_60`;
       `{freq}_bias` remains an alias of MA20 for backward compatibility).
     - BIAS-V distributions (by frequency), where
-        BIAS-V_t = (close_t - MA20(close)_t) / ATR(20)_t
-      This standardizes MA20 deviation by ATR20 to support cross-asset comparability.
+        BIAS-V_t = (close_t - MA_w(close)_t) / ATR(w)_t
+      for windows w=20 and w=60 (keys: `{freq}_bias_v_20`, `{freq}_bias_v_60`;
+      `{freq}_bias_v` remains an alias of window 20 for backward compatibility).
+      This standardizes MA deviation by ATR to support cross-asset comparability.
+    - Log-subtraction BIAS-L distributions (by frequency), where
+        BIAS-L_t = (ln(close_t) - ln(EMA(close, n)_t)) * 100
+      for windows n=20 and n=60 (keys: `{freq}_bias_l_20`, `{freq}_bias_l_60`).
+      EMA uses pandas `ewm(span=n, adjust=False)` (same convention as the bias
+      trend strategy).
     - MACD-V distributions (DIF/DEA/H/|H|, by frequency), where
         DIF_t = (EMA(close, 12) - EMA(close, 26)) / ATR(26)
         DEA_t = EMA(DIF, 9)
@@ -2434,10 +2441,54 @@ def _compute_periodic_returns_and_volatility(
                     _add_bias(_kind, "bias_20", bias20)
                     _add_bias(_kind, "bias_60", bias60)
 
-                # BIAS-V: (close - MA20(close)) / ATR(20)
+                # Log-subtraction BIAS-L: (ln(close) - ln(EMA(close,n))) * 100
+                def _bias_l_ema(s: pd.Series, window: int) -> pd.Series:
+                    n = int(window)
+                    if n <= 1:
+                        return pd.Series([], dtype=float)
+                    s2 = (
+                        pd.to_numeric(s, errors="coerce")
+                        .astype(float)
+                        .replace([np.inf, -np.inf], np.nan)
+                    )
+                    s2 = s2.where(s2 > 0.0).dropna()
+                    if s2.empty:
+                        return pd.Series([], dtype=float)
+                    ema = s2.ewm(
+                        span=n, adjust=False, min_periods=max(2, n // 2)
+                    ).mean()
+                    ln_c = np.log(s2)
+                    ln_ema = np.log(ema.replace(0.0, np.nan))
+                    out = (
+                        ((ln_c - ln_ema) * 100.0)
+                        .replace([np.inf, -np.inf], np.nan)
+                        .dropna()
+                    )
+                    return out
+
+                for _kind, _px in (
+                    ("daily", px_d),
+                    ("weekly", px_w),
+                    ("monthly", px_m),
+                    ("quarterly", px_q),
+                    ("yearly", px_y),
+                ):
+                    _add_bias(_kind, "bias_l_20", _bias_l_ema(_px, 20))
+                    _add_bias(_kind, "bias_l_60", _bias_l_ema(_px, 60))
+
+                # BIAS-V: (close - MA_w(close)) / ATR(w) for w=20,60
                 def _add_bias_v(
-                    kind: str, close_s: pd.Series, high_s: pd.Series, low_s: pd.Series
+                    kind: str,
+                    key: str,
+                    close_s: pd.Series,
+                    high_s: pd.Series,
+                    low_s: pd.Series,
+                    *,
+                    window: int,
                 ) -> None:
+                    w = int(window)
+                    if w <= 1:
+                        return
                     c = pd.to_numeric(close_s, errors="coerce").astype(float)
                     h = (
                         pd.to_numeric(high_s, errors="coerce")
@@ -2464,24 +2515,25 @@ def _compute_periodic_returns_and_volatility(
                         .replace([np.inf, -np.inf], np.nan)
                         .combine_first(c)
                     )
-                    ma20 = c.rolling(window=20, min_periods=5).mean()
+                    ma_min_periods = 5 if w <= 20 else max(5, w // 4)
+                    ma = c.rolling(window=w, min_periods=ma_min_periods).mean()
                     prev_c = c.shift(1)
                     tr = pd.concat(
                         [(h - low_v).abs(), (h - prev_c).abs(), (low_v - prev_c).abs()],
                         axis=1,
                     ).max(axis=1)
-                    atr20 = tr.ewm(
-                        alpha=1.0 / 20.0, adjust=False, min_periods=20
+                    atr = tr.ewm(
+                        alpha=1.0 / float(w), adjust=False, min_periods=w
                     ).mean()
                     bias_v = (
-                        ((c - ma20) / atr20.replace(0.0, np.nan))
+                        ((c - ma) / atr.replace(0.0, np.nan))
                         .replace([np.inf, -np.inf], np.nan)
                         .dropna()
                     )
                     if bias_v.empty:
                         return
                     vals = bias_v.to_numpy(dtype=float)
-                    code_result[f"{kind}_bias_v"] = {
+                    code_result[f"{kind}_{key}"] = {
                         "hist": _histogram_from_samples(vals),
                         "quantiles": _quantiles_from_samples(vals),
                         "mean": float(np.mean(vals)),
@@ -2494,6 +2546,20 @@ def _compute_periodic_returns_and_volatility(
                         .date()
                         .isoformat(),
                     }
+
+                def _emit_bias_v_windows(
+                    kind: str,
+                    close_s: pd.Series,
+                    high_s: pd.Series,
+                    low_s: pd.Series,
+                ) -> None:
+                    # Legacy key `*_bias_v` == BIAS-V(20)
+                    for key, win in (
+                        ("bias_v", 20),
+                        ("bias_v_20", 20),
+                        ("bias_v_60", 60),
+                    ):
+                        _add_bias_v(kind, key, close_s, high_s, low_s, window=win)
 
                 # MACD-V:
                 # DIF = (EMA(close,12)-EMA(close,26))/ATR(26), DEA = EMA(DIF,9)
@@ -2690,11 +2756,11 @@ def _compute_periodic_returns_and_volatility(
                 _add_macd_abs("monthly", px_m)
                 _add_macd_abs("quarterly", px_q)
                 _add_macd_abs("yearly", px_y)
-                _add_bias_v("daily", px_d, hi_d, lo_d)
-                _add_bias_v("weekly", px_w, hi_w, lo_w)
-                _add_bias_v("monthly", px_m, hi_m, lo_m)
-                _add_bias_v("quarterly", px_q, hi_q, lo_q)
-                _add_bias_v("yearly", px_y, hi_y, lo_y)
+                _emit_bias_v_windows("daily", px_d, hi_d, lo_d)
+                _emit_bias_v_windows("weekly", px_w, hi_w, lo_w)
+                _emit_bias_v_windows("monthly", px_m, hi_m, lo_m)
+                _emit_bias_v_windows("quarterly", px_q, hi_q, lo_q)
+                _emit_bias_v_windows("yearly", px_y, hi_y, lo_y)
 
         # Activity (volume/amount) and crowding proxies (optional)
         act: pd.Series | None = None
