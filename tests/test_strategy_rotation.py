@@ -1767,9 +1767,13 @@ def test_rotation_equity_budget_stop_uses_current_weight_contribution(session_fa
             close_a = close_a + 0.2
             close_b = close_b + 0.2
             if i == 55:
-                close_a = close_a * 0.98  # mild drawdown while A weight should be reduced
+                close_a = (
+                    close_a * 0.98
+                )  # mild drawdown while A weight should be reduced
             if i == 70:
-                close_b = close_b * 0.90  # force at least one effective equity-budget stop event
+                close_b = (
+                    close_b * 0.90
+                )  # force at least one effective equity-budget stop event
             if i < 50:
                 ha, la = close_a * 1.002, close_a * 0.998
                 hb, lb = close_b * 1.03, close_b * 0.97
@@ -1826,7 +1830,9 @@ def test_rotation_equity_budget_stop_uses_current_weight_contribution(session_fa
     for p in out.get("holdings") or []:
         atr_meta = (p or {}).get("atr_stop") or {}
         events.extend([e for e in (atr_meta.get("events") or []) if e])
-    effective = [e for e in events if float((e or {}).get("reduce_fraction") or 0.0) > 0.0]
+    effective = [
+        e for e in events if float((e or {}).get("reduce_fraction") or 0.0) > 0.0
+    ]
     for ev in effective:
         loss_pct = (ev or {}).get("equity_loss_pct_at_trigger")
         risk_pct = (ev or {}).get("equity_stop_risk_pct")
@@ -1913,8 +1919,7 @@ def test_rotation_equity_budget_stop_keeps_true_entry_across_rebalance_segments(
     one = cur.get(code)
     assert one is not None
     w_dates = list(((out.get("weights") or {}).get("dates") or []))
-    w_vals = list((((out.get("weights") or {}).get("series") or {}).get(code) or [])
-    )
+    w_vals = list((((out.get("weights") or {}).get("series") or {}).get(code) or []))
     first_pos = next((i for i, v in enumerate(w_vals) if float(v) > 1e-12), None)
     assert first_pos is not None
     assert str(one.get("entry_date") or "") == str(w_dates[first_pos])
@@ -1997,7 +2002,9 @@ def test_rotation_atr_stop_keeps_true_entry_across_rebalance_segments(
     assert str(one.get("entry_date") or "") == str(w_dates[first_pos])
 
 
-def test_rotation_current_holdings_return_uses_entry_day_execution_price(session_factory):
+def test_rotation_current_holdings_return_uses_entry_day_execution_price(
+    session_factory,
+):
     sf = session_factory
     start = dt.date(2024, 1, 2)
     dates = [d.date() for d in pd.date_range(start, periods=45, freq="B")]
@@ -2049,14 +2056,18 @@ def test_rotation_current_holdings_return_uses_entry_day_execution_price(session
     assert float(one.get("entry_price") or 0.0) == pytest.approx(entry_px, abs=1e-12)
     assert float(one.get("latest_price") or 0.0) == pytest.approx(last_px, abs=1e-12)
     assert one.get("equity_return") is not None
-    htr = [x for x in (out.get("historical_trades") or []) if str(x.get("code")) == "HOLD"]
+    htr = [
+        x for x in (out.get("historical_trades") or []) if str(x.get("code")) == "HOLD"
+    ]
     assert htr
     last_open = htr[-1]
     assert bool(last_open.get("closed")) is False
     assert float(last_open.get("entry_price") or 0.0) == pytest.approx(
         entry_px, abs=1e-12
     )
-    assert float(last_open.get("exit_price") or 0.0) == pytest.approx(last_px, abs=1e-12)
+    assert float(last_open.get("exit_price") or 0.0) == pytest.approx(
+        last_px, abs=1e-12
+    )
     assert float(last_open.get("holding_return") or 0.0) == pytest.approx(
         expected, abs=1e-12
     )

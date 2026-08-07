@@ -398,7 +398,9 @@ def _trade_returns_from_weight_series(
             active = True
             start_i = int(i)
             start_nav = float(nav_prev)
-            entry_px = float(px_i) if np.isfinite(float(px_i)) and px_i > 0.0 else float("nan")
+            entry_px = (
+                float(px_i) if np.isfinite(float(px_i)) and px_i > 0.0 else float("nan")
+            )
             entry_w = float(cur)
         nav_cur = float(nav_prev) * (1.0 + float(day_ret))
         # Trade ends on the execution day when position becomes flat (exit cost is booked on this day).
@@ -421,9 +423,7 @@ def _trade_returns_from_weight_series(
                         else None
                     ),
                     "exit_price": (
-                        float(px_i)
-                        if np.isfinite(float(px_i)) and px_i > 0.0
-                        else None
+                        float(px_i) if np.isfinite(float(px_i)) and px_i > 0.0 else None
                     ),
                     "holding_return": (
                         float(float(px_i) / float(entry_px) - 1.0)
@@ -467,7 +467,8 @@ def _trade_returns_from_weight_series(
                 ),
                 "exit_price": (
                     float(px.iloc[n - 1])
-                    if np.isfinite(float(px.iloc[n - 1])) and float(px.iloc[n - 1]) > 0.0
+                    if np.isfinite(float(px.iloc[n - 1]))
+                    and float(px.iloc[n - 1]) > 0.0
                     else None
                 ),
                 "holding_return": (
@@ -4993,14 +4994,12 @@ def backtest_rotation(
                             notional_now = float(equity_at_entry) * float(wt_now)
                             if notional_now <= 1e-12:
                                 continue
-                            dist_pct_now = float(
-                                risk_abs / max(notional_now, 1e-12)
-                            )
-                            dist_pct_now = float(
-                                min(max(dist_pct_now, 0.0), 0.9999)
-                            )
+                            dist_pct_now = float(risk_abs / max(notional_now, 1e-12))
+                            dist_pct_now = float(min(max(dist_pct_now, 0.0), 0.9999))
                             entry_price_now = float(entry_px.get(c, float("nan")))
-                            if (not np.isfinite(entry_price_now)) or entry_price_now <= 0.0:
+                            if (
+                                not np.isfinite(entry_price_now)
+                            ) or entry_price_now <= 0.0:
                                 continue
                             stop_px = float(entry_price_now * (1.0 - dist_pct_now))
                             stop[c] = float(stop_px)
@@ -5008,8 +5007,7 @@ def backtest_rotation(
                             eq_holding_ret = float(px_close / entry_price_now - 1.0)
                             eq_loss_contrib = float(wt_now) * float(eq_holding_ret)
                             triggered = bool(
-                                float(eq_loss_contrib)
-                                <= -float(equity_stop_risk_pct)
+                                float(eq_loss_contrib) <= -float(equity_stop_risk_pct)
                             )
                             trigger_px = float(px_close)
                         if exec_time_now == "open":

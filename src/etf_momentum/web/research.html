@@ -32897,7 +32897,9 @@
         $("status").textContent = "";
         window.__lastRotationResultByBench[benchmark_mode] = data;
         window.__lastRotationResult = data;
-        window.__lastRotationHistoricalTrades = Array.isArray(data.historical_trades)
+        window.__lastRotationHistoricalTrades = Array.isArray(
+          data.historical_trades,
+        )
           ? data.historical_trades
           : [];
         try {
@@ -32908,7 +32910,9 @@
           console.error("render rotation current holdings failed:", e);
         }
         try {
-          _renderRotationHistoricalTrades(window.__lastRotationHistoricalTrades);
+          _renderRotationHistoricalTrades(
+            window.__lastRotationHistoricalTrades,
+          );
         } catch (e) {
           console.error("render rotation historical trades failed:", e);
         }
