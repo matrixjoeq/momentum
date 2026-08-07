@@ -3234,6 +3234,37 @@
             <select id="rotRStatsCodeSelect" style="min-width: 200px"></select>
           </div>
         </div>
+        <div class="muted" style="margin-top: 10px">
+          近100次交易SQN滚动统计（仅策略整体；每个点严格使用完整100笔窗口）
+        </div>
+        <div
+          id="rotSqnRollingRecent100Chart"
+          style="width: 100%; height: 300px; margin-top: 8px"
+        ></div>
+        <div
+          class="two"
+          style="grid-template-columns: 1fr 1fr; margin-top: 10px"
+        >
+          <div>
+            <div class="muted">滚动100次SQN分布直方图（全历史）</div>
+            <div
+              id="rotSqnRollingRecent100Hist"
+              style="width: 100%; height: 280px; margin-top: 8px"
+            ></div>
+          </div>
+          <div>
+            <div class="muted">滚动100次SQN分布统计（全历史）</div>
+            <table
+              id="rotSqnRollingRecent100StatsTable"
+              style="margin-top: 8px"
+            ></table>
+          </div>
+        </div>
+        <div
+          id="rotSqnRollingRecent100StabilityNote"
+          class="muted"
+          style="margin-top: 8px"
+        ></div>
         <div
           class="two"
           style="grid-template-columns: 1fr 1fr; margin-top: 8px"
