@@ -1560,7 +1560,24 @@ def test_rotation_equity_budget_stop_exits_only_triggered_asset(session_factory)
     for p in out.get("holdings") or []:
         atr_meta = (p or {}).get("atr_stop") or {}
         eq_events.extend(list(atr_meta.get("events") or []))
+    effective_eq_events = [
+        e for e in eq_events if float((e or {}).get("reduce_fraction") or 0.0) > 0.0
+    ]
     assert any(str((e or {}).get("code") or "") == "EQA" for e in eq_events)
+    assert effective_eq_events
+    for ev in effective_eq_events:
+        loss_pct = (ev or {}).get("equity_loss_pct_at_trigger")
+        risk_pct = (ev or {}).get("equity_stop_risk_pct")
+        hold_ret = (ev or {}).get("holding_return_at_trigger")
+        wt_now = (ev or {}).get("weight_at_trigger")
+        assert loss_pct is not None
+        assert risk_pct is not None
+        assert hold_ret is not None
+        assert wt_now is not None
+        assert float(loss_pct) <= -float(risk_pct) + 1e-12
+        assert float(loss_pct) == pytest.approx(
+            float(wt_now) * float(hold_ret), abs=1e-12
+        )
 
 
 def test_rotation_equity_budget_next_day_close_exec_delays_exit(session_factory):
@@ -1737,6 +1754,316 @@ def test_rotation_equity_budget_next_day_exec_still_works_during_dd_sleep(
     assert idx > 0
     assert float(wa[idx - 1]) > 1e-12
     assert float(wa[idx]) <= 1e-12
+
+
+def test_rotation_equity_budget_stop_uses_current_weight_contribution(session_factory):
+    sf = session_factory
+    with sf() as db:
+        codes = ["EWC_A", "EWC_B"]
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=100, freq="B")]
+        close_a = 100.0
+        close_b = 100.0
+        for i, d in enumerate(dates):
+            close_a = close_a + 0.2
+            close_b = close_b + 0.2
+            if i == 55:
+                close_a = close_a * 0.98  # mild drawdown while A weight should be reduced
+            if i == 70:
+                close_b = close_b * 0.90  # force at least one effective equity-budget stop event
+            if i < 50:
+                ha, la = close_a * 1.002, close_a * 0.998
+                hb, lb = close_b * 1.03, close_b * 0.97
+            else:
+                ha, la = close_a * 1.06, close_a * 0.94
+                hb, lb = close_b * 1.01, close_b * 0.99
+            add_price_all_adjustments(
+                db,
+                code="EWC_A",
+                day=d,
+                close=float(close_a),
+                open_price=float(close_a),
+                high=float(ha),
+                low=float(la),
+            )
+            add_price_all_adjustments(
+                db,
+                code="EWC_B",
+                day=d,
+                close=float(close_b),
+                open_price=float(close_b),
+                high=float(hb),
+                low=float(lb),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=2,
+                position_mode="risk_budget",
+                daily_rebalance=True,
+                risk_budget_atr_window=5,
+                risk_budget_pct=0.01,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="equity_budget",
+                equity_stop_risk_pct=0.01,
+                atr_stop_execution_mode="intraday",
+                atr_stop_execution_time="close",
+                atr_stop_mode="none",
+            ),
+        )
+
+    events = []
+    for p in out.get("holdings") or []:
+        atr_meta = (p or {}).get("atr_stop") or {}
+        events.extend([e for e in (atr_meta.get("events") or []) if e])
+    effective = [e for e in events if float((e or {}).get("reduce_fraction") or 0.0) > 0.0]
+    for ev in effective:
+        loss_pct = (ev or {}).get("equity_loss_pct_at_trigger")
+        risk_pct = (ev or {}).get("equity_stop_risk_pct")
+        hold_ret = (ev or {}).get("holding_return_at_trigger")
+        wt_now = (ev or {}).get("weight_at_trigger")
+        assert loss_pct is not None
+        assert risk_pct is not None
+        assert hold_ret is not None
+        assert wt_now is not None
+        assert float(loss_pct) <= -float(risk_pct) + 1e-12
+        assert float(loss_pct) == pytest.approx(
+            float(wt_now) * float(hold_ret), abs=1e-12
+        )
+    # EWC_A should not be stopped by the mild -2% move after its weight is reduced.
+    assert not any(str((e or {}).get("code") or "") == "EWC_A" for e in effective)
+
+
+def test_rotation_equity_budget_stop_keeps_true_entry_across_rebalance_segments(
+    session_factory,
+):
+    sf = session_factory
+    with sf() as db:
+        code = "EQREF"
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=35, freq="B")]
+        prices = []
+        for i, d in enumerate(dates):
+            if i < 20:
+                px = 100.0 + float(i) * 0.6  # uptrend before second segment
+            elif i == 20:
+                px = 108.0  # small pullback at/after segment boundary
+            else:
+                px = 108.0 + float(i - 20) * 0.05
+            prices.append(float(px))
+            add_price_all_adjustments(
+                db,
+                code=code,
+                day=d,
+                close=float(px),
+                open_price=float(px),
+                high=float(px),
+                low=float(px),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=1,
+                position_mode="inverse_vol",
+                daily_rebalance=False,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="equity_budget",
+                equity_stop_risk_pct=0.01,
+                atr_stop_execution_mode="intraday",
+                atr_stop_execution_time="close",
+                atr_stop_mode="none",
+            ),
+        )
+    events = []
+    for p in out.get("holdings") or []:
+        atr_meta = (p or {}).get("atr_stop") or {}
+        events.extend(
+            [
+                e
+                for e in (atr_meta.get("events") or [])
+                if e
+                and str((e or {}).get("code") or "") == code
+                and float((e or {}).get("reduce_fraction") or 0.0) > 0.0
+            ]
+        )
+    # If entry reference were reset at each rebalance segment, the mild pullback
+    # near the segment boundary could falsely trigger a 1% equity-budget stop.
+    assert not events
+    cur = {str(x.get("code") or ""): x for x in (out.get("current_holdings") or [])}
+    one = cur.get(code)
+    assert one is not None
+    w_dates = list(((out.get("weights") or {}).get("dates") or []))
+    w_vals = list((((out.get("weights") or {}).get("series") or {}).get(code) or [])
+    )
+    first_pos = next((i for i, v in enumerate(w_vals) if float(v) > 1e-12), None)
+    assert first_pos is not None
+    assert str(one.get("entry_date") or "") == str(w_dates[first_pos])
+
+
+def test_rotation_atr_stop_keeps_true_entry_across_rebalance_segments(
+    session_factory,
+):
+    sf = session_factory
+    with sf() as db:
+        code = "ATRREF"
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=45, freq="B")]
+        for i, d in enumerate(dates):
+            if i < 22:
+                px = 100.0 + float(i) * 0.35
+            elif i == 22:
+                px = 112.0
+            elif i == 23:
+                px = 107.5
+            else:
+                px = 107.5 + float(i - 23) * 0.05
+            add_price_all_adjustments(
+                db,
+                code=code,
+                day=d,
+                close=float(px),
+                open_price=float(px),
+                high=float(px + 0.6),
+                low=float(px - 0.6),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=1,
+                position_mode="inverse_vol",
+                daily_rebalance=False,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="atr",
+                atr_stop_mode="static",
+                atr_stop_execution_mode="intraday",
+                atr_stop_execution_time="close",
+                atr_stop_window=5,
+                atr_stop_n=0.5,
+                atr_stop_m=0.25,
+            ),
+        )
+    events = []
+    for p in out.get("holdings") or []:
+        atr_meta = (p or {}).get("atr_stop") or {}
+        events.extend(
+            [
+                e
+                for e in (atr_meta.get("events") or [])
+                if e
+                and str((e or {}).get("code") or "") == code
+                and float((e or {}).get("reduce_fraction") or 0.0) > 0.0
+            ]
+        )
+    # A segment-start reference-price reset would spuriously lift stop_price and
+    # trigger on the mild pullback after the jump.
+    assert not events
+    cur = {str(x.get("code") or ""): x for x in (out.get("current_holdings") or [])}
+    one = cur.get(code)
+    assert one is not None
+    w_dates = list(((out.get("weights") or {}).get("dates") or []))
+    w_vals = list((((out.get("weights") or {}).get("series") or {}).get(code) or []))
+    first_pos = next((i for i, v in enumerate(w_vals) if float(v) > 1e-12), None)
+    assert first_pos is not None
+    assert str(one.get("entry_date") or "") == str(w_dates[first_pos])
+
+
+def test_rotation_current_holdings_return_uses_entry_day_execution_price(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 2)
+    dates = [d.date() for d in pd.date_range(start, periods=45, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + float(i)
+            add_price_all_adjustments(
+                db,
+                code="HOLD",
+                day=d,
+                close=float(px),
+                open_price=float(px),
+                high=float(px),
+                low=float(px),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["HOLD"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=1,
+                lookback_days=5,
+                skip_days=0,
+                position_mode="inverse_vol",
+                daily_rebalance=False,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="none",
+                atr_stop_mode="none",
+            ),
+        )
+
+    rows = list(out.get("current_holdings") or [])
+    assert rows
+    one = rows[0]
+    entry_date = dt.date.fromisoformat(str(one.get("entry_date")))
+    assert entry_date in dates
+    entry_idx = dates.index(entry_date)
+    last_px = 100.0 + float(len(dates) - 1)
+    entry_px = 100.0 + float(entry_idx)
+    expected = float(last_px / entry_px - 1.0)
+    assert float(one.get("holding_return") or 0.0) == pytest.approx(expected, abs=1e-12)
+    assert float(one.get("entry_price") or 0.0) == pytest.approx(entry_px, abs=1e-12)
+    assert float(one.get("latest_price") or 0.0) == pytest.approx(last_px, abs=1e-12)
+    assert one.get("equity_return") is not None
+    htr = [x for x in (out.get("historical_trades") or []) if str(x.get("code")) == "HOLD"]
+    assert htr
+    last_open = htr[-1]
+    assert bool(last_open.get("closed")) is False
+    assert float(last_open.get("entry_price") or 0.0) == pytest.approx(
+        entry_px, abs=1e-12
+    )
+    assert float(last_open.get("exit_price") or 0.0) == pytest.approx(last_px, abs=1e-12)
+    assert float(last_open.get("holding_return") or 0.0) == pytest.approx(
+        expected, abs=1e-12
+    )
+    assert float(one.get("equity_return") or 0.0) == pytest.approx(
+        float(last_open.get("total_equity_return") or 0.0),
+        abs=1e-12,
+    )
 
 
 def test_rotation_r_take_profit_triggers_with_stop_scheme_none(session_factory):

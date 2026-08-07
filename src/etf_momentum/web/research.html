@@ -3035,6 +3035,19 @@
           </div>
         </div>
         <div id="rotNextPlan" class="muted" style="margin-top: 8px"></div>
+        <div class="panel" style="margin-top: 10px">
+          <div
+            class="row no-print"
+            style="justify-content: space-between; align-items: center"
+          >
+            <h3 style="margin: 0">历史逐笔交易明细（轮动）</h3>
+            <button id="rotExportHistoricalTradesCsv">导出CSV</button>
+          </div>
+          <div class="muted" style="margin-top: 6px">
+            字段：出入场日期、出入场价格、持有收益、总权益收益（UTF-8）。
+          </div>
+          <table id="rotHistoricalTradesTable" style="margin-top: 8px"></table>
+        </div>
       </div>
 
       <div class="panel two" style="grid-template-columns: 1fr 1fr">
@@ -32884,12 +32897,20 @@
         $("status").textContent = "";
         window.__lastRotationResultByBench[benchmark_mode] = data;
         window.__lastRotationResult = data;
+        window.__lastRotationHistoricalTrades = Array.isArray(data.historical_trades)
+          ? data.historical_trades
+          : [];
         try {
           _renderRotationCurrentHoldings(
             Array.isArray(data.current_holdings) ? data.current_holdings : [],
           );
         } catch (e) {
           console.error("render rotation current holdings failed:", e);
+        }
+        try {
+          _renderRotationHistoricalTrades(window.__lastRotationHistoricalTrades);
+        } catch (e) {
+          console.error("render rotation historical trades failed:", e);
         }
         try {
           _renderRotationNextPlanTables(
@@ -37083,15 +37104,89 @@
         const el = $("rotCurrentHoldingsTable");
         if (!el) return;
         el.innerHTML =
-          `<tr><th>标的代码</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th></tr>` +
+          `<tr><th>标的代码</th><th>入场日期</th><th>入场价</th><th>最新价</th><th>出场日期</th><th>出场价</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th><th>总权益收益</th></tr>` +
           (xs.length
             ? xs
                 .map(
                   (x) =>
-                    `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${esc(x.entry_date || "-")}</td><td>${x.holding_days ?? "-"}</td><td>${fmtPct(x.weight)}</td><td>${x.holding_return == null ? "-" : fmtPct(x.holding_return)}</td></tr>`,
+                    `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${esc(x.entry_date || "-")}</td><td>${x.entry_price == null ? "-" : fmtNum(Number(x.entry_price))}</td><td>${x.latest_price == null ? "-" : fmtNum(Number(x.latest_price))}</td><td>${esc(x.exit_date || "-")}</td><td>${x.exit_price == null ? "-" : fmtNum(Number(x.exit_price))}</td><td>${x.holding_days ?? "-"}</td><td>${fmtPct(x.weight)}</td><td>${x.holding_return == null ? "-" : fmtPct(x.holding_return)}</td><td>${x.equity_return == null ? "-" : fmtPct(x.equity_return)}</td></tr>`,
                 )
                 .join("")
-            : `<tr><td colspan="5" class="muted">当前无持仓</td></tr>`);
+            : `<tr><td colspan="10" class="muted">当前无持仓</td></tr>`);
+      }
+
+      function _rotationCsvEscape(v) {
+        if (v == null) return "";
+        const s = String(v);
+        if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      }
+
+      function _renderRotationHistoricalTrades(rows) {
+        const xs = Array.isArray(rows) ? rows : [];
+        const el = $("rotHistoricalTradesTable");
+        if (!el) return;
+        el.innerHTML =
+          `<tr><th>标的代码</th><th>入场日期</th><th>入场价</th><th>出场日期</th><th>出场价</th><th>持仓时长(交易日)</th><th>是否平仓</th><th>持有收益</th><th>总权益收益</th></tr>` +
+          (xs.length
+            ? xs
+                .map(
+                  (x) =>
+                    `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${esc(x.entry_date || "-")}</td><td>${x.entry_price == null ? "-" : fmtNum(Number(x.entry_price))}</td><td>${esc(x.exit_date || "-")}</td><td>${x.exit_price == null ? "-" : fmtNum(Number(x.exit_price))}</td><td>${x.holding_days ?? "-"}</td><td>${x.closed ? "是" : "否"}</td><td>${x.holding_return == null ? "-" : fmtPct(x.holding_return)}</td><td>${x.total_equity_return == null ? "-" : fmtPct(x.total_equity_return)}</td></tr>`,
+                )
+                .join("")
+            : `<tr><td colspan="9" class="muted">无历史交易明细</td></tr>`);
+      }
+
+      function _exportRotationHistoricalTradesCsv() {
+        const rows = Array.isArray(window.__lastRotationHistoricalTrades)
+          ? window.__lastRotationHistoricalTrades
+          : [];
+        if (!rows.length) {
+          setMsg("暂无历史交易可导出");
+          return;
+        }
+        const headers = [
+          "code",
+          "name",
+          "entry_date",
+          "entry_price",
+          "exit_date",
+          "exit_price",
+          "holding_days",
+          "closed",
+          "holding_return_pct",
+          "total_equity_return_pct",
+        ];
+        const lines = [headers.join(",")];
+        for (const r of rows) {
+          const one = [
+            r.code || "",
+            codeLabel(r.code || ""),
+            r.entry_date || "",
+            r.entry_price == null ? "" : Number(r.entry_price),
+            r.exit_date || "",
+            r.exit_price == null ? "" : Number(r.exit_price),
+            r.holding_days == null ? "" : Number(r.holding_days),
+            r.closed ? "true" : "false",
+            r.holding_return == null ? "" : Number(r.holding_return) * 100.0,
+            r.total_equity_return == null
+              ? ""
+              : Number(r.total_equity_return) * 100.0,
+          ].map(_rotationCsvEscape);
+          lines.push(one.join(","));
+        }
+        const csv = "\uFEFF" + lines.join("\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const a = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
+        a.href = url;
+        a.download = `rotation_historical_trades_${ts}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       }
 
       function _renderRotationNextPlanTables(p) {
@@ -40024,6 +40119,11 @@
         );
       if ($("runRotNextPlan"))
         $("runRotNextPlan").addEventListener("click", runRotNextExecutionPlan);
+      if ($("rotExportHistoricalTradesCsv"))
+        $("rotExportHistoricalTradesCsv").addEventListener(
+          "click",
+          _exportRotationHistoricalTradesCsv,
+        );
       if ($("runTrendResearch"))
         $("runTrendResearch").addEventListener("click", runTrendResearch);
       if ($("exportTrendParamsJson"))

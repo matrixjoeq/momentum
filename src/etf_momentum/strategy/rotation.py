@@ -370,6 +370,8 @@ def _trade_returns_from_weight_series(
     active = False
     start_i = -1
     start_nav = 1.0
+    entry_px = float("nan")
+    entry_w = 0.0
     nav_prev = 1.0
     for i in range(n):
         cur = float(ww.iloc[i])
@@ -396,6 +398,8 @@ def _trade_returns_from_weight_series(
             active = True
             start_i = int(i)
             start_nav = float(nav_prev)
+            entry_px = float(px_i) if np.isfinite(float(px_i)) and px_i > 0.0 else float("nan")
+            entry_w = float(cur)
         nav_cur = float(nav_prev) * (1.0 + float(day_ret))
         # Trade ends on the execution day when position becomes flat (exit cost is booked on this day).
         if active and (prev > eps) and (cur <= eps):
@@ -411,13 +415,38 @@ def _trade_returns_from_weight_series(
                     if start_i >= 0
                     else None,
                     "exit_date": str(pd.to_datetime(dates[i]).date()),
+                    "entry_price": (
+                        float(entry_px)
+                        if np.isfinite(float(entry_px)) and entry_px > 0.0
+                        else None
+                    ),
+                    "exit_price": (
+                        float(px_i)
+                        if np.isfinite(float(px_i)) and px_i > 0.0
+                        else None
+                    ),
+                    "holding_return": (
+                        float(float(px_i) / float(entry_px) - 1.0)
+                        if (
+                            np.isfinite(float(px_i))
+                            and px_i > 0.0
+                            and np.isfinite(float(entry_px))
+                            and entry_px > 0.0
+                        )
+                        else None
+                    ),
+                    "holding_days": int(i - start_i + 1) if start_i >= 0 else None,
+                    "entry_weight": float(entry_w),
                     "return": float(tr),
+                    "total_equity_return": float(tr),
                     "closed": True,
                 }
             )
             active = False
             start_i = -1
             start_nav = float(nav_cur)
+            entry_px = float("nan")
+            entry_w = 0.0
         nav_prev = float(nav_cur)
     # If trade is still open at the end, include mark-to-market return up to last available date.
     if active and start_i >= 0:
@@ -431,7 +460,30 @@ def _trade_returns_from_weight_series(
             {
                 "entry_date": str(pd.to_datetime(dates[start_i]).date()),
                 "exit_date": str(pd.to_datetime(dates[n - 1]).date()),
+                "entry_price": (
+                    float(entry_px)
+                    if np.isfinite(float(entry_px)) and entry_px > 0.0
+                    else None
+                ),
+                "exit_price": (
+                    float(px.iloc[n - 1])
+                    if np.isfinite(float(px.iloc[n - 1])) and float(px.iloc[n - 1]) > 0.0
+                    else None
+                ),
+                "holding_return": (
+                    float(float(px.iloc[n - 1]) / float(entry_px) - 1.0)
+                    if (
+                        np.isfinite(float(px.iloc[n - 1]))
+                        and float(px.iloc[n - 1]) > 0.0
+                        and np.isfinite(float(entry_px))
+                        and entry_px > 0.0
+                    )
+                    else None
+                ),
+                "holding_days": int(n - start_i) if start_i >= 0 else None,
+                "entry_weight": float(entry_w),
                 "return": float(tr),
+                "total_equity_return": float(tr),
                 "closed": False,
             }
         )
@@ -510,7 +562,7 @@ def _turnover_with_daily_rebalance(
     )
     out = pd.DataFrame(0.0, index=idx, columns=cols, dtype=float)
     prev_post = np.zeros(len(cols), dtype=float)
-    for i, d in enumerate(idx):
+    for d in idx:
         tgt = w_tgt.loc[d].to_numpy(dtype=float)
         tgt = np.where(np.isfinite(tgt), tgt, 0.0)
         pre = np.where(np.isfinite(prev_post), prev_post, 0.0)
@@ -1502,6 +1554,8 @@ def _build_current_holdings_snapshot(
     *,
     codes: list[str],
     asset_nav_exec: pd.DataFrame | None = None,
+    asset_price_exec: pd.DataFrame | None = None,
+    open_trade_by_code: dict[str, dict[str, Any]] | None = None,
     eps: float = 1e-12,
 ) -> list[dict[str, Any]]:
     """Build current holdings snapshot on the last backtest day."""
@@ -1520,6 +1574,12 @@ def _build_current_holdings_snapshot(
         if isinstance(asset_nav_exec, pd.DataFrame) and (not asset_nav_exec.empty)
         else pd.DataFrame(index=w.index, columns=cols, dtype=float)
     )
+    px_df = (
+        asset_price_exec.reindex(index=w.index, columns=cols).astype(float)
+        if isinstance(asset_price_exec, pd.DataFrame) and (not asset_price_exec.empty)
+        else pd.DataFrame(index=w.index, columns=cols, dtype=float)
+    )
+    open_map = open_trade_by_code if isinstance(open_trade_by_code, dict) else {}
     for c in cols:
         s_w = pd.to_numeric(w[c], errors="coerce").fillna(0.0).astype(float)
         w_last = float(s_w.iloc[last_i])
@@ -1532,12 +1592,35 @@ def _build_current_holdings_snapshot(
         entry_date = idx[entry_i].date().isoformat()
         holding_days = int(last_i - entry_i + 1)
         hold_ret: float | None = None
-        if c in nav_df.columns:
+        p0 = float("nan")
+        p1 = float("nan")
+        # Prefer execution-price ratio on the actual holding window.
+        # Using cumulative forward-return NAV can shift the entry base by one day.
+        if c in px_df.columns:
+            s_px = pd.to_numeric(px_df[c], errors="coerce").astype(float)
+            p0 = float(s_px.iloc[entry_i]) if entry_i < len(s_px) else float("nan")
+            p1 = float(s_px.iloc[last_i]) if last_i < len(s_px) else float("nan")
+            if np.isfinite(p0) and np.isfinite(p1) and p0 > 0.0:
+                hold_ret = float(p1 / p0 - 1.0)
+        if hold_ret is None and c in nav_df.columns:
             s_nav = pd.to_numeric(nav_df[c], errors="coerce").astype(float)
             n0 = float(s_nav.iloc[entry_i]) if entry_i < len(s_nav) else float("nan")
             n1 = float(s_nav.iloc[last_i]) if last_i < len(s_nav) else float("nan")
             if np.isfinite(n0) and np.isfinite(n1) and n0 > 0.0:
                 hold_ret = float(n1 / n0 - 1.0)
+        entry_price = float(p0) if np.isfinite(float(p0)) and float(p0) > 0.0 else None
+        latest_price = float(p1) if np.isfinite(float(p1)) and float(p1) > 0.0 else None
+        open_trade = open_map.get(str(c)) or {}
+        eq_ret = (
+            float(open_trade.get("total_equity_return"))
+            if isinstance(open_trade, dict)
+            and (open_trade.get("total_equity_return") is not None)
+            else (
+                float(w_last) * float(hold_ret)
+                if hold_ret is not None and np.isfinite(float(hold_ret))
+                else None
+            )
+        )
         out.append(
             {
                 "code": str(c),
@@ -1545,6 +1628,11 @@ def _build_current_holdings_snapshot(
                 "holding_days": int(holding_days),
                 "weight": float(w_last),
                 "holding_return": hold_ret,
+                "entry_price": entry_price,
+                "latest_price": latest_price,
+                "exit_date": None,
+                "exit_price": None,
+                "equity_return": eq_ret,
             }
         )
     out.sort(key=lambda x: float(x.get("weight") or 0.0), reverse=True)
@@ -4771,12 +4859,35 @@ def backtest_rotation(
                         equity_at_entry = 1.0
 
                 for c in stop_codes:
+                    entry_ref_day = seg_dates[0]
+                    if stop_scheme in {"equity_budget", "atr"}:
+                        # Keep a continuous-holding entry reference across rebalance
+                        # segments (do not reset entry at each segment start).
+                        entry_ref_i = int(start_i)
+                        while entry_ref_i > 0:
+                            prev_w_ref = (
+                                float(w.iloc[entry_ref_i - 1].get(c, 0.0))
+                                if c in w.columns
+                                else 0.0
+                            )
+                            if (not np.isfinite(prev_w_ref)) or prev_w_ref <= 1e-12:
+                                break
+                            entry_ref_i -= 1
+                        if 0 <= int(entry_ref_i) < len(dates):
+                            entry_ref_day = dates[int(entry_ref_i)]
                     try:
-                        p0 = float(close_qfq.loc[seg_dates[0], c])
+                        p0 = float(close_qfq.loc[entry_ref_day, c])
                     except (KeyError, TypeError, ValueError):
                         continue
                     if (not np.isfinite(p0)) or p0 <= 0.0:
                         continue
+                    cur_px = p0
+                    try:
+                        cur_px = float(close_qfq.loc[seg_dates[0], c])
+                    except (KeyError, TypeError, ValueError):
+                        cur_px = p0
+                    if (not np.isfinite(cur_px)) or cur_px <= 0.0:
+                        cur_px = p0
                     wt0 = (
                         float(seg_w_base.loc[seg_dates[0], c])
                         if (
@@ -4787,10 +4898,10 @@ def backtest_rotation(
                     if (not np.isfinite(wt0)) or wt0 <= 1e-12:
                         continue
                     entry_px[c] = float(p0)
-                    prev_close[c] = float(p0)
+                    prev_close[c] = float(cur_px)
                     if stop_scheme == "atr":
                         try:
-                            a0 = float(atr.loc[seg_dates[0], c])
+                            a0 = float(atr.loc[entry_ref_day, c])
                         except (KeyError, TypeError, ValueError):
                             continue
                         if not (np.isfinite(a0) and a0 > 0.0):
@@ -4798,6 +4909,9 @@ def backtest_rotation(
                         entry_atr[c] = float(a0)
                         stop[c] = float(p0 - float(atr_n) * float(a0))
                     else:
+                        # Initialize with entry-day notional risk budget; for equity-budget
+                        # stops we will re-evaluate the stop distance each day using the
+                        # current effective position weight.
                         risk_abs = float(equity_at_entry) * float(equity_stop_risk_pct)
                         notional = float(equity_at_entry) * float(wt0)
                         if notional <= 1e-12:
@@ -4866,8 +4980,38 @@ def backtest_rotation(
                         triggered = False
                         trigger_px = px_close
                         exec_time_now = str(atr_stop_execution_time or "close")
+                        eq_holding_ret: float | None = None
+                        eq_loss_contrib: float | None = None
+                        eq_dist_pct: float | None = None
                         if stop_scheme == "equity_budget":
                             exec_time_now = "close"
+                            # Equity-budget stop is based on account-level risk contribution:
+                            # trigger when current weight * holding return breaches budget.
+                            risk_abs = float(equity_at_entry) * float(
+                                equity_stop_risk_pct
+                            )
+                            notional_now = float(equity_at_entry) * float(wt_now)
+                            if notional_now <= 1e-12:
+                                continue
+                            dist_pct_now = float(
+                                risk_abs / max(notional_now, 1e-12)
+                            )
+                            dist_pct_now = float(
+                                min(max(dist_pct_now, 0.0), 0.9999)
+                            )
+                            entry_price_now = float(entry_px.get(c, float("nan")))
+                            if (not np.isfinite(entry_price_now)) or entry_price_now <= 0.0:
+                                continue
+                            stop_px = float(entry_price_now * (1.0 - dist_pct_now))
+                            stop[c] = float(stop_px)
+                            eq_dist_pct = float(dist_pct_now)
+                            eq_holding_ret = float(px_close / entry_price_now - 1.0)
+                            eq_loss_contrib = float(wt_now) * float(eq_holding_ret)
+                            triggered = bool(
+                                float(eq_loss_contrib)
+                                <= -float(equity_stop_risk_pct)
+                            )
+                            trigger_px = float(px_close)
                         if exec_time_now == "open":
                             triggered = bool(px_open < stop_px)
                             trigger_px = float(px_open)
@@ -4898,6 +5042,22 @@ def backtest_rotation(
                             "trigger_price": float(trigger_px),
                             "stop_price": float(stop_px),
                         }
+                        if stop_scheme == "equity_budget":
+                            ev["weight_at_trigger"] = float(wt_now)
+                            ev["holding_return_at_trigger"] = (
+                                float(eq_holding_ret)
+                                if eq_holding_ret is not None
+                                else None
+                            )
+                            ev["equity_loss_pct_at_trigger"] = (
+                                float(eq_loss_contrib)
+                                if eq_loss_contrib is not None
+                                else None
+                            )
+                            ev["equity_stop_risk_pct"] = float(equity_stop_risk_pct)
+                            ev["stop_distance_from_entry"] = (
+                                float(eq_dist_pct) if eq_dist_pct is not None else None
+                            )
                         atr_events.append(ev)
                         atr_events_by_code[str(c)].append(ev)
                         stopped_codes.add(str(c))
@@ -5939,12 +6099,6 @@ def backtest_rotation(
     ).astype(float)
     decomp_net = (decomp_gross - decomp_cost).astype(float)
     asset_nav_exec = (1.0 + ret_exec[codes].astype(float).fillna(0.0)).cumprod()
-    current_holdings = _build_current_holdings_snapshot(
-        w,
-        codes=codes,
-        asset_nav_exec=asset_nav_exec,
-        eps=1e-12,
-    )
     if not asset_nav_exec.empty:
         asset_nav_exec.iloc[0] = 1.0
     trade_pack = _trade_returns_from_weight_df(
@@ -5955,6 +6109,23 @@ def backtest_rotation(
         exec_price=px_exec_slip_all.reindex(index=dates, columns=codes).ffill(),
         turnover_override=turnover_by_asset.reindex(index=dates, columns=codes),
         dates=dates,
+    )
+    open_trade_by_code: dict[str, dict[str, Any]] = {}
+    for c, one_trades in (trade_pack.get("trades_by_code") or {}).items():
+        rows = list(one_trades or [])
+        if not rows:
+            continue
+        for tr in reversed(rows):
+            if not bool((tr or {}).get("closed", True)):
+                open_trade_by_code[str(c)] = dict(tr or {})
+                break
+    current_holdings = _build_current_holdings_snapshot(
+        w,
+        codes=codes,
+        asset_nav_exec=asset_nav_exec,
+        asset_price_exec=px_exec_slip_all.reindex(index=w.index, columns=codes).ffill(),
+        open_trade_by_code=open_trade_by_code,
+        eps=1e-12,
     )
     sample_days = int(len(port_ret_net))
     complete_trade_count = int(len(trade_pack.get("returns", [])))
@@ -6874,6 +7045,7 @@ def backtest_rotation(
         "period_details": period_stats,
         "holdings": holdings["periods"],
         "current_holdings": current_holdings,
+        "historical_trades": list(trade_pack.get("trades") or []),
         "holding_streaks": holding_streaks,
         "daily_exit_events": daily_exit_events,
         "r_take_profit_events": r_take_profit_events_all,
