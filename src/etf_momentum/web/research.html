@@ -3046,6 +3046,29 @@
           <div class="muted" style="margin-top: 6px">
             字段：出入场日期、出入场价格、持有收益、总权益收益（UTF-8）。
           </div>
+          <div class="row no-print" style="gap: 8px; margin-top: 6px">
+            <select id="rotHistoricalTradesSortKey" style="min-width: 160px">
+              <option value="exit_date" selected>出场日期</option>
+              <option value="entry_date">入场日期</option>
+              <option value="code">标的代码</option>
+              <option value="trade_action">出场动作</option>
+              <option value="exit_reason">出场原因</option>
+              <option value="reduce_ratio">降仓比例</option>
+              <option value="entry_price">入场价</option>
+              <option value="exit_price">出场价</option>
+              <option value="holding_days">持仓时长</option>
+              <option value="closed">是否平仓</option>
+              <option value="holding_return">持有收益</option>
+              <option value="total_equity_return">总权益收益</option>
+            </select>
+            <select id="rotHistoricalTradesSortDir" style="min-width: 120px">
+              <option value="desc" selected>递减</option>
+              <option value="asc">递增</option>
+            </select>
+            <button id="rotHistoricalTradesPrev">上一页</button>
+            <button id="rotHistoricalTradesNext">下一页</button>
+            <span class="muted" id="rotHistoricalTradesPage"></span>
+          </div>
           <table id="rotHistoricalTradesTable" style="margin-top: 8px"></table>
         </div>
       </div>
@@ -6250,6 +6273,42 @@
             ></div>
           </details>
         </div>
+      </div>
+      <div class="panel" style="margin-top: 10px">
+        <div
+          class="row no-print"
+          style="justify-content: space-between; align-items: center"
+        >
+          <h3 style="margin: 0">历史逐笔交易明细（趋势）</h3>
+          <button id="trendExportHistoricalTradesCsv">导出CSV</button>
+        </div>
+        <div class="muted" style="margin-top: 6px">
+          字段：出入场日期、出入场价格、持有收益、总权益收益、出场动作/原因、降仓比例（UTF-8）。
+        </div>
+        <div class="row no-print" style="gap: 8px; margin-top: 6px">
+          <select id="trendHistoricalTradesSortKey" style="min-width: 160px">
+            <option value="exit_date" selected>出场日期</option>
+            <option value="entry_date">入场日期</option>
+            <option value="code">标的代码</option>
+            <option value="trade_action">出场动作</option>
+            <option value="exit_reason">出场原因</option>
+            <option value="reduce_ratio">降仓比例</option>
+            <option value="entry_price">入场价</option>
+            <option value="exit_price">出场价</option>
+            <option value="holding_days">持仓时长</option>
+            <option value="closed">是否平仓</option>
+            <option value="holding_return">持有收益</option>
+            <option value="total_equity_return">总权益收益</option>
+          </select>
+          <select id="trendHistoricalTradesSortDir" style="min-width: 120px">
+            <option value="desc" selected>递减</option>
+            <option value="asc">递增</option>
+          </select>
+          <button id="trendHistoricalTradesPrev">上一页</button>
+          <button id="trendHistoricalTradesNext">下一页</button>
+          <span class="muted" id="trendHistoricalTradesPage"></span>
+        </div>
+        <table id="trendHistoricalTradesTable" style="margin-top: 8px"></table>
       </div>
       <div class="row" style="gap: 8px; margin: 8px 0">
         <button id="trendGroupFirst">首页</button>
@@ -30852,8 +30911,47 @@
       }
 
       const rotState = { page: 1, rows: [] };
+      const rotHistoricalTradesState = { page: 1, rows: [] };
+      const trendHistoricalTradesState = { page: 1, rows: [] };
       const rotGroupExplainState = { page: 1, rows: [] };
       const trendGroupExplainState = { page: 1, rows: [] };
+      function _sortedRotationHistoricalTradesRows(rows, key, dir) {
+        const xs = Array.isArray(rows) ? rows.slice() : [];
+        const sortKey = key || "exit_date";
+        const sortDir = dir === "asc" ? "asc" : "desc";
+        const isMissing = (v) =>
+          v == null || (typeof v === "string" && String(v).trim() === "");
+        const asValue = (x) => {
+          if (sortKey === "entry_date" || sortKey === "exit_date") {
+            const v = x && x[sortKey] ? String(x[sortKey]) : "";
+            return v;
+          }
+          if (
+            sortKey === "code" ||
+            sortKey === "trade_action" ||
+            sortKey === "exit_reason"
+          ) {
+            return String((x && x[sortKey]) || "");
+          }
+          if (sortKey === "closed") return x && x.closed ? 1 : 0;
+          return Number(x && x[sortKey]);
+        };
+        xs.sort((a, b) => {
+          const av = asValue(a);
+          const bv = asValue(b);
+          const aMiss =
+            isMissing(av) || (typeof av === "number" && !isFinite(av));
+          const bMiss =
+            isMissing(bv) || (typeof bv === "number" && !isFinite(bv));
+          if (aMiss && bMiss) return 0;
+          if (aMiss) return 1;
+          if (bMiss) return -1;
+          if (av < bv) return sortDir === "asc" ? -1 : 1;
+          if (av > bv) return sortDir === "asc" ? 1 : -1;
+          return 0;
+        });
+        return xs;
+      }
       function _sortedRotRows(rows, key, dir) {
         const arr = (rows || []).slice();
         const bk =
@@ -34626,6 +34724,13 @@
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         window.__lastTrendResult = data;
+        window.__lastTrendHistoricalTrades =
+          _buildTrendHistoricalTradesFromResult(data);
+        try {
+          _renderTrendHistoricalTrades(window.__lastTrendHistoricalTrades);
+        } catch (e) {
+          console.error("render trend historical trades failed:", e);
+        }
         renderTrendCapacityPanel(data);
         const nav = data && data.nav && data.nav.series ? data.nav.series : {};
         const dates = data && data.nav && data.nav.dates ? data.nav.dates : [];
@@ -37127,19 +37232,56 @@
       }
 
       function _renderRotationHistoricalTrades(rows) {
-        const xs = Array.isArray(rows) ? rows : [];
+        if (Array.isArray(rows)) {
+          rotHistoricalTradesState.rows = rows.slice();
+          rotHistoricalTradesState.page = 1;
+        }
+        const sortKeyEl = $("rotHistoricalTradesSortKey");
+        const sortDirEl = $("rotHistoricalTradesSortDir");
+        const sortKey =
+          sortKeyEl && sortKeyEl.value ? sortKeyEl.value : "exit_date";
+        const sortDir = sortDirEl && sortDirEl.value ? sortDirEl.value : "desc";
+        const xs = _sortedRotationHistoricalTradesRows(
+          rotHistoricalTradesState.rows,
+          sortKey,
+          sortDir,
+        );
         const el = $("rotHistoricalTradesTable");
+        const pageEl = $("rotHistoricalTradesPage");
+        const prevBtn = $("rotHistoricalTradesPrev");
+        const nextBtn = $("rotHistoricalTradesNext");
         if (!el) return;
+        const pageSize = 20;
+        const total = xs.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        rotHistoricalTradesState.page = Math.min(
+          Math.max(1, rotHistoricalTradesState.page),
+          totalPages,
+        );
+        const startIdx = (rotHistoricalTradesState.page - 1) * pageSize;
+        const pageRows = xs.slice(startIdx, startIdx + pageSize);
+        const fmtAction = (x) => {
+          const k = String((x && x.trade_action) || "");
+          if (k === "partial_reduce") return "减仓";
+          if (k === "full_exit") return "平仓";
+          if (k === "open_holding") return "持有中";
+          return "-";
+        };
         el.innerHTML =
-          `<tr><th>标的代码</th><th>入场日期</th><th>入场价</th><th>出场日期</th><th>出场价</th><th>持仓时长(交易日)</th><th>是否平仓</th><th>持有收益</th><th>总权益收益</th></tr>` +
-          (xs.length
-            ? xs
+          `<tr><th>标的代码</th><th>入场日期</th><th>入场价</th><th>出场日期</th><th>出场价</th><th>持仓时长(交易日)</th><th>出场动作</th><th>出场原因</th><th>降仓比例</th><th>是否平仓</th><th>持有收益</th><th>总权益收益</th></tr>` +
+          (pageRows.length
+            ? pageRows
                 .map(
                   (x) =>
-                    `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${esc(x.entry_date || "-")}</td><td>${x.entry_price == null ? "-" : fmtNum(Number(x.entry_price))}</td><td>${esc(x.exit_date || "-")}</td><td>${x.exit_price == null ? "-" : fmtNum(Number(x.exit_price))}</td><td>${x.holding_days ?? "-"}</td><td>${x.closed ? "是" : "否"}</td><td>${x.holding_return == null ? "-" : fmtPct(x.holding_return)}</td><td>${x.total_equity_return == null ? "-" : fmtPct(x.total_equity_return)}</td></tr>`,
+                    `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${esc(x.entry_date || "-")}</td><td>${x.entry_price == null ? "-" : fmtNum(Number(x.entry_price))}</td><td>${esc(x.exit_date || "-")}</td><td>${x.exit_price == null ? "-" : fmtNum(Number(x.exit_price))}</td><td>${x.holding_days ?? "-"}</td><td>${fmtAction(x)}</td><td>${esc(x.exit_reason || "-")}</td><td>${x.reduce_ratio == null ? "-" : fmtPct(x.reduce_ratio)}</td><td>${x.closed ? "是" : "否"}</td><td>${x.holding_return == null ? "-" : fmtPct(x.holding_return)}</td><td>${x.total_equity_return == null ? "-" : fmtPct(x.total_equity_return)}</td></tr>`,
                 )
                 .join("")
-            : `<tr><td colspan="9" class="muted">无历史交易明细</td></tr>`);
+            : `<tr><td colspan="12" class="muted">无历史交易明细</td></tr>`);
+        if (pageEl)
+          pageEl.textContent = `${rotHistoricalTradesState.page}/${totalPages} · 共${total}条 · 每页20条`;
+        if (prevBtn) prevBtn.disabled = rotHistoricalTradesState.page <= 1;
+        if (nextBtn)
+          nextBtn.disabled = rotHistoricalTradesState.page >= totalPages;
       }
 
       function _exportRotationHistoricalTradesCsv() {
@@ -37158,6 +37300,9 @@
           "exit_date",
           "exit_price",
           "holding_days",
+          "trade_action",
+          "exit_reason",
+          "reduce_ratio_pct",
           "closed",
           "holding_return_pct",
           "total_equity_return_pct",
@@ -37172,6 +37317,9 @@
             r.exit_date || "",
             r.exit_price == null ? "" : Number(r.exit_price),
             r.holding_days == null ? "" : Number(r.holding_days),
+            r.trade_action || "",
+            r.exit_reason || "",
+            r.reduce_ratio == null ? "" : Number(r.reduce_ratio) * 100.0,
             r.closed ? "true" : "false",
             r.holding_return == null ? "" : Number(r.holding_return) * 100.0,
             r.total_equity_return == null
@@ -37187,6 +37335,245 @@
         const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
         a.href = url;
         a.download = `rotation_historical_trades_${ts}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      function _collectTrendOverlayEvents(data) {
+        const out = [];
+        const rc = (data && data.risk_controls) || {};
+        const overlays = [
+          { key: "atr_stop", reason: "ATR止损", priority: 0 },
+          { key: "ma_trailing_stop", reason: "MA拖尾止损", priority: 1 },
+          { key: "er_exit_filter", reason: "ER出场", priority: 2 },
+          { key: "r_take_profit", reason: "R回落止盈", priority: 3 },
+          { key: "r_profit_scaleout", reason: "R乘数止盈", priority: 4 },
+          { key: "bias_v_take_profit", reason: "BIAS-V止盈", priority: 5 },
+        ];
+        const toNum = (v, d = NaN) => {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : d;
+        };
+        for (const ov of overlays) {
+          const root = (rc && rc[ov.key]) || {};
+          const pushOne = (raw, codeHint) => {
+            const e = raw && typeof raw === "object" ? raw : null;
+            if (!e) return;
+            const code = String(e.code || codeHint || "").trim();
+            const executionDate = String(
+              e.execution_date || e.date || "",
+            ).trim();
+            if (!code || !executionDate) return;
+            const reduce = toNum(e.reduce_fraction, 1.0);
+            if (!Number.isFinite(reduce) || reduce <= 0) return;
+            const reduceClip = Math.max(0, Math.min(1, reduce));
+            out.push({
+              code,
+              execution_date: executionDate,
+              trigger_date: String(e.trigger_date || "").trim() || null,
+              decision_date:
+                String(e.decision_date || e.trigger_date || "").trim() || null,
+              exit_reason: ov.reason,
+              trade_action:
+                reduceClip < 1.0 - 1e-12 ? "partial_reduce" : "full_exit",
+              reduce_ratio: reduceClip,
+              priority: Number(ov.priority),
+              fill_price: Number.isFinite(toNum(e.fill_price))
+                ? Number(e.fill_price)
+                : null,
+            });
+          };
+          const rootEvents = Array.isArray(root.trigger_events)
+            ? root.trigger_events
+            : [];
+          for (const e of rootEvents) {
+            pushOne(e, ((data || {}).meta || {}).code || "");
+          }
+          const byAsset =
+            root.by_asset && typeof root.by_asset === "object"
+              ? root.by_asset
+              : {};
+          for (const [code, stats] of Object.entries(byAsset)) {
+            const evs = Array.isArray((stats || {}).trigger_events)
+              ? (stats || {}).trigger_events
+              : [];
+            for (const e of evs) pushOne(e, code);
+          }
+        }
+        return out;
+      }
+
+      function _buildTrendHistoricalTradesFromResult(data) {
+        const baseRows = Array.isArray(data && data.historical_trades)
+          ? data.historical_trades.slice()
+          : Array.isArray(
+                data && data.trade_statistics && data.trade_statistics.trades,
+              )
+            ? data.trade_statistics.trades.slice()
+            : [];
+        const overlays = _collectTrendOverlayEvents(data);
+        const byExitKey = new Map();
+        const partialRows = [];
+        for (const ov of overlays) {
+          const k = `${String(ov.code || "").trim()}::${String(ov.execution_date || "").trim()}`;
+          if (!k || k === "::") continue;
+          if (ov.trade_action === "partial_reduce") {
+            partialRows.push({
+              code: ov.code,
+              entry_date: null,
+              entry_price: null,
+              exit_date: ov.execution_date,
+              exit_price: ov.fill_price,
+              holding_days: null,
+              closed: false,
+              holding_return: null,
+              total_equity_return: null,
+              trade_action: "partial_reduce",
+              exit_reason: ov.exit_reason,
+              reduce_ratio: ov.reduce_ratio,
+              trigger_date: ov.trigger_date,
+              decision_date: ov.decision_date,
+            });
+            continue;
+          }
+          const old = byExitKey.get(k);
+          if (!old || Number(ov.priority) < Number(old.priority)) {
+            byExitKey.set(k, ov);
+          }
+        }
+        const enriched = baseRows.map((r) => {
+          const one = r && typeof r === "object" ? { ...r } : {};
+          const key = `${String(one.code || "").trim()}::${String(one.exit_date || "").trim()}`;
+          const ov = byExitKey.get(key);
+          if (ov) {
+            one.trade_action = "full_exit";
+            one.exit_reason = ov.exit_reason;
+            one.reduce_ratio = 1.0;
+            one.trigger_date = one.trigger_date || ov.trigger_date || null;
+            one.decision_date = one.decision_date || ov.decision_date || null;
+          } else {
+            if (one.closed === true) {
+              one.trade_action = one.trade_action || "full_exit";
+              one.reduce_ratio =
+                one.reduce_ratio == null ? 1.0 : Number(one.reduce_ratio);
+            } else {
+              one.trade_action = one.trade_action || "open_holding";
+              one.reduce_ratio =
+                one.reduce_ratio == null ? null : Number(one.reduce_ratio);
+            }
+            one.exit_reason = one.exit_reason || null;
+          }
+          return one;
+        });
+        return enriched.concat(partialRows);
+      }
+
+      function _renderTrendHistoricalTrades(rows) {
+        if (Array.isArray(rows)) {
+          trendHistoricalTradesState.rows = rows.slice();
+          trendHistoricalTradesState.page = 1;
+        }
+        const sortKeyEl = $("trendHistoricalTradesSortKey");
+        const sortDirEl = $("trendHistoricalTradesSortDir");
+        const sortKey =
+          sortKeyEl && sortKeyEl.value ? sortKeyEl.value : "exit_date";
+        const sortDir = sortDirEl && sortDirEl.value ? sortDirEl.value : "desc";
+        const xs = _sortedRotationHistoricalTradesRows(
+          trendHistoricalTradesState.rows,
+          sortKey,
+          sortDir,
+        );
+        const el = $("trendHistoricalTradesTable");
+        const pageEl = $("trendHistoricalTradesPage");
+        const prevBtn = $("trendHistoricalTradesPrev");
+        const nextBtn = $("trendHistoricalTradesNext");
+        if (!el) return;
+        const pageSize = 20;
+        const total = xs.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        trendHistoricalTradesState.page = Math.min(
+          Math.max(1, trendHistoricalTradesState.page),
+          totalPages,
+        );
+        const startIdx = (trendHistoricalTradesState.page - 1) * pageSize;
+        const pageRows = xs.slice(startIdx, startIdx + pageSize);
+        const fmtAction = (x) => {
+          const k = String((x && x.trade_action) || "");
+          if (k === "partial_reduce") return "减仓";
+          if (k === "full_exit") return "平仓";
+          if (k === "open_holding") return "持有中";
+          return "-";
+        };
+        el.innerHTML =
+          `<tr><th>标的代码</th><th>入场日期</th><th>入场价</th><th>出场日期</th><th>出场价</th><th>持仓时长(交易日)</th><th>出场动作</th><th>出场原因</th><th>降仓比例</th><th>是否平仓</th><th>持有收益</th><th>总权益收益</th></tr>` +
+          (pageRows.length
+            ? pageRows
+                .map(
+                  (x) =>
+                    `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${esc(x.entry_date || "-")}</td><td>${x.entry_price == null ? "-" : fmtNum(Number(x.entry_price))}</td><td>${esc(x.exit_date || "-")}</td><td>${x.exit_price == null ? "-" : fmtNum(Number(x.exit_price))}</td><td>${x.holding_days ?? "-"}</td><td>${fmtAction(x)}</td><td>${esc(x.exit_reason || "-")}</td><td>${x.reduce_ratio == null ? "-" : fmtPct(x.reduce_ratio)}</td><td>${x.closed ? "是" : "否"}</td><td>${x.holding_return == null ? "-" : fmtPct(x.holding_return)}</td><td>${x.total_equity_return == null ? "-" : fmtPct(x.total_equity_return)}</td></tr>`,
+                )
+                .join("")
+            : `<tr><td colspan="12" class="muted">无历史交易明细</td></tr>`);
+        if (pageEl)
+          pageEl.textContent = `${trendHistoricalTradesState.page}/${totalPages} · 共${total}条 · 每页20条`;
+        if (prevBtn) prevBtn.disabled = trendHistoricalTradesState.page <= 1;
+        if (nextBtn)
+          nextBtn.disabled = trendHistoricalTradesState.page >= totalPages;
+      }
+
+      function _exportTrendHistoricalTradesCsv() {
+        const rows = Array.isArray(window.__lastTrendHistoricalTrades)
+          ? window.__lastTrendHistoricalTrades
+          : [];
+        if (!rows.length) {
+          setMsg("暂无历史交易可导出");
+          return;
+        }
+        const headers = [
+          "code",
+          "name",
+          "entry_date",
+          "entry_price",
+          "exit_date",
+          "exit_price",
+          "holding_days",
+          "trade_action",
+          "exit_reason",
+          "reduce_ratio_pct",
+          "closed",
+          "holding_return_pct",
+          "total_equity_return_pct",
+        ];
+        const lines = [headers.join(",")];
+        for (const r of rows) {
+          const one = [
+            r.code || "",
+            codeLabel(r.code || ""),
+            r.entry_date || "",
+            r.entry_price == null ? "" : Number(r.entry_price),
+            r.exit_date || "",
+            r.exit_price == null ? "" : Number(r.exit_price),
+            r.holding_days == null ? "" : Number(r.holding_days),
+            r.trade_action || "",
+            r.exit_reason || "",
+            r.reduce_ratio == null ? "" : Number(r.reduce_ratio) * 100.0,
+            r.closed ? "true" : "false",
+            r.holding_return == null ? "" : Number(r.holding_return) * 100.0,
+            r.total_equity_return == null
+              ? ""
+              : Number(r.total_equity_return) * 100.0,
+          ].map(_rotationCsvEscape);
+          lines.push(one.join(","));
+        }
+        const csv = "\uFEFF" + lines.join("\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const a = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
+        a.href = url;
+        a.download = `trend_historical_trades_${ts}.csv`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -40128,6 +40515,51 @@
           "click",
           _exportRotationHistoricalTradesCsv,
         );
+      if ($("rotHistoricalTradesPrev"))
+        $("rotHistoricalTradesPrev").addEventListener("click", () => {
+          rotHistoricalTradesState.page -= 1;
+          _renderRotationHistoricalTrades();
+        });
+      if ($("rotHistoricalTradesNext"))
+        $("rotHistoricalTradesNext").addEventListener("click", () => {
+          rotHistoricalTradesState.page += 1;
+          _renderRotationHistoricalTrades();
+        });
+      if ($("rotHistoricalTradesSortKey"))
+        $("rotHistoricalTradesSortKey").addEventListener("change", () => {
+          rotHistoricalTradesState.page = 1;
+          _renderRotationHistoricalTrades();
+        });
+      if ($("rotHistoricalTradesSortDir"))
+        $("rotHistoricalTradesSortDir").addEventListener("change", () => {
+          rotHistoricalTradesState.page = 1;
+          _renderRotationHistoricalTrades();
+        });
+      if ($("trendExportHistoricalTradesCsv"))
+        $("trendExportHistoricalTradesCsv").addEventListener(
+          "click",
+          _exportTrendHistoricalTradesCsv,
+        );
+      if ($("trendHistoricalTradesPrev"))
+        $("trendHistoricalTradesPrev").addEventListener("click", () => {
+          trendHistoricalTradesState.page -= 1;
+          _renderTrendHistoricalTrades();
+        });
+      if ($("trendHistoricalTradesNext"))
+        $("trendHistoricalTradesNext").addEventListener("click", () => {
+          trendHistoricalTradesState.page += 1;
+          _renderTrendHistoricalTrades();
+        });
+      if ($("trendHistoricalTradesSortKey"))
+        $("trendHistoricalTradesSortKey").addEventListener("change", () => {
+          trendHistoricalTradesState.page = 1;
+          _renderTrendHistoricalTrades();
+        });
+      if ($("trendHistoricalTradesSortDir"))
+        $("trendHistoricalTradesSortDir").addEventListener("change", () => {
+          trendHistoricalTradesState.page = 1;
+          _renderTrendHistoricalTrades();
+        });
       if ($("runTrendResearch"))
         $("runTrendResearch").addEventListener("click", runTrendResearch);
       if ($("exportTrendParamsJson"))

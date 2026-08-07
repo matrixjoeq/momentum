@@ -6117,6 +6117,172 @@ def backtest_rotation(
             if not bool((tr or {}).get("closed", True)):
                 open_trade_by_code[str(c)] = dict(tr or {})
                 break
+
+    def _rotation_exit_reason_from_conditions(hit_conditions: Any) -> str:
+        labels = {
+            "momentum_rule": "动量退出",
+            "trend_rule": "趋势退出",
+            "bias_rule": "乖离率退出",
+        }
+        xs = [str(x) for x in (hit_conditions or []) if str(x).strip()]
+        if not xs:
+            return ""
+        return "+".join(labels.get(x, x) for x in xs)
+
+    def _safe_float(v: Any, default: float = 0.0) -> float:
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            return float(default)
+        return float(fv) if np.isfinite(fv) else float(default)
+
+    stop_events_all: list[dict[str, Any]] = []
+    for p in list(holdings.get("periods") or []):
+        atr_meta = (p or {}).get("atr_stop") or {}
+        for ev in list((atr_meta or {}).get("events") or []):
+            if _safe_float((ev or {}).get("reduce_fraction"), 0.0) <= 0.0:
+                continue
+            stop_events_all.append(dict(ev or {}))
+
+    exit_meta_by_trade_key: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
+
+    def _register_exit_meta(
+        code: str,
+        exit_date: str,
+        *,
+        priority: int,
+        meta: dict[str, Any],
+    ) -> None:
+        c = str(code or "").strip()
+        d = str(exit_date or "").strip()
+        if (not c) or (not d):
+            return
+        key = (c, d)
+        old = exit_meta_by_trade_key.get(key)
+        if old is None or int(priority) < int(old[0]):
+            exit_meta_by_trade_key[key] = (int(priority), dict(meta or {}))
+
+    for ev in stop_events_all:
+        code = str((ev or {}).get("code") or "")
+        execution_date = str((ev or {}).get("execution_date") or "")
+        scheme = str((ev or {}).get("scheme") or "atr")
+        if scheme == "equity_budget":
+            reason_txt = "总权益止损"
+        elif scheme == "atr":
+            reason_txt = "ATR止损"
+        else:
+            reason_txt = f"止损({scheme})"
+        _register_exit_meta(
+            code,
+            execution_date,
+            priority=0,
+            meta={
+                "trade_action": "full_exit",
+                "exit_reason": reason_txt,
+                "exit_source": "stop",
+                "reduce_ratio": 1.0,
+                "trigger_date": (ev or {}).get("trigger_date"),
+                "decision_date": (ev or {}).get("trigger_date"),
+            },
+        )
+
+    for ev in list(r_take_profit_events_all or []):
+        code = str((ev or {}).get("code") or "")
+        execution_date = str((ev or {}).get("execution_date") or "")
+        reduce_frac = _safe_float((ev or {}).get("reduce_fraction"), 0.0)
+        if reduce_frac <= 0.0:
+            continue
+        _register_exit_meta(
+            code,
+            execution_date,
+            priority=1,
+            meta={
+                "trade_action": (
+                    "partial_reduce"
+                    if float(reduce_frac) < 1.0 - 1e-12
+                    else "full_exit"
+                ),
+                "exit_reason": "R乘数止盈",
+                "exit_source": "r_take_profit",
+                "reduce_ratio": float(np.clip(reduce_frac, 0.0, 1.0)),
+                "trigger_date": (ev or {}).get("trigger_date"),
+                "decision_date": (ev or {}).get("trigger_date"),
+            },
+        )
+
+    historical_trade_partial_rows: list[dict[str, Any]] = []
+    for ev in list(daily_exit_events or []):
+        code = str((ev or {}).get("code") or "")
+        execution_date = str((ev or {}).get("execution_date") or "")
+        action = str((ev or {}).get("action") or "")
+        reason_txt = _rotation_exit_reason_from_conditions(
+            (ev or {}).get("hit_conditions")
+        )
+        if action == "partial_reduce":
+            from_weight = _safe_float((ev or {}).get("from_weight"), 0.0)
+            to_weight = _safe_float((ev or {}).get("to_weight"), 0.0)
+            reduce_ratio = (
+                float(np.clip(1.0 - float(to_weight) / float(from_weight), 0.0, 1.0))
+                if from_weight > 1e-12
+                else None
+            )
+            historical_trade_partial_rows.append(
+                {
+                    "code": code,
+                    "entry_date": None,
+                    "exit_date": execution_date or None,
+                    "entry_price": None,
+                    "exit_price": None,
+                    "holding_return": None,
+                    "holding_days": None,
+                    "entry_weight": from_weight if from_weight > 0.0 else None,
+                    "return": None,
+                    "total_equity_return": None,
+                    "closed": False,
+                    "trade_action": "partial_reduce",
+                    "exit_reason": reason_txt or "信号减仓",
+                    "exit_source": "daily_exit",
+                    "reduce_ratio": reduce_ratio,
+                    "decision_date": (ev or {}).get("decision_date"),
+                    "trigger_date": (ev or {}).get("decision_date"),
+                }
+            )
+            continue
+        if action == "full_exit":
+            _register_exit_meta(
+                code,
+                execution_date,
+                priority=2,
+                meta={
+                    "trade_action": "full_exit",
+                    "exit_reason": reason_txt or "信号平仓",
+                    "exit_source": "daily_exit",
+                    "reduce_ratio": 1.0,
+                    "trigger_date": (ev or {}).get("decision_date"),
+                    "decision_date": (ev or {}).get("decision_date"),
+                },
+            )
+
+    historical_trades: list[dict[str, Any]] = []
+    for tr in list(trade_pack.get("trades") or []):
+        row = dict(tr or {})
+        code = str(row.get("code") or "")
+        exit_date = str(row.get("exit_date") or "")
+        meta = (exit_meta_by_trade_key.get((code, exit_date)) or (None, {}))[1]
+        if meta:
+            row.update(dict(meta))
+        else:
+            if bool(row.get("closed", True)):
+                row["trade_action"] = "full_exit"
+                row["reduce_ratio"] = 1.0
+            else:
+                row["trade_action"] = "open_holding"
+                row["reduce_ratio"] = None
+            row["exit_reason"] = row.get("exit_reason") or None
+            row["exit_source"] = row.get("exit_source") or None
+        historical_trades.append(row)
+    historical_trades.extend(historical_trade_partial_rows)
+
     current_holdings = _build_current_holdings_snapshot(
         w,
         codes=codes,
@@ -7043,9 +7209,10 @@ def backtest_rotation(
         "period_details": period_stats,
         "holdings": holdings["periods"],
         "current_holdings": current_holdings,
-        "historical_trades": list(trade_pack.get("trades") or []),
+        "historical_trades": historical_trades,
         "holding_streaks": holding_streaks,
         "daily_exit_events": daily_exit_events,
+        "stop_events": stop_events_all,
         "r_take_profit_events": r_take_profit_events_all,
         "corporate_actions": corporate_actions,
     }

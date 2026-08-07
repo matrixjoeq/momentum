@@ -1173,6 +1173,15 @@ def test_rotation_bias_exit_rules_stack_partial_reduction(session_factory):
         if fw > 1e-12:
             ratios.append(tw / fw)
     assert any(r <= 0.125 + 1e-12 for r in ratios)
+    hist = list(out.get("historical_trades") or [])
+    partial_rows = [
+        x for x in hist if str((x or {}).get("trade_action") or "") == "partial_reduce"
+    ]
+    assert partial_rows
+    assert any(
+        "乖离率退出" in str((x or {}).get("exit_reason") or "") for x in partial_rows
+    )
+    assert any(float((x or {}).get("reduce_ratio") or 0.0) > 0.0 for x in partial_rows)
 
 
 def test_rotation_topk_larger_than_pool_still_runs(session_factory):
@@ -1848,6 +1857,14 @@ def test_rotation_equity_budget_stop_uses_current_weight_contribution(session_fa
         )
     # EWC_A should not be stopped by the mild -2% move after its weight is reduced.
     assert not any(str((e or {}).get("code") or "") == "EWC_A" for e in effective)
+    hist = list(out.get("historical_trades") or [])
+    effective_codes = {str((e or {}).get("code") or "") for e in effective}
+    if effective_codes:
+        assert any(
+            str((x or {}).get("code") or "") in effective_codes
+            and "止损" in str((x or {}).get("exit_reason") or "")
+            for x in hist
+        )
 
 
 def test_rotation_equity_budget_stop_keeps_true_entry_across_rebalance_segments(
