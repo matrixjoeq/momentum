@@ -7365,7 +7365,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 prev_active_n = int(len(prev_rb_active_set))
                 cur_active_n = int(len(active_set))
                 if prev_active_n > 0 and cur_active_n > prev_active_n:
-                    event_expansion_scale = float(float(prev_active_n) / float(cur_active_n))
+                    event_expansion_scale = float(
+                        float(prev_active_n) / float(cur_active_n)
+                    )
                     for c in active_codes:
                         if float(w_row.loc[c]) > eps:
                             w_row.loc[c] = float(w_row.loc[c]) * float(
