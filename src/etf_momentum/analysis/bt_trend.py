@@ -7279,11 +7279,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                     else float("nan")
                 )
                 if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
-                    active_n = max(1, int(len(active_set)))
-                    per_asset_budget = float(risk_budget_pct)
-                    if str(atr_stop_mode_v) != "none":
-                        per_asset_budget = float(risk_budget_pct) / float(active_n)
-                    return float(per_asset_budget) * float(px) / float(a)
+                    return float(risk_budget_pct) * float(px) / float(a)
                 return float("nan")
 
             for c in wdf.columns:
@@ -7359,18 +7355,22 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 continue
                 prev_rb_overcap_state = bool(overcap_now)
 
+            event_expansion_scale = 1.0
             if (
                 has_constituent_event
                 and str(atr_stop_mode_v) != "none"
                 and (not bool(vol_regime_risk_mgmt_enabled))
                 and (not bool(vol_periodic_risk_mgmt_enabled))
             ):
-                # Keep stop-risk anchored to strategy-level budget when
-                # constituent count changes under stop-managed risk-budget mode.
-                for c in active_codes:
-                    target_now = _base_target_for_code(str(c))
-                    if np.isfinite(target_now) and target_now > 0.0:
-                        w_row.loc[c] = float(target_now)
+                prev_active_n = int(len(prev_rb_active_set))
+                cur_active_n = int(len(active_set))
+                if prev_active_n > 0 and cur_active_n > prev_active_n:
+                    event_expansion_scale = float(float(prev_active_n) / float(cur_active_n))
+                    for c in active_codes:
+                        if float(w_row.loc[c]) > eps:
+                            w_row.loc[c] = float(w_row.loc[c]) * float(
+                                event_expansion_scale
+                            )
 
             for c in active_codes:
                 px = float(
@@ -7380,6 +7380,8 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                     .loc[d]
                 )
                 base_target = _base_target_for_code(str(c))
+                if np.isfinite(base_target) and event_expansion_scale < 1.0:
+                    base_target = float(base_target) * float(event_expansion_scale)
                 has_pos = bool(float(w_row.loc[c]) > eps)
                 key = str(c)
                 if not has_pos:

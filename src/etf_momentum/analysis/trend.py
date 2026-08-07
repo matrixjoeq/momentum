@@ -12131,14 +12131,7 @@ def compute_trend_portfolio_backtest(
                     else float("nan")
                 )
                 if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
-                    # When ATR stop is enabled, allocate the risk budget across the
-                    # current active basket so total stop-risk does not scale linearly
-                    # with holding count.
-                    active_n = max(1, int(len(active_set)))
-                    per_asset_budget = float(risk_budget_pct)
-                    if str(atr_mode) != "none":
-                        per_asset_budget = float(risk_budget_pct) / float(active_n)
-                    return float(per_asset_budget) * float(px) / float(a)
+                    return float(risk_budget_pct) * float(px) / float(a)
                 return float("nan")
 
             # Exit when base signal is no longer active.
@@ -12215,19 +12208,25 @@ def compute_trend_portfolio_backtest(
                 prev_rb_overcap_state = bool(overcap_now)
 
             if not did_standard_event_rebalance:
+                event_expansion_scale = 1.0
                 if (
                     has_constituent_event
                     and str(atr_mode) != "none"
                     and (not bool(vol_regime_risk_mgmt_enabled))
                     and (not bool(periodic_enabled))
                 ):
-                    # For stop-managed risk budgets, rescale existing holdings when
-                    # basket size changes so aggregate stop-risk stays anchored to
-                    # strategy-level budget instead of growing with holding count.
-                    for c in active_codes:
-                        target_now = _base_target_for_code(str(c))
-                        if np.isfinite(target_now) and target_now > 0.0:
-                            w_row.loc[c] = float(target_now)
+                    prev_active_n = int(len(prev_rb_active_set))
+                    cur_active_n = int(len(active_set))
+                    # Only shrink on expansion; never increase risk on contraction.
+                    if prev_active_n > 0 and cur_active_n > prev_active_n:
+                        event_expansion_scale = float(
+                            float(prev_active_n) / float(cur_active_n)
+                        )
+                        for c in active_codes:
+                            if float(w_row.loc[c]) > 1e-12:
+                                w_row.loc[c] = float(w_row.loc[c]) * float(
+                                    event_expansion_scale
+                                )
                 # Keep existing active positions at their entry-time risk-budget weight.
                 for c in active_codes:
                     px = (
@@ -12236,6 +12235,8 @@ def compute_trend_portfolio_backtest(
                         else float("nan")
                     )
                     base_target = _base_target_for_code(str(c))
+                    if np.isfinite(base_target) and event_expansion_scale < 1.0:
+                        base_target = float(base_target) * float(event_expansion_scale)
                     has_pos = bool(w_row.loc[c] > 1e-12)
                     key = str(c)
                     if not has_pos:
