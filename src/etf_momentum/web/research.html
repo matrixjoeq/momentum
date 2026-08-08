@@ -37344,6 +37344,11 @@
       function _collectTrendOverlayEvents(data) {
         const out = [];
         const rc = (data && data.risk_controls) || {};
+        const mode = String(((data || {}).meta || {}).type || "").includes(
+          "portfolio",
+        )
+          ? "portfolio"
+          : "single";
         const overlays = [
           { key: "atr_stop", reason: "ATR止损", priority: 0 },
           { key: "ma_trailing_stop", reason: "MA拖尾止损", priority: 1 },
@@ -37385,21 +37390,24 @@
                 : null,
             });
           };
-          const rootEvents = Array.isArray(root.trigger_events)
-            ? root.trigger_events
-            : [];
-          for (const e of rootEvents) {
-            pushOne(e, ((data || {}).meta || {}).code || "");
-          }
-          const byAsset =
-            root.by_asset && typeof root.by_asset === "object"
-              ? root.by_asset
-              : {};
-          for (const [code, stats] of Object.entries(byAsset)) {
-            const evs = Array.isArray((stats || {}).trigger_events)
-              ? (stats || {}).trigger_events
+          if (mode === "portfolio") {
+            const byAsset =
+              root.by_asset && typeof root.by_asset === "object"
+                ? root.by_asset
+                : {};
+            for (const [code, stats] of Object.entries(byAsset)) {
+              const evs = Array.isArray((stats || {}).trigger_events)
+                ? (stats || {}).trigger_events
+                : [];
+              for (const e of evs) pushOne(e, code);
+            }
+          } else {
+            const rootEvents = Array.isArray(root.trigger_events)
+              ? root.trigger_events
               : [];
-            for (const e of evs) pushOne(e, code);
+            for (const e of rootEvents) {
+              pushOne(e, ((data || {}).meta || {}).code || "");
+            }
           }
         }
         return out;
@@ -37413,18 +37421,120 @@
               )
             ? data.trade_statistics.trades.slice()
             : [];
-        const overlays = _collectTrendOverlayEvents(data);
-        const byExitKey = new Map();
+        const reasonMap = {
+          base_exit_signal: "基础信号平仓",
+          atr_stop: "ATR止损",
+          r_take_profit: "R回落止盈",
+          r_profit_scaleout: "R乘数止盈",
+          bias_v_take_profit: "BIAS-V止盈",
+          ma_trailing_stop: "MA拖尾止损",
+          er_exit_filter: "ER出场",
+        };
+        const reasonLabel = (raw) => {
+          const k = String(raw || "").trim();
+          if (!k) return null;
+          return reasonMap[k] || k;
+        };
+        const normDate = (v) => String(v || "").trim();
+        const keyOf = (code, entryDate, exitDate) =>
+          `${String(code || "").trim()}::${normDate(entryDate)}::${normDate(exitDate)}`;
+        const codeExitKeyOf = (code, exitDate) =>
+          `${String(code || "").trim()}::${normDate(exitDate)}`;
+        const collectBaseExitReasonRows = (d) => {
+          const modeNow = String(((d || {}).meta || {}).type || "").includes(
+            "portfolio",
+          )
+            ? "portfolio"
+            : "single";
+          const rows = [];
+          const riskControls = (d && d.risk_controls) || {};
+          const roots = [
+            riskControls.atr_stop || {},
+            riskControls.bias_v_take_profit || {},
+            riskControls.r_profit_scaleout || {},
+            riskControls.ma_trailing_stop || {},
+            riskControls.er_exit_filter || {},
+            riskControls.r_take_profit || {},
+          ];
+          if (modeNow === "portfolio") {
+            for (const root of roots) {
+              const byAsset =
+                root && typeof root.by_asset === "object" ? root.by_asset : {};
+              for (const [code, stats] of Object.entries(byAsset)) {
+                const recs = Array.isArray((stats || {}).trade_records)
+                  ? (stats || {}).trade_records
+                  : [];
+                for (const r of recs) {
+                  if (
+                    String((r || {}).event_type || "").toLowerCase() !== "exit"
+                  )
+                    continue;
+                  const label = reasonLabel((r || {}).event_reason);
+                  const dt = String((r || {}).date || "").trim();
+                  const entryDate = String(
+                    (r || {}).entry_execution_date ||
+                      (r || {}).entry_date ||
+                      "",
+                  ).trim();
+                  if (!label || !dt) continue;
+                  rows.push({
+                    code: String(code || "").trim(),
+                    entry_date: entryDate || null,
+                    exit_date: dt,
+                    exit_reason: label,
+                  });
+                }
+              }
+            }
+          } else {
+            const code = String(((d || {}).meta || {}).code || "").trim();
+            for (const root of roots) {
+              const recs = Array.isArray(root.trade_records)
+                ? root.trade_records
+                : [];
+              for (const r of recs) {
+                if (String((r || {}).event_type || "").toLowerCase() !== "exit")
+                  continue;
+                const label = reasonLabel((r || {}).event_reason);
+                const dt = String((r || {}).date || "").trim();
+                const entryDate = String(
+                  (r || {}).entry_execution_date || (r || {}).entry_date || "",
+                ).trim();
+                if (!label || !dt) continue;
+                rows.push({
+                  code,
+                  entry_date: entryDate || null,
+                  exit_date: dt,
+                  exit_reason: label,
+                });
+              }
+            }
+          }
+          return rows;
+        };
+        const baseRowsNorm = baseRows.map((r) => ({
+          ...(r && typeof r === "object" ? r : {}),
+          code: String((r && r.code) || "").trim(),
+          entry_date: normDate(r && r.entry_date),
+          exit_date: normDate(r && r.exit_date),
+        }));
+        const overlaysNorm = _collectTrendOverlayEvents(data).map((x) => ({
+          ...(x && typeof x === "object" ? x : {}),
+          code: String((x && x.code) || "").trim(),
+          entry_date: normDate((x && x.entry_date) || ""),
+          exit_date: normDate((x && x.execution_date) || ""),
+        }));
+        const overlayByFullKey = new Map();
+        const overlayBestByCodeExit = new Map();
         const partialRows = [];
-        for (const ov of overlays) {
-          const k = `${String(ov.code || "").trim()}::${String(ov.execution_date || "").trim()}`;
-          if (!k || k === "::") continue;
+        for (const ov of overlaysNorm) {
+          if (!ov.code || !ov.exit_date) continue;
           if (ov.trade_action === "partial_reduce") {
             partialRows.push({
               code: ov.code,
               entry_date: null,
               entry_price: null,
-              exit_date: ov.execution_date,
+              exit_date: ov.exit_date,
               exit_price: ov.fill_price,
               holding_days: null,
               closed: false,
@@ -37438,15 +37548,26 @@
             });
             continue;
           }
-          const old = byExitKey.get(k);
-          if (!old || Number(ov.priority) < Number(old.priority)) {
-            byExitKey.set(k, ov);
+          const fullKey = keyOf(ov.code, ov.entry_date, ov.exit_date);
+          const codeExitKey = codeExitKeyOf(ov.code, ov.exit_date);
+          const oldFull = overlayByFullKey.get(fullKey);
+          if (
+            ov.entry_date &&
+            (!oldFull || Number(ov.priority) < Number(oldFull.priority))
+          ) {
+            overlayByFullKey.set(fullKey, ov);
+          }
+          const oldCe = overlayBestByCodeExit.get(codeExitKey);
+          if (!oldCe || Number(ov.priority) < Number(oldCe.priority)) {
+            overlayBestByCodeExit.set(codeExitKey, ov);
           }
         }
-        const enriched = baseRows.map((r) => {
+        const enriched = baseRowsNorm.map((r) => {
           const one = r && typeof r === "object" ? { ...r } : {};
-          const key = `${String(one.code || "").trim()}::${String(one.exit_date || "").trim()}`;
-          const ov = byExitKey.get(key);
+          const fullKey = keyOf(one.code, one.entry_date, one.exit_date);
+          const ceKey = codeExitKeyOf(one.code, one.exit_date);
+          const ov =
+            overlayByFullKey.get(fullKey) || overlayBestByCodeExit.get(ceKey);
           if (ov) {
             one.trade_action = "full_exit";
             one.exit_reason = ov.exit_reason;
@@ -37467,6 +37588,36 @@
           }
           return one;
         });
+        const baseExitReasonRows = collectBaseExitReasonRows(data);
+        const baseExitReasonByFullKey = new Map();
+        const baseExitReasonByCodeExit = new Map();
+        for (const x of baseExitReasonRows) {
+          const code = String((x && x.code) || "").trim();
+          const entryDate = normDate(x && x.entry_date);
+          const exitDate = normDate(x && x.exit_date);
+          const reason = String((x && x.exit_reason) || "").trim();
+          if (!code || !exitDate || !reason) continue;
+          if (entryDate) {
+            const k = keyOf(code, entryDate, exitDate);
+            if (!baseExitReasonByFullKey.has(k)) {
+              baseExitReasonByFullKey.set(k, reason);
+            }
+          }
+          const k2 = codeExitKeyOf(code, exitDate);
+          if (!baseExitReasonByCodeExit.has(k2)) {
+            baseExitReasonByCodeExit.set(k2, reason);
+          }
+        }
+        for (const row of enriched) {
+          if (String(row.trade_action || "") !== "full_exit") continue;
+          if (String(row.exit_reason || "").trim()) continue;
+          const fullKey = keyOf(row.code, row.entry_date, row.exit_date);
+          const ceKey = codeExitKeyOf(row.code, row.exit_date);
+          const baseReason =
+            baseExitReasonByFullKey.get(fullKey) ||
+            baseExitReasonByCodeExit.get(ceKey);
+          if (baseReason) row.exit_reason = baseReason;
+        }
         return enriched.concat(partialRows);
       }
 

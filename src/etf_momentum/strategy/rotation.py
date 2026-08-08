@@ -6144,23 +6144,34 @@ def backtest_rotation(
                 continue
             stop_events_all.append(dict(ev or {}))
 
-    exit_meta_by_trade_key: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
+    exit_meta_by_trade_key: dict[tuple[str, str, str], tuple[int, dict[str, Any]]] = {}
+    pending_exit_meta_by_code_exit: dict[
+        tuple[str, str], tuple[int, dict[str, Any]]
+    ] = {}
 
     def _register_exit_meta(
         code: str,
+        entry_date: str | None,
         exit_date: str,
         *,
         priority: int,
         meta: dict[str, Any],
     ) -> None:
         c = str(code or "").strip()
+        e = str(entry_date or "").strip()
         d = str(exit_date or "").strip()
         if (not c) or (not d):
             return
-        key = (c, d)
-        old = exit_meta_by_trade_key.get(key)
-        if old is None or int(priority) < int(old[0]):
-            exit_meta_by_trade_key[key] = (int(priority), dict(meta or {}))
+        if e:
+            key3 = (c, e, d)
+            old3 = exit_meta_by_trade_key.get(key3)
+            if old3 is None or int(priority) < int(old3[0]):
+                exit_meta_by_trade_key[key3] = (int(priority), dict(meta or {}))
+            return
+        key2 = (c, d)
+        old2 = pending_exit_meta_by_code_exit.get(key2)
+        if old2 is None or int(priority) < int(old2[0]):
+            pending_exit_meta_by_code_exit[key2] = (int(priority), dict(meta or {}))
 
     for ev in stop_events_all:
         code = str((ev or {}).get("code") or "")
@@ -6174,6 +6185,7 @@ def backtest_rotation(
             reason_txt = f"止损({scheme})"
         _register_exit_meta(
             code,
+            None,
             execution_date,
             priority=0,
             meta={
@@ -6194,6 +6206,7 @@ def backtest_rotation(
             continue
         _register_exit_meta(
             code,
+            None,
             execution_date,
             priority=1,
             meta={
@@ -6251,6 +6264,7 @@ def backtest_rotation(
         if action == "full_exit":
             _register_exit_meta(
                 code,
+                None,
                 execution_date,
                 priority=2,
                 meta={
@@ -6267,8 +6281,13 @@ def backtest_rotation(
     for tr in list(trade_pack.get("trades") or []):
         row = dict(tr or {})
         code = str(row.get("code") or "")
+        entry_date = str(row.get("entry_date") or "")
         exit_date = str(row.get("exit_date") or "")
-        meta = (exit_meta_by_trade_key.get((code, exit_date)) or (None, {}))[1]
+        meta = (
+            exit_meta_by_trade_key.get((code, entry_date, exit_date))
+            or pending_exit_meta_by_code_exit.get((code, exit_date))
+            or (None, {})
+        )[1]
         if meta:
             row.update(dict(meta))
         else:

@@ -107,6 +107,16 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("931588", "562530"),
     ),
     RegressionFactorSpec(
+        key="CNI_GROWTH_100",
+        label="国证成长100",
+        aliases=("980080", "159259"),
+    ),
+    RegressionFactorSpec(
+        key="CNI_VALUE_100",
+        label="国证价值100",
+        aliases=("980081", "159263"),
+    ),
+    RegressionFactorSpec(
         key="CSI_ALL_ENERGY",
         label="中证全指能源",
         aliases=("000986", "159945"),
