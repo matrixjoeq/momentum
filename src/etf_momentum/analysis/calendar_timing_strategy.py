@@ -74,7 +74,8 @@ class CalendarTimingStrategyInputs:
     start: dt.date
     end: dt.date
     adjust: str = "none"
-    decision_day: int = 1  # [-28, -1] U [1, 28], monthly natural day semantics
+    decision_mode: str = "monthly"  # monthly | weekly
+    decision_day: int = 1  # monthly: [-28,-1]U[1,28], weekly: [-5,-1]U[1,5]
     hold_days: int = 1
     position_mode: str = "equal"  # equal | fixed_ratio | risk_budget
     fixed_pos_ratio: float = 1.0
@@ -104,6 +105,44 @@ def _monthly_target_date(year: int, month: int, anchor: int) -> dt.date:
     if day > last_day:
         day = last_day
     return dt.date(year, month, day)
+
+
+def _weekly_target_date(week_monday: dt.date, anchor: int) -> dt.date:
+    if anchor == 0 or anchor < -5 or anchor > 5:
+        raise ValueError("decision_day must be within [-5, 5] and cannot be 0")
+    # Positive: 1..5 means Mon..Fri; Negative: -1..-5 means Fri..Mon.
+    if anchor > 0:
+        offset = int(anchor) - 1
+    else:
+        offset = 5 + int(anchor)  # -1=>4(Fri), -5=>0(Mon)
+    return week_monday + dt.timedelta(days=offset)
+
+
+def _iter_decision_natural_dates(
+    start: dt.date, end: dt.date, *, decision_mode: str, decision_day: int
+) -> list[dt.date]:
+    if end < start:
+        return []
+    mode = str(decision_mode or "monthly").strip().lower()
+    out: list[dt.date] = []
+    if mode == "monthly":
+        y, m = start.year, start.month
+        y_end, m_end = end.year, end.month
+        while (y, m) <= (y_end, m_end):
+            out.append(_monthly_target_date(y, m, int(decision_day)))
+            if m == 12:
+                y += 1
+                m = 1
+            else:
+                m += 1
+        return out
+    if mode == "weekly":
+        cur = start - dt.timedelta(days=int(start.weekday()))
+        while cur <= end:
+            out.append(_weekly_target_date(cur, int(decision_day)))
+            cur = cur + dt.timedelta(days=7)
+        return out
+    raise ValueError("decision_mode must be one of: monthly|weekly")
 
 
 def _shift_or_skip(target: dt.date, *, shift: str, cal: str) -> dt.date | None:
@@ -211,8 +250,21 @@ def compute_calendar_timing_strategy_backtest(
     )
     if not codes:
         raise ValueError("codes is empty")
-    if inp.decision_day == 0 or inp.decision_day < -28 or inp.decision_day > 28:
-        raise ValueError("decision_day must be within [-28, 28] and cannot be 0")
+    decision_mode = (
+        str(getattr(inp, "decision_mode", "monthly") or "monthly").strip().lower()
+    )
+    if decision_mode not in {"monthly", "weekly"}:
+        raise ValueError("decision_mode must be one of: monthly|weekly")
+    if decision_mode == "monthly":
+        if inp.decision_day == 0 or inp.decision_day < -28 or inp.decision_day > 28:
+            raise ValueError(
+                "monthly decision_day must be within [-28, 28] and cannot be 0"
+            )
+    else:
+        if inp.decision_day == 0 or inp.decision_day < -5 or inp.decision_day > 5:
+            raise ValueError(
+                "weekly decision_day must be within [-5, 5] and cannot be 0"
+            )
     if int(inp.hold_days) < 1:
         raise ValueError("hold_days must be >= 1")
     ep = str(inp.exec_price or "open").strip().lower()
@@ -540,18 +592,13 @@ def compute_calendar_timing_strategy_backtest(
         )
     bench_ret_series = bench_ret_series.reindex(idx).fillna(0.0)
 
-    # Build monthly decision dates on natural calendar, then map to trading day.
-    m0 = (inp.start.year, inp.start.month)
-    m1 = (inp.end.year, inp.end.month)
-    ym: list[tuple[int, int]] = []
-    y, m = m0
-    while (y, m) <= m1:
-        ym.append((y, m))
-        if m == 12:
-            y += 1
-            m = 1
-        else:
-            m += 1
+    # Build periodic decision dates on natural calendar (monthly/weekly), then map to trading day.
+    decision_natural_dates = _iter_decision_natural_dates(
+        inp.start,
+        inp.end,
+        decision_mode=decision_mode,
+        decision_day=int(inp.decision_day),
+    )
     all_trade_days = trading_days(
         inp.start - dt.timedelta(days=40), inp.end + dt.timedelta(days=240), cal=inp.cal
     )
@@ -559,8 +606,7 @@ def compute_calendar_timing_strategy_backtest(
     trade_pos = {d: i for i, d in enumerate(all_trade_days)}
 
     entry_events: list[dict[str, Any]] = []
-    for y, m in ym:
-        natural = _monthly_target_date(y, m, int(inp.decision_day))
+    for natural in decision_natural_dates:
         dec = _shift_or_skip(natural, shift=shift, cal=inp.cal)
         if dec is None:
             continue
@@ -1143,23 +1189,25 @@ def compute_calendar_timing_strategy_backtest(
     }
     future_trade_days = [d for d in all_trade_days if d > asof]
     if future_trade_days:
-        # compute future entries.
-        # Include current month first; if asof is before this month's decision/entry,
-        # skipping current month would produce a delayed next-plan date.
-        fut_months: list[tuple[int, int]] = []
-        y0, m0 = asof.year, asof.month
-        y, m = y0, m0
-        fut_months.append((y, m))
-        for _ in range(4):
-            if m == 12:
-                y += 1
-                m = 1
-            else:
-                m += 1
-            fut_months.append((y, m))
+        # compute future entries (include current period to avoid skipping immediate signals)
+        lookback_start = (
+            asof - dt.timedelta(days=7)
+            if decision_mode == "weekly"
+            else asof - dt.timedelta(days=32)
+        )
+        lookahead_end = (
+            asof + dt.timedelta(days=90)
+            if decision_mode == "weekly"
+            else asof + dt.timedelta(days=180)
+        )
+        fut_naturals = _iter_decision_natural_dates(
+            lookback_start,
+            lookahead_end,
+            decision_mode=decision_mode,
+            decision_day=int(inp.decision_day),
+        )
         fut_entries: list[tuple[dt.date, dt.date]] = []  # (decision, entry_exec)
-        for y, m in fut_months:
-            natural = _monthly_target_date(y, m, int(inp.decision_day))
+        for natural in fut_naturals:
             dec = _shift_or_skip(natural, shift=shift, cal=inp.cal)
             if dec is None:
                 continue
@@ -1256,6 +1304,7 @@ def compute_calendar_timing_strategy_backtest(
             "codes": codes,
             "start": inp.start.strftime("%Y%m%d"),
             "end": inp.end.strftime("%Y%m%d"),
+            "decision_mode": decision_mode,
             "decision_day": int(inp.decision_day),
             "hold_days": int(inp.hold_days),
             "position_mode": position_mode,

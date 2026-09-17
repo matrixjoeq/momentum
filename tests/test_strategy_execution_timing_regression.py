@@ -139,6 +139,63 @@ def test_trend_exec_price_uses_execution_day_timing_rule(
     assert final_nav == pytest.approx(expected_nav, rel=0.0, abs=1e-12)
 
 
+@pytest.mark.parametrize(
+    "runner",
+    [compute_trend_backtest, compute_trend_backtest_bt],
+)
+def test_close_execution_initializes_atr_state_from_t_plus_one_close(
+    session_factory, runner
+):
+    sf = session_factory
+    with sf() as db:
+        start = dt.date(2024, 1, 1)
+        dates = [start + dt.timedelta(days=i) for i in range(7)]
+        close = [100.0, 100.0, 100.0, 110.0, 120.0, 130.0, 140.0]
+        _seed_one(
+            db,
+            code="AAA",
+            dates=dates,
+            ohlc_none=[(value, value) for value in close],
+            close_qfq=close,
+        )
+        db.commit()
+
+        out = runner(
+            db,
+            TrendInputs(
+                code="AAA",
+                start=start,
+                end=dates[-1],
+                strategy="tsmom",
+                mom_lookback=2,
+                tsmom_entry_threshold=0.02,
+                tsmom_exit_threshold=0.0,
+                exec_price="close",
+                atr_stop_mode="static",
+                atr_stop_window=2,
+                atr_stop_n=2.0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    trace = out["risk_controls"]["atr_stop"]["trace_last_rows"]
+    entry = next(row for row in trace if row.get("event_type") == "entry")
+    market_index = dates.index(dt.date.fromisoformat(str(entry["date"])))
+    # The trace date is already mapped to the actual T+1 market session, so
+    # every market observation on the row must belong to that same date.
+    assert entry["close"] == pytest.approx(close[market_index])
+    assert entry["open"] == pytest.approx(close[market_index])
+    assert entry["low"] == pytest.approx(close[market_index] * 0.99)
+    # Wilder RMA(alpha=1/2): prior ATR 6.55, current TR 11.20 -> 8.875.
+    assert entry["atr"] == pytest.approx(8.875)
+    assert entry["stop_after"] == pytest.approx(120.0 - 2.0 * 8.875)
+    episode = out["trade_statistics"]["trades"][0]
+    assert episode["entry_date"] == entry["date"]
+    assert episode["entry_price"] == pytest.approx(120.0)
+    assert episode["initial_r_pct_nav"] == pytest.approx((2.0 * 8.875) / 120.0)
+
+
 @pytest.mark.parametrize("exec_price", ["open", "close"])
 def test_trend_and_bt_trend_execution_timing_are_aligned(
     session_factory, exec_price: str
@@ -175,14 +232,17 @@ def test_trend_and_bt_trend_execution_timing_are_aligned(
 
 
 @pytest.mark.parametrize(
-    ("exec_price", "expected_d8_ret"),
+    ("exec_price", "expected_reentry_index", "expected_d9_ret"),
     [
-        ("open", 0.20),
-        ("close", 0.0),
+        ("open", 9, 0.20),
+        ("close", 8, 0.0),
     ],
 )
 def test_trend_atr_stop_reentry_timing_no_lookahead(
-    session_factory, exec_price: str, expected_d8_ret: float
+    session_factory,
+    exec_price: str,
+    expected_reentry_index: int,
+    expected_d9_ret: float,
 ):
     sf = session_factory
     with sf() as db:
@@ -190,9 +250,9 @@ def test_trend_atr_stop_reentry_timing_no_lookahead(
         dates = [start + dt.timedelta(days=i) for i in range(10)]
         # qfq close for signal/ATR:
         # - steady uptrend to let trailing stop move upward
-        # - d6 dip keeps base signal long but breaks trailing stop
-        # - d7 base stays long to allow stop_reentry decision
-        # - d8/d9 used to distinguish open vs close execution-day return
+        # - d7 has an intraday low that keeps the base signal long but breaks the stop
+        # - d8 base stays long to allow stop_reentry
+        # - d9 distinguishes open from close execution-day return
         close_qfq = [
             100.0,
             102.0,
@@ -207,12 +267,23 @@ def test_trend_atr_stop_reentry_timing_no_lookahead(
         ]
         # none/hfq execution OHLC:
         # - mostly open=close
-        # - d8 has large intraday open->close move (20%)
-        #   * open mode should realize it on d8
-        #   * close mode should not realize it on d8
+        # - d9 has large intraday open->close move (20%)
+        #   * open mode re-enters at d9 open and realizes it
+        #   * close mode re-enters at d8 close and has zero d9 close return
         ohlc_none = [(p, p) for p in close_qfq]
-        ohlc_none[8] = (100.0, 120.0)
+        ohlc_none[9] = (100.0, 120.0)
         _seed_one(db, code="AAA", dates=dates, ohlc_none=ohlc_none, close_qfq=close_qfq)
+        db.flush()
+        qfq_d7 = (
+            db.query(EtfPrice)
+            .filter(
+                EtfPrice.code == "AAA",
+                EtfPrice.trade_date == dates[7],
+                EtfPrice.adjust == "qfq",
+            )
+            .one()
+        )
+        qfq_d7.low = 90.0
         db.commit()
 
         out = compute_trend_backtest(
@@ -239,32 +310,29 @@ def test_trend_atr_stop_reentry_timing_no_lookahead(
     atr = out["risk_controls"]["atr_stop"]
     trace = out["next_plan"]["trace"]["atr_stop"]["trace_last_rows"]
 
-    i6 = d.index(dates[6].isoformat())
     i7 = d.index(dates[7].isoformat())
     i8 = d.index(dates[8].isoformat())
+    i9 = d.index(dates[9].isoformat())
 
-    # Stop is decided on d6 and executed on d7 (effective weight at d7 must be 0).
+    # The d7 low is the first eligible T+1 stop observation.
     assert int(atr["trigger_count"]) >= 1
-    assert atr["trigger_dates"] and atr["trigger_dates"][-1] == dates[6].isoformat()
+    assert atr["trigger_dates"] and atr["trigger_dates"][-1] == dates[7].isoformat()
     assert float(eff[i7]) == pytest.approx(0.0, abs=1e-12)
-    # d7 is stop execution day, so it must have no strategy return.
-    assert float(nav[i7]) == pytest.approx(float(nav[i6]), rel=0.0, abs=1e-12)
 
-    # Re-entry decision can happen at d7; position becomes effective at d8.
-    assert float(eff[i8]) == pytest.approx(1.0, abs=1e-12)
+    expected_reentry_i = d.index(dates[expected_reentry_index].isoformat())
+    assert float(eff[expected_reentry_i]) == pytest.approx(1.0, abs=1e-12)
+    if exec_price == "open":
+        assert float(eff[i8]) == pytest.approx(0.0, abs=1e-12)
     has_stop_reentry = any(
-        (str(r.get("date")) == dates[7].isoformat())
+        (str(r.get("date")) == dates[8].isoformat())
         and (str(r.get("event_type")) == "entry")
         and (str(r.get("event_reason")) == "stop_reentry")
         for r in trace
     )
     assert has_stop_reentry
 
-    # d8 return behavior depends on execution price:
-    # - open: has same-day open->close return
-    # - close: no same-day return
-    d8_ret = float(nav[i8] / nav[i7] - 1.0)
-    assert d8_ret == pytest.approx(expected_d8_ret, rel=0.0, abs=1e-12)
+    d9_ret = float(nav[i9] / nav[i8] - 1.0)
+    assert d9_ret == pytest.approx(expected_d9_ret, rel=0.0, abs=1e-12)
 
 
 def test_calendar_open_exec_includes_entry_day_and_excludes_exit_day(session_factory):

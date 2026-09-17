@@ -360,6 +360,13 @@ class OffFundRegressionFactorConfig(Base):
     """
 
     __tablename__ = "off_fund_regression_factor_config"
+    __table_args__ = (
+        UniqueConstraint(
+            "template_id",
+            "template_version",
+            name="uq_off_fund_factor_template_identity",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(
@@ -370,6 +377,11 @@ class OffFundRegressionFactorConfig(Base):
         String(64), nullable=False, default="cn_stock_core"
     )
     benchmark_factors_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    template_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    template_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    solver_params_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -412,10 +424,39 @@ class OffFundResearchState(Base):
     drift_rel_threshold: Mapped[float] = mapped_column(
         Float, nullable=False, default=0.25
     )
+    invest_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="lump_sum"
+    )
+    dca_base_amount: Mapped[float] = mapped_column(
+        Float, nullable=False, default=100000.0
+    )
+    dca_periodic_amount: Mapped[float] = mapped_column(
+        Float, nullable=False, default=10000.0
+    )
+    dca_frequency: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="monthly"
+    )
+    dca_weekly_weekday: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    dca_monthly_day: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    dca_non_trading_shift: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="next"
+    )
     show_non_group_codes: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True
     )
     pair_chart_prefs_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    replication_rolling_window: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=252
+    )
+    replication_min_samples: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=120
+    )
+    replication_include_portfolio: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    replication_drop_short_history_factors: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

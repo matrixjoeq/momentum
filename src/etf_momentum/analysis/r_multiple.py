@@ -671,11 +671,18 @@ def enrich_trades_with_r_metrics(
         trades_out.append(tr)
         grouped.setdefault(code, []).append(tr)
 
-    by_code = {k: _summarize_group(v) for k, v in grouped.items()}
-    overall = _summarize_group(trades_out)
+    closed_trades = [tr for tr in trades_out if bool(tr.get("closed"))]
+    open_mtm_trades = [tr for tr in trades_out if not bool(tr.get("closed"))]
+    grouped_closed: dict[str, list[dict[str, Any]]] = {}
+    for tr in closed_trades:
+        grouped_closed.setdefault(
+            _group_code(tr, default_code=default_code), []
+        ).append(tr)
+    by_code = {k: _summarize_group(v) for k, v in grouped_closed.items()}
+    overall = _summarize_group(closed_trades)
 
     recent_window = 100
-    recent_trades = _recent_n_trades(trades_out, recent_window)
+    recent_trades = _recent_n_trades(closed_trades, recent_window)
     grouped_recent: dict[str, list[dict[str, Any]]] = {}
     for tr in recent_trades:
         c = _group_code(tr, default_code=default_code)
@@ -683,12 +690,15 @@ def enrich_trades_with_r_metrics(
     recent_by_code = {k: _summarize_group(v) for k, v in grouped_recent.items()}
     recent_overall = _summarize_group(recent_trades)
     statistics = {
+        "scope": "closed_trades_only",
+        "all_episode_count": int(len(trades_out)),
+        "open_mtm_trade_count": int(len(open_mtm_trades)),
         "overall": overall,
         "by_code": by_code,
         "recent_100": {
             "window_size": int(recent_window),
             "effective_count": int(len(recent_trades)),
-            "total_trade_count": int(len(trades_out)),
+            "total_trade_count": int(len(closed_trades)),
             "overall": recent_overall,
             "by_code": recent_by_code,
         },

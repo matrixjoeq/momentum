@@ -282,9 +282,14 @@ def test_rotation_trade_statistics_have_samples_user_case_like(session_factory):
         assert "holding_bias_v_ge_5_max_per_holding" in (one or {})
         assert "holding_bias_v_ge_5_per_holding_distribution" in (one or {})
     rs = out.get("r_statistics") or {}
-    assert int(((rs.get("overall") or {}).get("trade_count") or 0) > 0)
+    assert rs.get("scope") == "closed_trades_only"
+    assert int(rs.get("all_episode_count") or 0) > 0
+    assert int((rs.get("overall") or {}).get("trade_count") or 0) == 0
+    assert int(rs.get("open_mtm_trade_count") or 0) == int(
+        rs.get("all_episode_count") or 0
+    )
     assert "recent_100" in rs
-    assert int(((rs.get("recent_100") or {}).get("effective_count") or 0) > 0)
+    assert int((rs.get("recent_100") or {}).get("effective_count") or 0) == 0
     assert "sqn" in (rs.get("overall") or {})
     score_pack = rs.get("trade_system_score") or {}
     assert "overall" in score_pack

@@ -25,6 +25,12 @@ def _assert_scope_financial_audit(c, *, scope_type: str, scope_id: int) -> None:
     )
     nav = perf.get("nav", [])
     for i, row in enumerate(nav):
+        identity = (
+            Decimal(str(row.get("equity") or 0))
+            - Decimal(str(row.get("cash") or 0))
+            - Decimal(str(row.get("market_value") or 0))
+        )
+        assert abs(identity) <= Decimal("0.01")
         daily = float(row.get("daily_return_twr") or 0.0)
         rebuild = (
             float(row.get("selection_return") or 0.0)
@@ -45,6 +51,9 @@ def _assert_scope_financial_audit(c, *, scope_type: str, scope_id: int) -> None:
     attr = get_json(
         c, f"/api/live/attribution?scope_type={scope_type}&scope_id={scope_id}"
     )
+    assert [str(row["nav_date"]) for row in nav] == [
+        str(row["date"]) for row in attr.get("daily", [])
+    ]
     period = attr.get("period", {})
     assert (
         abs(
@@ -101,6 +110,149 @@ def _snapshot_sha256(payload_doc: dict) -> str:
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+
+
+def test_live_trade_visible_immediately_after_post(api_client, session_factory):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "即时可见账户", "initial_cash": 0}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "即时可见策略"})
+    sid = int(st["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "A987654321"},
+    )
+    hid = int(holder["id"])
+    post_json(
+        c,
+        f"/api/live/accounts/{aid}/cashflows",
+        {"flow_date": "20240620", "amount": 100000, "flow_type": "deposit"},
+    )
+    post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategy-transfer",
+        {
+            "strategy_id": sid,
+            "flow_date": "20240621",
+            "amount": 60000,
+            "direction": "to_strategy",
+        },
+    )
+    created = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 1000,
+            "fee": 0.41,
+            "broker_trade_no": "immediate-visible-1",
+        },
+    )
+    listed = get_json(c, f"/api/live/trades?strategy_id={sid}&page=1&page_size=50")
+    trade_ids = {int(x["id"]) for x in listed.get("items", [])}
+    assert int(created["id"]) in trade_ids
+    holdings = get_json(c, f"/api/live/holdings?scope_type=strategy&scope_id={sid}")
+    assert any(str(x.get("code")) == "159915" for x in holdings)
+
+
+def test_live_delete_trade_with_closed_round_leg(api_client, session_factory):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "删除回合账户", "initial_cash": 0}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "删除回合策略"})
+    sid = int(st["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "A111111111"},
+    )
+    hid = int(holder["id"])
+    post_json(
+        c,
+        f"/api/live/accounts/{aid}/cashflows",
+        {"flow_date": "20240620", "amount": 100000, "flow_type": "deposit"},
+    )
+    post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategy-transfer",
+        {
+            "strategy_id": sid,
+            "flow_date": "20240621",
+            "amount": 60000,
+            "direction": "to_strategy",
+        },
+    )
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 1000,
+            "fee": 0.41,
+            "broker_trade_no": "closed-round-buy",
+        },
+    )
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240624",
+            "trade_time": "14:56:00",
+            "side": "SELL",
+            "price": 4.30,
+            "quantity": 1000,
+            "fee": 0.43,
+            "broker_trade_no": "closed-round-sell",
+        },
+    )
+    rounds_before = get_json(
+        c, f"/api/live/closed-rounds?scope_type=strategy&scope_id={sid}"
+    )
+    assert int(rounds_before.get("total") or 0) >= 1
+    sell = get_json(c, f"/api/live/trades?strategy_id={sid}&page=1&page_size=20")
+    sell_id = next(int(x["id"]) for x in sell["items"] if str(x.get("side")) == "SELL")
+    r_delete = c.request(
+        "DELETE",
+        f"/api/live/trades/{sell_id}",
+        json={"reason": "撤销卖出成交"},
+    )
+    assert r_delete.status_code == 200
+    assert r_delete.json().get("ok") is True
+    trades_after = get_json(
+        c, f"/api/live/trades?strategy_id={sid}&page=1&page_size=20"
+    )
+    assert int(trades_after["total"]) == 1
+    holdings = get_json(c, f"/api/live/holdings?scope_type=strategy&scope_id={sid}")
+    row = next(x for x in holdings if x["code"] == "159915")
+    assert abs(float(row["quantity"]) - 1000.0) < 1e-9
 
 
 def test_live_trading_records_contract(api_client, session_factory):
@@ -377,6 +529,12 @@ def test_live_trading_records_contract(api_client, session_factory):
     first = rounds["items"][0]
     assert first["buy_count"] >= 2
     assert first["sell_count"] >= 2
+    # Raw-leg oracle: buys 4100+2100, sells 5400+1380, all fees 30.
+    assert Decimal(str(first["realized_pnl"])) == Decimal("550.0")
+    assert Decimal(str(first["total_fee"])) == Decimal("30.0")
+    assert abs(
+        Decimal(str(first["return_rate"])) - Decimal("550") / Decimal("6200")
+    ) <= Decimal("1e-15")
 
     fee_stats = get_json(c, f"/api/live/stats/fees?scope_type=strategy&scope_id={sid}")
     assert fee_stats["total_fee"] > 0
@@ -474,6 +632,35 @@ def test_live_replay_account_refreshes_strategy_scope(api_client, session_factor
 
     hs_after = get_json(c, f"/api/live/holdings?scope_type=strategy&scope_id={sid}")
     assert len(hs_after) > 0
+    perf_after = get_json(
+        c,
+        f"/api/live/performance?scope_type=strategy&scope_id={sid}&return_basis=both",
+    )
+    rounds_after = get_json(
+        c,
+        f"/api/live/closed-rounds?scope_type=strategy&scope_id={sid}&page=1&page_size=50",
+    )
+
+    second = post_json(c, "/api/live/replay", {"account_id": aid})
+    assert int(second.get("strategies_replayed", 0)) >= 1
+    assert (
+        get_json(c, f"/api/live/holdings?scope_type=strategy&scope_id={sid}")
+        == hs_after
+    )
+    assert (
+        get_json(
+            c,
+            f"/api/live/performance?scope_type=strategy&scope_id={sid}&return_basis=both",
+        )
+        == perf_after
+    )
+    assert (
+        get_json(
+            c,
+            f"/api/live/closed-rounds?scope_type=strategy&scope_id={sid}&page=1&page_size=50",
+        )
+        == rounds_after
+    )
 
 
 def test_live_trading_shareholder_isolated_fifo(api_client, session_factory):

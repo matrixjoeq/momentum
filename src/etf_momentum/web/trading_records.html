@@ -315,6 +315,20 @@
           <label id="tradeQtyLabel">数量</label>
           <input id="tradeQty" type="number" min="100" step="100" />
         </div>
+        <div class="spot-only">
+          <label id="tradeBudgetAmountLabel">交易金额(元，拟投入/卖出)</label>
+          <input id="tradeBudgetAmount" type="number" min="0.01" step="0.01" />
+        </div>
+        <div class="spot-only">
+          <label id="tradeFillAmountLabel">成交金额(元)</label>
+          <input
+            id="tradeFillAmount"
+            type="text"
+            readonly
+            tabindex="-1"
+            aria-readonly="true"
+          />
+        </div>
         <div>
           <label>费用</label>
           <input id="tradeFee" type="number" step="0.01" value="0.20" />
@@ -375,9 +389,9 @@
       </details>
     </div>
 
-    <div class="panel">
-      <h3>企业行为</h3>
-      <div class="row">
+    <details class="panel">
+      <summary style="cursor: pointer; font-weight: 600">企业行为</summary>
+      <div class="row" style="margin-top: 10px">
         <div>
           <label>类型</label>
           <select id="caType">
@@ -428,7 +442,7 @@
         </thead>
         <tbody id="caTbody"></tbody>
       </table>
-    </div>
+    </details>
 
     <datalist id="etfCodeDatalist"></datalist>
 
@@ -841,9 +855,14 @@
       };
       let strategiesLoadSeq = 0;
       let holdersLoadSeq = 0;
+      let tradesLoadSeq = 0;
+      let holdingsLoadSeq = 0;
+      let tradeViewsRefreshSeq = 0;
+      let suppressStrategySelectChange = false;
       let etfCodeCatalog = [];
       let etfCodeLookup = new Map();
       let tradeFeeAuto = true;
+      let spotDefaultPriceRequestSeq = 0;
       let accountFlowDatePicker = null;
       let transferDatePicker = null;
       let tradeDatePicker = null;
@@ -1147,6 +1166,65 @@
         }
       }
 
+      function tradeDateToYyyymmdd(isoDate) {
+        const s = String(isoDate || "").trim();
+        if (!s) return "";
+        return s.replaceAll("-", "");
+      }
+
+      function spotPriceBasisFromQuickTime() {
+        const mode = String($("tradeTimeQuick")?.value || "close");
+        return mode === "open" ? "open" : "close";
+      }
+
+      async function syncSpotDefaultTradePrice() {
+        if (currentTradeStrategyType() !== "etf_spot") return;
+        const code = normalizeEtfCode($("tradeCode")?.value);
+        const isoDate = String($("tradeDate")?.value || "").trim();
+        const ymd = tradeDateToYyyymmdd(isoDate);
+        if (!code || !ymd || ymd.length !== 8) return;
+
+        const requestId = ++spotDefaultPriceRequestSeq;
+        try {
+          const url = `${location.origin}/api/etf/${encodeURIComponent(code)}/prices?start=${encodeURIComponent(ymd)}&end=${encodeURIComponent(ymd)}&adjust=none&limit=1`;
+          const res = await fetch(url);
+          if (requestId !== spotDefaultPriceRequestSeq) return;
+          if (!res.ok) {
+            tradeMsg(
+              `无法获取 ${code} ${isoDate} 行情：${res.status} ${res.statusText}`,
+              true,
+            );
+            return;
+          }
+          const rows = await res.json();
+          if (requestId !== spotDefaultPriceRequestSeq) return;
+          if (!Array.isArray(rows) || rows.length === 0) {
+            tradeMsg(`未找到 ${code} 在 ${isoDate} 的 none 复权行情`, true);
+            return;
+          }
+          const row = rows[0];
+          const basis = spotPriceBasisFromQuickTime();
+          const rawPx = basis === "open" ? row.open : row.close;
+          const px = Number(rawPx);
+          if (!Number.isFinite(px) || px <= 0) {
+            tradeMsg(
+              `${code} ${isoDate} ${basis === "open" ? "开盘价" : "收盘价"}无效`,
+              true,
+            );
+            return;
+          }
+          $("tradePrice").value = roundHalfUp(px, PRICE_DECIMALS).toFixed(
+            PRICE_DECIMALS,
+          );
+          tradeMsg("");
+          syncSpotFieldsOnPriceChange();
+          applyTradeFeeDefault(false);
+        } catch (e) {
+          if (requestId !== spotDefaultPriceRequestSeq) return;
+          tradeMsg(`获取默认成交价失败：${e.message}`, true);
+        }
+      }
+
       function isTradeQtyAllowed(qtyText) {
         const q = Number(qtyText);
         if (!Number.isFinite(q) || q <= 0) return false;
@@ -1165,6 +1243,89 @@
         if (!Number.isFinite(amt) || amt <= 0) return false;
         const ratio = amt / REPO_LOT_AMOUNT;
         return Math.abs(ratio - Math.round(ratio)) <= 1e-9;
+      }
+
+      function calcSpotQtyFromBudgetAmount(budgetAmount, price) {
+        const budget = Number(budgetAmount);
+        const px = Number(price);
+        if (
+          !Number.isFinite(budget) ||
+          budget <= 0 ||
+          !Number.isFinite(px) ||
+          px <= 0
+        ) {
+          return null;
+        }
+        const lots = Math.floor(budget / px / 100);
+        return lots * 100;
+      }
+
+      function syncSpotFillAmountFromQtyAndPrice() {
+        if (currentTradeStrategyType() !== "etf_spot") return;
+        const fillEl = $("tradeFillAmount");
+        if (!fillEl) return;
+        const px = Number($("tradePrice").value);
+        const qty = Number($("tradeQty").value);
+        if (
+          !Number.isFinite(px) ||
+          px <= 0 ||
+          !Number.isFinite(qty) ||
+          qty <= 0
+        ) {
+          fillEl.value = "";
+          return;
+        }
+        fillEl.value = roundHalfUp(px * qty, 2).toFixed(2);
+      }
+
+      function syncSpotQtyFromBudgetAmount() {
+        if (currentTradeStrategyType() !== "etf_spot") return;
+        const raw = String($("tradeBudgetAmount").value || "").trim();
+        if (!raw) return;
+        const budget = Number(raw);
+        if (!Number.isFinite(budget) || budget <= 0) return;
+        const px = Number($("tradePrice").value);
+        if (!Number.isFinite(px) || px <= 0) return;
+        const qty = calcSpotQtyFromBudgetAmount(budget, px);
+        if (qty == null || qty <= 0) {
+          $("tradeQty").value = "";
+          syncSpotFillAmountFromQtyAndPrice();
+          return;
+        }
+        $("tradeQty").value = String(qty);
+        syncSpotFillAmountFromQtyAndPrice();
+      }
+
+      function syncSpotFieldsOnPriceChange() {
+        if (currentTradeStrategyType() !== "etf_spot") return;
+        const budgetRaw = String($("tradeBudgetAmount").value || "").trim();
+        if (budgetRaw) {
+          syncSpotQtyFromBudgetAmount();
+        } else {
+          syncSpotFillAmountFromQtyAndPrice();
+        }
+      }
+
+      function resolveSpotTradeQuantityForSubmit() {
+        const qtyRaw = String($("tradeQty").value || "").trim();
+        if (isTradeQtyAllowed(qtyRaw)) {
+          return Number(qtyRaw);
+        }
+        const budgetRaw = String($("tradeBudgetAmount").value || "").trim();
+        if (!qtyRaw && budgetRaw) {
+          syncSpotQtyFromBudgetAmount();
+          const derivedRaw = String($("tradeQty").value || "").trim();
+          if (isTradeQtyAllowed(derivedRaw)) {
+            return Number(derivedRaw);
+          }
+          throw new Error(
+            "交易金额不足以换算出 100 的正整数倍数量，请提高金额或价格。",
+          );
+        }
+        if (qtyRaw) {
+          throw new Error("成交数量必须是 100 的倍数");
+        }
+        throw new Error("请填写数量或交易金额");
       }
 
       function syncRepoPrincipalFromQty() {
@@ -1422,6 +1583,8 @@
         $("tradeRepoAction").value = "LEND";
         $("tradeRepoPrincipal").value = "";
         $("tradeRepoInterestDays").value = "";
+        $("tradeBudgetAmount").value = "";
+        $("tradeFillAmount").value = "";
         syncTradeFormByStrategyType(true);
         setTradeTimeValue(defaultTradeTimeForCurrentContext());
         applyTradeFeeDefault(true);
@@ -1433,18 +1596,24 @@
         const transferInput = $("transferDate");
         const timeInput = $("tradeTime");
         if (!dateInput || !timeInput) return;
-        const setupDatePicker = (el) => {
+        const setupDatePicker = (el, { onChange } = {}) => {
           if (!el) return null;
           if (!window.flatpickr) return null;
-          return window.flatpickr(el, {
+          const opts = {
             dateFormat: "Y-m-d",
             allowInput: false,
             defaultDate: toIsoDateToday(),
             clickOpens: true,
-          });
+          };
+          if (onChange) {
+            opts.onChange = () => onChange();
+          }
+          return window.flatpickr(el, opts);
         };
         if (window.flatpickr) {
-          tradeDatePicker = setupDatePicker(dateInput);
+          tradeDatePicker = setupDatePicker(dateInput, {
+            onChange: () => syncSpotDefaultTradePrice(),
+          });
           accountFlowDatePicker = setupDatePicker(accountFlowInput);
           transferDatePicker = setupDatePicker(transferInput);
           tradeTimePicker = window.flatpickr(timeInput, {
@@ -1472,6 +1641,7 @@
           }
         };
         dateInput.addEventListener("click", () => tryOpenNative(dateInput));
+        dateInput.addEventListener("change", () => syncSpotDefaultTradePrice());
         if (accountFlowInput) {
           accountFlowInput.addEventListener("click", () =>
             tryOpenNative(accountFlowInput),
@@ -1493,6 +1663,42 @@
         const m = s.match(/^([0-9]{6})(?:\.[A-Z]+)?$/);
         if (m) return m[1];
         return s;
+      }
+
+      function enrichTradeRow(row) {
+        if (!row || typeof row !== "object") return row;
+        return {
+          ...row,
+          strategy_text: strategyLabelById(row.strategy_id),
+          holder_text: holderLabelById(row.shareholder_account_id),
+        };
+      }
+
+      function mergeTradeRowIntoCache(row) {
+        const enriched = enrichTradeRow(row);
+        if (!enriched || !enriched.id) return;
+        const id = Number(enriched.id);
+        const idx = tradesRowsCache.findIndex((x) => Number(x.id) === id);
+        if (idx >= 0) {
+          tradesRowsCache[idx] = enriched;
+        } else {
+          tradesRowsCache.unshift(enriched);
+        }
+        tradesPage = 1;
+        renderTradesRows(tradesRowsCache);
+      }
+
+      function syncScopeSelectorsToTradeStrategy(strategyId) {
+        const sid = Number(strategyId || 0);
+        if (!sid) return;
+        suppressStrategySelectChange = true;
+        try {
+          if ($("strategySelect")) $("strategySelect").value = String(sid);
+          if ($("tradeStrategySelect"))
+            $("tradeStrategySelect").value = String(sid);
+        } finally {
+          suppressStrategySelectChange = false;
+        }
       }
 
       function renderEtfCodeCandidates(keyword = "") {
@@ -1854,6 +2060,9 @@
         for (const el of document.querySelectorAll(".repo-only")) {
           el.style.display = isRepo ? "" : "none";
         }
+        for (const el of document.querySelectorAll(".spot-only")) {
+          el.style.display = isRepo ? "none" : "";
+        }
         $("tradePriceLabel").textContent = isRepo ? "年化利率(%)" : "价格";
         $("tradeQtyLabel").textContent = isRepo ? "数量(手)" : "数量(股)";
         if ($("tradeRepoPrincipalLabel")) {
@@ -1890,9 +2099,10 @@
             ? repoAction === "BUYBACK"
               ? "当前策略类型为 bond_repo：仅支持 204001/GC001 与 131810/R-001；数量单位为手(1手=1000元)；价格表示年化利率；购回金额=数量*1000*(1+利率/100/365*计息天数)，四项填三项可自动推算剩余一项。"
               : "当前策略类型为 bond_repo：仅支持 204001/GC001 与 131810/R-001；数量单位为手(1手=1000元)；价格表示年化利率；融券交易金额需满足金额=数量*1000；融券费率十万分之一。"
-            : "当前策略类型为 etf_spot：逆回购字段已隐藏。可在“账户与策略管理”中把当前策略类型改为 bond_repo。";
+            : "当前策略类型为 etf_spot：可按价格+数量录入，或填写交易金额(拟买入/卖出金额)由系统换算数量 floor(金额/价格/100)×100；成交金额=价格×数量；改数量只更新成交金额，不改交易金额；数量优先；数量须为 100 的正整数倍；更换标的/日期/快捷时间会按 none 复权开盘价或收盘价自动填入成交价。";
         }
         if (!isRepo) {
+          syncSpotFillAmountFromQtyAndPrice();
           applyTradeTimeUiByContext();
           if (
             forceDefaultTime ||
@@ -1969,6 +2179,11 @@
             ? ""
             : roundHalfUp(row.price, PRICE_DECIMALS).toFixed(PRICE_DECIMALS);
         $("tradeQty").value = row.quantity ?? "";
+        $("tradeBudgetAmount").value = "";
+        $("tradeFillAmount").value =
+          row.amount == null || !Number.isFinite(Number(row.amount))
+            ? ""
+            : roundHalfUp(row.amount, 2).toFixed(2);
         $("tradeFee").value =
           row.fee == null || !Number.isFinite(Number(row.fee))
             ? ""
@@ -3124,7 +3339,9 @@
       async function loadTrades() {
         const aid = Number($("accountSelect").value || 0);
         const sid = Number($("strategySelect").value || 0);
+        const reqSeq = ++tradesLoadSeq;
         if (!aid && !sid) {
+          if (reqSeq !== tradesLoadSeq) return;
           tradesRowsCache = [];
           tradesPage = 1;
           renderTradesRows(tradesRowsCache);
@@ -3139,27 +3356,27 @@
             ? `?strategy_id=${sid}&page=${page}&page_size=${pageSize}`
             : `?account_id=${aid}&page=${page}&page_size=${pageSize}`;
           const out = await api(`/trades${q}`);
+          if (reqSeq !== tradesLoadSeq) return;
           const items = out.items || [];
           if (page === 1) total = Number(out.total || 0);
           allItems.push(...items);
           if (!items.length || allItems.length >= total) break;
           page += 1;
         }
-        tradesRowsCache = allItems.map((x) => ({
-          ...x,
-          strategy_text: strategyLabelById(x.strategy_id),
-          holder_text: holderLabelById(x.shareholder_account_id),
-        }));
+        if (reqSeq !== tradesLoadSeq) return;
+        tradesRowsCache = allItems.map((x) => enrichTradeRow(x));
         tradesPage = 1;
         renderTradesRows(tradesRowsCache);
       }
 
       async function loadHoldings() {
         const s = currentScope();
+        const reqSeq = ++holdingsLoadSeq;
         if (!s.scope_id) return;
         const out = await api(
           `/holdings?scope_type=${s.scope_type}&scope_id=${s.scope_id}`,
         );
+        if (reqSeq !== holdingsLoadSeq) return;
         holdingsRowsCache = (out || []).map((x) => {
           const cls = x.price_missing ? "danger" : "";
           const status = x.price_missing
@@ -3241,7 +3458,7 @@
         $(bodyId).innerHTML = rows;
       }
 
-      async function loadPerformance() {
+      async function loadPerformance({ renderPanels = true } = {}) {
         const s = currentScope();
         if (!s.scope_id) return;
         const out = await api(
@@ -3266,8 +3483,10 @@
           String(a?.nav_date || "").localeCompare(String(b?.nav_date || "")),
         );
         navRowsCache = nav;
-        renderCapitalOverview(nav.length ? nav[nav.length - 1] : null, nav);
-        renderHoldingsRows(holdingsRowsCache);
+        if (renderPanels) {
+          renderCapitalOverview(nav.length ? nav[nav.length - 1] : null, nav);
+          renderHoldingsRows(holdingsRowsCache);
+        }
         const x = nav.map((r) => r.nav_date);
         // Prefer backend integrated TWR NAV (includes holdings + realized trades + costs).
         // Fallback to equity-normalized series only if nav_twr is unavailable.
@@ -3502,27 +3721,29 @@
           clearTradeAuditState("范围已切换，请重新运行审计。");
         }
         await Promise.all([
+          loadPerformance({ renderPanels: false }),
           loadTrades(),
-          loadHoldings(),
           loadRoundsAndStats(),
-          loadPerformance(),
           loadOverviewCashflowRecords(),
           loadAttribution(),
           loadCorporateActions(),
         ]);
+        await loadHoldings();
       }
 
       async function refreshTradeRelatedViews() {
         const s = currentScope();
         if (!s.scope_id) return;
-        // Keep capital overview consistent with latest NAV before holdings refresh.
-        await loadPerformance();
+        const seq = ++tradeViewsRefreshSeq;
         await Promise.all([
+          loadPerformance({ renderPanels: false }),
           loadTrades(),
-          loadHoldings(),
           loadRoundsAndStats(),
           loadOverviewCashflowRecords(),
         ]);
+        if (seq !== tradeViewsRefreshSeq) return;
+        await loadHoldings();
+        if (seq !== tradeViewsRefreshSeq) return;
         if (
           tradeAuditScopeKey &&
           tradeAuditScopeKey === _tradeAuditScopeKey(s)
@@ -3624,6 +3845,7 @@
                 : "14:56:00",
             );
           }
+          syncSpotDefaultTradePrice();
         });
 
         $("tradeCode").addEventListener("input", () => {
@@ -3634,6 +3856,7 @@
         $("tradeCode").addEventListener("change", () => {
           if (currentTradeStrategyType() === "bond_repo") return;
           fillTradeNameFromCodeIfMatched();
+          syncSpotDefaultTradePrice();
         });
         $("caCode").addEventListener("input", () =>
           renderEtfCodeCandidates($("caCode").value),
@@ -3688,10 +3911,32 @@
               currentRepoAction() === "BUYBACK"
             ) {
               syncRepoBuybackDerivedFields("tradePrice");
+            } else if (currentTradeStrategyType() === "etf_spot") {
+              syncSpotFieldsOnPriceChange();
             }
             applyTradeFeeDefault(false);
           } catch (e) {
             tradeMsg(e.message, true);
+          }
+        });
+        $("tradePrice").addEventListener("input", () => {
+          if (currentTradeStrategyType() === "etf_spot") {
+            syncSpotFillAmountFromQtyAndPrice();
+          }
+        });
+        $("tradeBudgetAmount").addEventListener("input", () => {
+          if (currentTradeStrategyType() !== "etf_spot") return;
+          syncSpotQtyFromBudgetAmount();
+          applyTradeFeeDefault(false);
+        });
+        $("tradeBudgetAmount").addEventListener("change", () => {
+          if (currentTradeStrategyType() !== "etf_spot") return;
+          const qtyVal = $("tradeQty").value;
+          if (!isTradeQtyAllowed(qtyVal)) {
+            tradeMsg(
+              "交易金额不足以换算出 100 的正整数倍数量，请提高金额或价格。",
+              true,
+            );
           }
         });
         $("tradeQty").addEventListener("input", () => {
@@ -3701,6 +3946,8 @@
             } else {
               syncRepoPrincipalFromQty();
             }
+          } else if (currentTradeStrategyType() === "etf_spot") {
+            syncSpotFillAmountFromQtyAndPrice();
           }
           applyTradeFeeDefault(false);
         });
@@ -3725,7 +3972,9 @@
           const qtyVal = $("tradeQty").value;
           if (!isTradeQtyAllowed(qtyVal)) {
             tradeMsg("成交数量必须是 100 的倍数。", true);
+            return;
           }
+          syncSpotFillAmountFromQtyAndPrice();
         });
         $("tradeTime").addEventListener("change", () => {
           const t = String($("tradeTime").value || "").trim();
@@ -3744,6 +3993,7 @@
           }
         });
         $("strategySelect").addEventListener("change", async () => {
+          if (suppressStrategySelectChange) return;
           try {
             if ($("tradeStrategySelect")) {
               $("tradeStrategySelect").value = $("strategySelect").value;
@@ -4124,8 +4374,10 @@
             const aid = Number($("accountSelect").value || 0);
             const sid = selectedTradeStrategyId();
             const hid = selectedTradeHolderId();
-            const qty = Number($("tradeQty").value);
             const isRepo = strategyTypeById(sid) === "bond_repo";
+            const qty = isRepo
+              ? Number($("tradeQty").value)
+              : resolveSpotTradeQuantityForSubmit();
             const repoQtyRaw = String($("tradeQty").value || "").trim();
             const repoAmountRaw = String(
               $("tradeRepoPrincipal").value || "",
@@ -4144,8 +4396,6 @@
             const isEditing = Boolean(editingTradeId);
             if (!aid || !sid || !hid)
               throw new Error("请先选择账户/策略/股东账号");
-            if (!isRepo && !isTradeQtyAllowed(qty))
-              throw new Error("成交数量必须是 100 的倍数");
             if (isRepo) {
               const qtyOk = repoQty != null && isRepoLotQtyAllowed(repoQtyRaw);
               const principalOk =
@@ -4198,6 +4448,7 @@
               }
             }
             const payload = buildTradePayloadFromForm(aid, sid, hid, qty);
+            let savedTrade = null;
             if (isEditing) {
               const reason = await askReasonInput({
                 title: `修改成交 #${editingTradeId}`,
@@ -4205,7 +4456,7 @@
                 confirmText: "确认修改",
               });
               if (reason == null) return;
-              await api(`/trades/${editingTradeId}`, {
+              savedTrade = await api(`/trades/${editingTradeId}`, {
                 method: "PUT",
                 body: JSON.stringify({
                   ...payload,
@@ -4214,11 +4465,13 @@
               });
               resetTradeEditMode();
             } else {
-              await api("/trades", {
+              savedTrade = await api("/trades", {
                 method: "POST",
                 body: JSON.stringify(payload),
               });
             }
+            syncScopeSelectorsToTradeStrategy(sid);
+            if (savedTrade) mergeTradeRowIntoCache(savedTrade);
             await refreshTradeRelatedViews();
             tradeMsg("");
             msg(isEditing ? "成交已修改" : "成交已新增");
@@ -4246,6 +4499,7 @@
               method: "POST",
               body: JSON.stringify({ trades }),
             });
+            syncScopeSelectorsToTradeStrategy(sid);
             await refreshTradeRelatedViews();
             tradeMsg("");
             msg(`已批量导入 ${trades.length} 条成交`);

@@ -43,6 +43,78 @@ def _circular_block_bootstrap_indices(
     return np.array(idx[:n], dtype=int)
 
 
+def _sortino_ratio(ret: pd.Series, *, rf: float, ann_factor: int) -> float:
+    r = (
+        pd.to_numeric(ret, errors="coerce")
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    r = r.dropna()
+    if r.empty:
+        return float("nan")
+    rf_daily = float(rf) / float(max(1, ann_factor))
+    excess = r - rf_daily
+    downside = excess[excess < 0.0]
+    if downside.empty:
+        return float("nan")
+    downside_dev = float(np.sqrt(np.mean(np.square(downside.to_numpy(dtype=float)))))
+    if (not np.isfinite(downside_dev)) or downside_dev <= 1e-12:
+        return float("nan")
+    mean_excess = float(np.mean(excess.to_numpy(dtype=float)))
+    return float((mean_excess / downside_dev) * np.sqrt(float(ann_factor)))
+
+
+def _ulcer_index_from_nav(nav: pd.Series) -> float:
+    n = (
+        pd.to_numeric(nav, errors="coerce")
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    n = n.dropna()
+    if n.empty:
+        return float("nan")
+    peak = n.cummax()
+    dd = n / peak - 1.0
+    return float(np.sqrt(np.mean(np.square(dd.to_numpy(dtype=float)))))
+
+
+def _calmar_ratio(ann_ret: float, max_drawdown: float) -> float:
+    ar = float(ann_ret)
+    mdd = float(max_drawdown)
+    denom = abs(mdd)
+    if (not np.isfinite(ar)) or (not np.isfinite(denom)) or denom <= 1e-12:
+        return float("nan")
+    return float(ar / denom)
+
+
+def _ulcer_performance_index(ann_ret: float, ulcer_index: float, *, rf: float) -> float:
+    ar = float(ann_ret)
+    ui = float(ulcer_index)
+    if (not np.isfinite(ar)) or (not np.isfinite(ui)) or ui <= 1e-12:
+        return float("nan")
+    return float((ar - float(rf)) / ui)
+
+
+def _rolling_recent_sqn_median(r_multiples: np.ndarray, *, window: int = 100) -> float:
+    x = np.asarray(r_multiples, dtype=float)
+    x = x[np.isfinite(x)]
+    w = int(max(2, window))
+    if x.size < w:
+        return float("nan")
+    vals: list[float] = []
+    root_w = float(np.sqrt(float(w)))
+    for i in range(w - 1, x.size):
+        seg = x[(i - w + 1) : (i + 1)]
+        mu = float(np.mean(seg))
+        sd = float(np.std(seg, ddof=1))
+        if (not np.isfinite(sd)) or sd <= 1e-12:
+            continue
+        vals.append(float((mu / sd) * root_w))
+    if not vals:
+        return float("nan")
+    return float(np.median(np.asarray(vals, dtype=float)))
+
+
 def _summarize(samples: np.ndarray, *, observed: float) -> dict[str, Any]:
     x = np.asarray(samples, dtype=float)
     x = x[np.isfinite(x)]
@@ -167,6 +239,24 @@ def _fit_one_distribution(x: np.ndarray, dist: str) -> dict[str, Any]:
             frozen = st.lognorm(s=shape, loc=loc, scale=scale)
             k = 3
             params = {"s": float(shape), "loc": float(loc), "scale": float(scale)}
+        elif dist == "ged":
+            beta, loc, scale = st.gennorm.fit(xs)
+            frozen = st.gennorm(beta, loc=loc, scale=scale)
+            k = 3
+            params = {"beta": float(beta), "loc": float(loc), "scale": float(scale)}
+        elif dist == "skew_t":
+            jf = getattr(st, "jf_skew_t", None)
+            if jf is None:
+                return {"ok": False, "error": "jf_skew_t_unavailable"}
+            a, b, loc, scale = jf.fit(xs)
+            frozen = jf(a, b, loc=loc, scale=scale)
+            k = 4
+            params = {
+                "a": float(a),
+                "b": float(b),
+                "loc": float(loc),
+                "scale": float(scale),
+            }
         else:
             return {"ok": False, "error": f"unknown dist={dist}"}
 
@@ -214,6 +304,11 @@ def bootstrap_metrics_from_daily_returns(
     ann_factor: int = TRADING_DAYS_PER_YEAR,
     extra_metrics: dict[str, Callable[[pd.Series, pd.Series], float]] | None = None,
     period_freq: str | None = None,
+    fit_candidates: list[str] | None = None,
+    fit_rule: str = "bic",
+    fit_ks_alpha: float = 0.05,
+    trade_r_multiples: pd.Series | np.ndarray | list[float] | None = None,
+    sqn_window: int = 100,
 ) -> dict[str, Any]:
     """
     Monte Carlo via circular block bootstrap on daily returns.
@@ -248,6 +343,12 @@ def bootstrap_metrics_from_daily_returns(
         "max_drawdown": float(_max_drawdown(nav_obs)),
         "sharpe_ratio": float(_sharpe(r, rf=float(rf), ann_factor=ann_factor)),
     }
+    obs["calmar_ratio"] = _calmar_ratio(obs["annualized_return"], obs["max_drawdown"])
+    obs["sortino_ratio"] = _sortino_ratio(r, rf=float(rf), ann_factor=int(ann_factor))
+    obs["ulcer_index"] = _ulcer_index_from_nav(nav_obs)
+    obs["ulcer_performance"] = _ulcer_performance_index(
+        obs["annualized_return"], obs["ulcer_index"], rf=float(rf)
+    )
 
     extra_metrics = extra_metrics or {}
     for k, fn in extra_metrics.items():
@@ -261,6 +362,21 @@ def bootstrap_metrics_from_daily_returns(
     seed_used = int(cfg.seed) if cfg.seed is not None else secrets.randbits(64)
     rng = np.random.default_rng(seed_used)
     sims: dict[str, list[float]] = {k: [] for k in obs.keys()}
+    r_mult_obs = (
+        np.asarray(
+            pd.to_numeric(pd.Series(trade_r_multiples), errors="coerce"), dtype=float
+        )
+        if trade_r_multiples is not None
+        else np.asarray([], dtype=float)
+    )
+    r_mult_obs = r_mult_obs[np.isfinite(r_mult_obs)]
+    has_r_mult = bool(r_mult_obs.size > 0)
+    sqn_obs = (
+        _rolling_recent_sqn_median(r_mult_obs, window=int(sqn_window))
+        if has_r_mult
+        else float("nan")
+    )
+    sqn_sims: list[float] = []
     period_samples: list[float] = []
     for _ in range(int(cfg.n_sims)):
         idx = _circular_block_bootstrap_indices(n, block_size=cfg.block_size, rng=rng)
@@ -278,11 +394,29 @@ def bootstrap_metrics_from_daily_returns(
         sims["sharpe_ratio"].append(
             float(_sharpe(rr, rf=float(rf), ann_factor=ann_factor))
         )
+        ann_ret = float(_annualized_return(nav, ann_factor=ann_factor))
+        mdd = float(_max_drawdown(nav))
+        ui = _ulcer_index_from_nav(nav)
+        sims["calmar_ratio"].append(_calmar_ratio(ann_ret, mdd))
+        sims["sortino_ratio"].append(
+            _sortino_ratio(rr, rf=float(rf), ann_factor=int(ann_factor))
+        )
+        sims["ulcer_index"].append(ui)
+        sims["ulcer_performance"].append(
+            _ulcer_performance_index(ann_ret, ui, rf=float(rf))
+        )
         for k, fn in extra_metrics.items():
             try:
                 sims[k].append(float(fn(rr, nav)))
             except (ValueError, TypeError):
                 sims[k].append(float("nan"))
+        if has_r_mult:
+            n_t = int(r_mult_obs.size)
+            idx_t = _circular_block_bootstrap_indices(
+                n_t, block_size=max(1, int(cfg.block_size)), rng=rng
+            )
+            sim_rm = r_mult_obs[idx_t]
+            sqn_sims.append(_rolling_recent_sqn_median(sim_rm, window=int(sqn_window)))
 
         if period_freq:
             try:
@@ -301,14 +435,23 @@ def bootstrap_metrics_from_daily_returns(
                 pass
 
     # Fit candidate distributions for each metric.
-    candidates = ["normal", "t", "lognorm"]
+    candidates = [
+        str(x).strip().lower()
+        for x in (fit_candidates or ["normal", "t", "lognorm"])
+        if str(x).strip()
+    ]
+    if not candidates:
+        candidates = ["normal", "t", "lognorm"]
+    ks_alpha = float(fit_ks_alpha)
+    if (not np.isfinite(ks_alpha)) or ks_alpha <= 0.0 or ks_alpha >= 1.0:
+        ks_alpha = 0.05
     out = {}
     for k, v in sims.items():
         arr = np.asarray(v, dtype=float)
         out[k] = _summarize(arr, observed=obs[k])
         out[k]["hist"] = _histogram(arr, bins=40, clip_q=(0.01, 0.99))
         fits = {d: _fit_one_distribution(arr, d) for d in candidates}
-        # Determine best by BIC among ok fits
+        # Determine best by BIC among ok fits.
         ok = [
             (d, fits[d].get("bic"))
             for d in candidates
@@ -316,6 +459,25 @@ def bootstrap_metrics_from_daily_returns(
         ]
         ok.sort(key=lambda x: x[1])
         best = ok[0][0] if ok else None
+        ks_ok = []
+        for d in candidates:
+            fit_d = fits.get(d) or {}
+            ks_p = (fit_d.get("ks") or {}).get("p_value")
+            bic = fit_d.get("bic")
+            if (
+                fit_d.get("ok")
+                and np.isfinite(float(bic))
+                and np.isfinite(float(ks_p))
+                and float(ks_p) >= ks_alpha
+            ):
+                ks_ok.append((d, float(bic)))
+        ks_ok.sort(key=lambda x: x[1])
+        best_by_rule = best
+        if str(fit_rule).strip().lower() == "bic_ks":
+            if ks_ok:
+                best_by_rule = ks_ok[0][0]
+        elif best is not None:
+            best_by_rule = best
         # attach QQ points for each dist (limited points)
         qq = {}
         for d in candidates:
@@ -331,6 +493,22 @@ def bootstrap_metrics_from_daily_returns(
                 elif d == "t":
                     frozen = st.t(
                         df=fits[d]["params"]["df"],
+                        loc=fits[d]["params"]["loc"],
+                        scale=fits[d]["params"]["scale"],
+                    )
+                elif d == "ged":
+                    frozen = st.gennorm(
+                        fits[d]["params"]["beta"],
+                        loc=fits[d]["params"]["loc"],
+                        scale=fits[d]["params"]["scale"],
+                    )
+                elif d == "skew_t":
+                    jf = getattr(st, "jf_skew_t", None)
+                    if jf is None:
+                        raise ValueError("jf_skew_t_unavailable")
+                    frozen = jf(
+                        fits[d]["params"]["a"],
+                        fits[d]["params"]["b"],
                         loc=fits[d]["params"]["loc"],
                         scale=fits[d]["params"]["scale"],
                     )
@@ -351,8 +529,109 @@ def bootstrap_metrics_from_daily_returns(
         out[k]["fit"] = {
             "candidates": candidates,
             "best_by_bic": best,
+            "best_by_rule": best_by_rule,
+            "fit_rule": str(fit_rule),
+            "ks_alpha": float(ks_alpha),
             "dists": fits,
             "qq": qq,
+        }
+    sqn_arr = np.asarray(sqn_sims, dtype=float)
+    out["rolling_recent_100_sqn_median"] = _summarize(sqn_arr, observed=float(sqn_obs))
+    out["rolling_recent_100_sqn_median"]["hist"] = _histogram(
+        sqn_arr, bins=40, clip_q=(0.01, 0.99)
+    )
+    if has_r_mult:
+        fits = {d: _fit_one_distribution(sqn_arr, d) for d in candidates}
+        ok = [
+            (d, fits[d].get("bic"))
+            for d in candidates
+            if fits[d].get("ok") and np.isfinite(fits[d].get("bic"))
+        ]
+        ok.sort(key=lambda x: x[1])
+        best = ok[0][0] if ok else None
+        ks_ok = []
+        for d in candidates:
+            fit_d = fits.get(d) or {}
+            ks_p = (fit_d.get("ks") or {}).get("p_value")
+            bic = fit_d.get("bic")
+            if (
+                fit_d.get("ok")
+                and np.isfinite(float(bic))
+                and np.isfinite(float(ks_p))
+                and float(ks_p) >= ks_alpha
+            ):
+                ks_ok.append((d, float(bic)))
+        ks_ok.sort(key=lambda x: x[1])
+        best_by_rule = best
+        if str(fit_rule).strip().lower() == "bic_ks" and ks_ok:
+            best_by_rule = ks_ok[0][0]
+        qq = {}
+        for d in candidates:
+            if not fits[d].get("ok"):
+                qq[d] = {"p": [], "emp": [], "theory": []}
+                continue
+            try:
+                if d == "normal":
+                    frozen = st.norm(
+                        loc=fits[d]["params"]["mu"], scale=fits[d]["params"]["sigma"]
+                    )
+                elif d == "t":
+                    frozen = st.t(
+                        df=fits[d]["params"]["df"],
+                        loc=fits[d]["params"]["loc"],
+                        scale=fits[d]["params"]["scale"],
+                    )
+                elif d == "ged":
+                    frozen = st.gennorm(
+                        fits[d]["params"]["beta"],
+                        loc=fits[d]["params"]["loc"],
+                        scale=fits[d]["params"]["scale"],
+                    )
+                elif d == "skew_t":
+                    jf = getattr(st, "jf_skew_t", None)
+                    if jf is None:
+                        raise ValueError("jf_skew_t_unavailable")
+                    frozen = jf(
+                        fits[d]["params"]["a"],
+                        fits[d]["params"]["b"],
+                        loc=fits[d]["params"]["loc"],
+                        scale=fits[d]["params"]["scale"],
+                    )
+                else:
+                    frozen = st.lognorm(
+                        s=fits[d]["params"]["s"],
+                        loc=fits[d]["params"]["loc"],
+                        scale=fits[d]["params"]["scale"],
+                    )
+                qq[d] = _qq_points(sqn_arr, frozen, n_points=80)
+            except (
+                ValueError,
+                TypeError,
+                ZeroDivisionError,
+                FloatingPointError,
+            ):
+                qq[d] = {"p": [], "emp": [], "theory": []}
+        out["rolling_recent_100_sqn_median"]["fit"] = {
+            "candidates": candidates,
+            "best_by_bic": best,
+            "best_by_rule": best_by_rule,
+            "fit_rule": str(fit_rule),
+            "ks_alpha": float(ks_alpha),
+            "dists": fits,
+            "qq": qq,
+        }
+    else:
+        out["rolling_recent_100_sqn_median"]["fit"] = {
+            "candidates": candidates,
+            "best_by_bic": None,
+            "best_by_rule": None,
+            "fit_rule": str(fit_rule),
+            "ks_alpha": float(ks_alpha),
+            "dists": {
+                d: {"ok": False, "error": "insufficient_trade_r_multiples"}
+                for d in candidates
+            },
+            "qq": {d: {"p": [], "emp": [], "theory": []} for d in candidates},
         }
     period_out = None
     if period_freq:

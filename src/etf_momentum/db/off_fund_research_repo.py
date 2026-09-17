@@ -39,8 +39,19 @@ def upsert_off_fund_research_state(
     drift_rebalance_enabled: bool,
     drift_abs_threshold: float,
     drift_rel_threshold: float,
+    invest_mode: str,
+    dca_base_amount: float,
+    dca_periodic_amount: float,
+    dca_frequency: str,
+    dca_weekly_weekday: int,
+    dca_monthly_day: int,
+    dca_non_trading_shift: str,
     show_non_group_codes: bool,
     pair_chart_prefs_json: str | None,
+    replication_rolling_window: int,
+    replication_min_samples: int,
+    replication_include_portfolio: bool,
+    replication_drop_short_history_factors: bool,
 ) -> OffFundResearchState:
     obj = get_off_fund_research_state(db)
     obj.start_date = start_date
@@ -53,9 +64,22 @@ def upsert_off_fund_research_state(
     obj.drift_rebalance_enabled = bool(drift_rebalance_enabled)
     obj.drift_abs_threshold = float(drift_abs_threshold)
     obj.drift_rel_threshold = float(drift_rel_threshold)
+    obj.invest_mode = str(invest_mode)
+    obj.dca_base_amount = float(dca_base_amount)
+    obj.dca_periodic_amount = float(dca_periodic_amount)
+    obj.dca_frequency = str(dca_frequency)
+    obj.dca_weekly_weekday = int(dca_weekly_weekday)
+    obj.dca_monthly_day = int(dca_monthly_day)
+    obj.dca_non_trading_shift = str(dca_non_trading_shift)
     obj.show_non_group_codes = bool(show_non_group_codes)
     obj.pair_chart_prefs_json = (
         str(pair_chart_prefs_json) if pair_chart_prefs_json is not None else None
+    )
+    obj.replication_rolling_window = int(replication_rolling_window)
+    obj.replication_min_samples = int(replication_min_samples)
+    obj.replication_include_portfolio = bool(replication_include_portfolio)
+    obj.replication_drop_short_history_factors = bool(
+        replication_drop_short_history_factors
     )
     db.flush()
     return obj

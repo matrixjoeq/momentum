@@ -4,8 +4,10 @@ from __future__ import annotations
 import math
 import inspect
 
+import numpy as np
 import pandas as pd
 import pytest
+from sqlalchemy import delete, update
 
 import etf_momentum.analysis.bt_trend as bt_trend_mod
 from etf_momentum.analysis.bt_trend import (
@@ -19,6 +21,7 @@ from etf_momentum.analysis.trend import (
     compute_trend_portfolio_backtest,
 )
 from etf_momentum.db.session import make_session_factory
+from etf_momentum.db.models import EtfPool, EtfPrice
 from tests.helpers.rotation_case_data import seed_prices
 
 
@@ -208,6 +211,44 @@ def _seed_case(engine) -> list:
         dates=dates,
     )
     return dates
+
+
+@pytest.mark.parametrize("runner", [compute_trend_backtest, compute_trend_backtest_bt])
+def test_single_backtest_prefix_is_invariant_to_future_extension(engine, runner):
+    dates = _seed_case(engine)
+    cutoff = dates[160]
+    sf = make_session_factory(engine)
+    common = dict(
+        code="A",
+        start=dates[0],
+        strategy="tsmom",
+        mom_lookback=20,
+        exec_price="close",
+        cost_bps=0.0,
+        slippage_rate=0.0,
+        quick_mode=True,
+    )
+    with sf() as db:
+        short = runner(db, TrendInputs(end=cutoff, **common))
+        extended = runner(db, TrendInputs(end=dates[-1], **common))
+
+    short_dates = list(short["nav"]["dates"])
+    extended_index = {day: index for index, day in enumerate(extended["nav"]["dates"])}
+    # The cutoff row is a terminal projection for close execution; causal rows
+    # strictly before it must not change when future observations are appended.
+    causal_dates = short_dates[:-1]
+    short_nav = short["nav"]["series"]["STRAT"]
+    extended_nav = extended["nav"]["series"]["STRAT"]
+    short_weight = short["signals"]["position_effective"]
+    extended_weight = extended["signals"]["position_effective"]
+    for index, day in enumerate(causal_dates):
+        other = extended_index[day]
+        assert float(short_nav[index]) == pytest.approx(
+            float(extended_nav[other]), rel=0.0, abs=1e-12
+        )
+        assert float(short_weight[index]) == pytest.approx(
+            float(extended_weight[other]), rel=0.0, abs=1e-12
+        )
 
 
 def test_bt_single_semantic_parity_keys_and_metrics(engine):
@@ -617,6 +658,339 @@ def test_bt_portfolio_effective_weights_semantic_parity(engine):
     b_aligned = b_w.reindex(common).fillna(0.0).astype(float)
     max_abs = (b_aligned - l_aligned).abs().to_numpy().max()
     assert float(max_abs) <= 1e-12
+
+
+def _series_frame(response: dict, key: str) -> pd.DataFrame:
+    payload = response[key]
+    return pd.DataFrame(
+        payload["series"],
+        index=pd.to_datetime(payload["dates"]),
+    ).sort_index()
+
+
+def _canonical_trigger_events(value: object, path: str = "") -> list[tuple]:
+    rows: list[tuple] = []
+    if isinstance(value, dict):
+        for key, child in sorted(value.items()):
+            child_path = f"{path}.{key}" if path else str(key)
+            if key == "trigger_events" and isinstance(child, list):
+                for event in child:
+                    if not isinstance(event, dict):
+                        continue
+                    if not any(
+                        event.get(field) is not None
+                        for field in (
+                            "date",
+                            "trigger_date",
+                            "execution_date",
+                            "trigger_source",
+                            "fill_price",
+                        )
+                    ):
+                        continue
+                    rows.append(
+                        (
+                            path,
+                            event.get("date"),
+                            event.get("trigger_date"),
+                            event.get("execution_date"),
+                            event.get("event_type"),
+                            event.get("trigger_source"),
+                            event.get("fill_price"),
+                            event.get("requested_reduce_fraction"),
+                        )
+                    )
+            else:
+                rows.extend(_canonical_trigger_events(child, child_path))
+    elif isinstance(value, list):
+        for child in value:
+            rows.extend(_canonical_trigger_events(child, path))
+    return sorted(rows, key=repr)
+
+
+def _canonical_closed_trades(response: dict) -> list[tuple]:
+    trades = (response.get("trade_statistics") or {}).get("closed_trades")
+    if trades is None:
+        trades = [
+            row
+            for row in (response.get("trade_statistics") or {}).get("trades", [])
+            if bool(row.get("closed"))
+        ]
+    return sorted(
+        (
+            str(row.get("code")),
+            str(row.get("entry_date")),
+            str(row.get("exit_date")),
+            float(row.get("return") or 0.0),
+            float(row.get("holding_return") or 0.0),
+            float(row.get("pnl_amount") or 0.0),
+        )
+        for row in trades
+    )
+
+
+def test_portfolio_daily_accounting_and_event_parity(engine) -> None:
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    inp = TrendPortfolioInputs(
+        codes=["A", "B", "C"],
+        start=dates[0],
+        end=dates[-1],
+        strategy="ma_filter",
+        ma_type="kama",
+        sma_window=20,
+        position_sizing="equal",
+        atr_stop_mode="trailing",
+        atr_stop_n=2.0,
+        r_take_profit_enabled=True,
+        bias_v_take_profit_enabled=True,
+        monthly_risk_budget_enabled=True,
+        monthly_risk_budget_pct=0.06,
+        cost_bps=5.0,
+        slippage_rate=0.001,
+        exec_price="close",
+        quick_mode=False,
+    )
+    with sf() as db:
+        legacy = compute_trend_portfolio_backtest(db, inp)
+        bt = compute_trend_portfolio_backtest_bt(db, inp)
+
+    for key in ("weights", "weights_decision"):
+        left = _series_frame(legacy, key)
+        right = _series_frame(bt, key)
+        pd.testing.assert_index_equal(left.index, right.index)
+        pd.testing.assert_index_equal(left.columns, right.columns)
+        np.testing.assert_allclose(left, right, rtol=0.0, atol=1e-12)
+
+    left_nav = _series_frame(legacy, "nav")[["STRAT"]]
+    right_nav = _series_frame(bt, "nav")[["STRAT"]]
+    pd.testing.assert_frame_equal(
+        left_nav,
+        right_nav,
+        check_exact=False,
+        rtol=0.0,
+        atol=1e-12,
+    )
+    left_cost = _series_frame(legacy, "return_decomposition")[["cost"]]
+    right_cost = _series_frame(bt, "return_decomposition")[["cost"]]
+    pd.testing.assert_frame_equal(
+        left_cost,
+        right_cost,
+        check_exact=False,
+        rtol=0.0,
+        atol=1e-12,
+    )
+    assert _canonical_trigger_events(
+        legacy.get("risk_controls") or {}
+    ) == _canonical_trigger_events(bt.get("risk_controls") or {})
+    left_trades = _canonical_closed_trades(legacy)
+    right_trades = _canonical_closed_trades(bt)
+    assert [row[:3] for row in left_trades] == [row[:3] for row in right_trades]
+    np.testing.assert_allclose(
+        [row[3:] for row in left_trades],
+        [row[3:] for row in right_trades],
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [compute_trend_portfolio_backtest, compute_trend_portfolio_backtest_bt],
+)
+def test_portfolio_availability_states_do_not_create_ghost_positions(
+    engine, runner
+) -> None:
+    dates = _seed_case(engine)
+    listing_date = dates[40]
+    gap_date = dates[120]
+    removal_date = dates[160]
+    sf = make_session_factory(engine)
+    with sf() as db:
+        db.add_all(
+            [
+                EtfPool(
+                    code="A",
+                    name="A",
+                    start_date=dates[0].strftime("%Y%m%d"),
+                ),
+                EtfPool(
+                    code="B",
+                    name="B",
+                    start_date=listing_date.strftime("%Y%m%d"),
+                ),
+                EtfPool(
+                    code="C",
+                    name="C",
+                    start_date=dates[0].strftime("%Y%m%d"),
+                    end_date=removal_date.strftime("%Y%m%d"),
+                ),
+            ]
+        )
+        db.execute(
+            delete(EtfPrice).where(
+                EtfPrice.code == "B",
+                EtfPrice.trade_date < listing_date,
+            )
+        )
+        db.execute(
+            delete(EtfPrice).where(
+                EtfPrice.code == "C",
+                (
+                    (EtfPrice.trade_date == gap_date)
+                    | (EtfPrice.trade_date > removal_date)
+                ),
+            )
+        )
+        db.commit()
+        out = runner(
+            db,
+            TrendPortfolioInputs(
+                codes=["A", "B", "C"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="tsmom",
+                mom_lookback=20,
+                tsmom_entry_threshold=0.01,
+                tsmom_exit_threshold=0.0,
+                position_sizing="equal",
+                dynamic_universe=True,
+                atr_stop_mode="static",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                exec_price="close",
+                quick_mode=False,
+            ),
+        )
+
+    weights = _series_frame(out, "weights")
+    assert (weights.loc[weights.index < pd.Timestamp(listing_date), "B"] == 0.0).all()
+    gap_timestamp = pd.Timestamp(gap_date)
+    assert weights.loc[gap_timestamp, "C"] == pytest.approx(
+        weights.shift(1).loc[gap_timestamp, "C"]
+    )
+    decision = _series_frame(out, "weights_decision")
+    post_removal = decision.index > pd.Timestamp(removal_date)
+    assert (decision.loc[post_removal, "C"] == 0.0).all()
+    post_dates = weights.index[weights.index > pd.Timestamp(removal_date)]
+    assert (weights.loc[post_dates[1:], "C"] == 0.0).all()
+    events = _canonical_trigger_events(out.get("risk_controls") or {})
+    assert not any(
+        gap_date.isoformat() in {str(event[1]), str(event[2]), str(event[3])}
+        for event in events
+    )
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [compute_trend_portfolio_backtest, compute_trend_portfolio_backtest_bt],
+)
+def test_portfolio_prefix_and_future_perturbation_are_causal(engine, runner) -> None:
+    dates = _seed_case(engine)
+    cutoff = dates[160]
+    sf = make_session_factory(engine)
+    common = dict(
+        codes=["A", "B", "C"],
+        start=dates[0],
+        strategy="tsmom",
+        mom_lookback=20,
+        tsmom_entry_threshold=0.01,
+        tsmom_exit_threshold=0.0,
+        position_sizing="equal",
+        dynamic_universe=True,
+        atr_stop_mode="static",
+        cost_bps=0.0,
+        slippage_rate=0.0,
+        exec_price="close",
+        quick_mode=True,
+    )
+    with sf() as db:
+        short = runner(db, TrendPortfolioInputs(end=cutoff, **common))
+        extended = runner(db, TrendPortfolioInputs(end=dates[-1], **common))
+        db.execute(
+            update(EtfPrice)
+            .where(EtfPrice.trade_date > cutoff)
+            .values(
+                close=EtfPrice.close * 7.0,
+                open=EtfPrice.open * 7.0,
+                high=EtfPrice.high * 7.0,
+                low=EtfPrice.low * 7.0,
+            )
+        )
+        db.commit()
+        perturbed = runner(db, TrendPortfolioInputs(end=dates[-1], **common))
+
+    causal_end = pd.Timestamp(cutoff)
+    for key in ("weights", "weights_decision", "nav"):
+        short_frame = _series_frame(short, key)
+        extended_frame = _series_frame(extended, key).reindex(short_frame.index)
+        perturbed_frame = _series_frame(perturbed, key).reindex(short_frame.index)
+        columns = ["STRAT"] if key == "nav" else list(short_frame.columns)
+        index = short_frame.index[short_frame.index < causal_end]
+        pd.testing.assert_frame_equal(
+            short_frame.loc[index, columns],
+            extended_frame.loc[index, columns],
+            check_exact=False,
+            rtol=0.0,
+            atol=1e-12,
+        )
+        pd.testing.assert_frame_equal(
+            extended_frame.loc[index, columns],
+            perturbed_frame.loc[index, columns],
+            check_exact=False,
+            rtol=0.0,
+            atol=1e-12,
+        )
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [compute_trend_portfolio_backtest, compute_trend_portfolio_backtest_bt],
+)
+def test_qfq_proportional_vintage_restatement_preserves_dimensionless_state(
+    engine, runner
+) -> None:
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    inp = TrendPortfolioInputs(
+        codes=["A", "B", "C"],
+        start=dates[0],
+        end=dates[-1],
+        strategy="tsmom",
+        mom_lookback=20,
+        tsmom_entry_threshold=0.01,
+        tsmom_exit_threshold=0.0,
+        position_sizing="equal",
+        dynamic_universe=True,
+        atr_stop_mode="static",
+        cost_bps=0.0,
+        slippage_rate=0.0,
+        exec_price="close",
+        quick_mode=True,
+    )
+    with sf() as db:
+        original = runner(db, inp)
+        db.execute(
+            update(EtfPrice)
+            .where(EtfPrice.adjust == "qfq")
+            .values(
+                close=EtfPrice.close * 13.0,
+                open=EtfPrice.open * 13.0,
+                high=EtfPrice.high * 13.0,
+                low=EtfPrice.low * 13.0,
+            )
+        )
+        db.commit()
+        restated = runner(db, inp)
+
+    for key in ("weights", "weights_decision"):
+        pd.testing.assert_frame_equal(
+            _series_frame(original, key),
+            _series_frame(restated, key),
+            check_exact=False,
+            rtol=0.0,
+            atol=1e-12,
+        )
 
 
 @pytest.mark.parametrize(

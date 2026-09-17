@@ -49,6 +49,8 @@ _apply_intraday_stop_execution_single = (
 _apply_monthly_risk_budget_gate = (
     _trend_semantic_helpers._apply_monthly_risk_budget_gate
 )
+_apply_cvar_budget_scaling_shared = _trend_semantic_helpers._apply_cvar_budget_scaling
+_historical_var_cvar_loss_shared = _trend_semantic_helpers._historical_var_cvar_loss
 _apply_r_multiple_take_profit_shared = (
     _trend_semantic_helpers._apply_r_multiple_take_profit
 )
@@ -1503,6 +1505,99 @@ def _series_index_to_date_str(series: pd.Series) -> pd.Series:
     return s
 
 
+def _ewma_corr_matrix_latest(
+    ret_df: pd.DataFrame, *, window: int = 60, decay: float = 0.94
+) -> dict[str, Any]:
+    df = ret_df.copy().replace([np.inf, -np.inf], np.nan).astype(float)
+    if df.empty or df.shape[1] <= 1:
+        return {
+            "ok": False,
+            "reason": "insufficient_series",
+            "window": int(window),
+            "decay": float(decay),
+            "codes": [str(c) for c in df.columns],
+            "matrix": [],
+        }
+    win = int(max(2, window))
+    lam = float(decay)
+    if (not np.isfinite(lam)) or lam <= 0.0 or lam >= 1.0:
+        lam = 0.94
+    tail = df.tail(win)
+    n_rows = int(tail.shape[0])
+    if n_rows < win:
+        return {
+            "ok": False,
+            "reason": "insufficient_window_rows",
+            "window": int(win),
+            "decay": float(lam),
+            "codes": [str(c) for c in tail.columns],
+            "matrix": [],
+            "row_count": n_rows,
+            "required_rows": int(win),
+        }
+
+    # Recent observation gets highest weight.
+    w_raw = np.power(lam, np.arange(n_rows - 1, -1, -1, dtype=float))
+    codes = [str(c) for c in tail.columns]
+    n_codes = len(codes)
+    mat = np.full((n_codes, n_codes), np.nan, dtype=float)
+    min_pair_obs = 20
+    for i in range(n_codes):
+        xi = tail.iloc[:, i].to_numpy(dtype=float)
+        for j in range(i, n_codes):
+            xj = tail.iloc[:, j].to_numpy(dtype=float)
+            mask = np.isfinite(xi) & np.isfinite(xj)
+            n_eff = int(np.sum(mask))
+            if n_eff < min_pair_obs:
+                continue
+            w = w_raw[mask]
+            sw = float(np.sum(w))
+            if (not np.isfinite(sw)) or sw <= 0.0:
+                continue
+            w = w / sw
+            a = xi[mask]
+            b = xj[mask]
+            ma = float(np.sum(w * a))
+            mb = float(np.sum(w * b))
+            da = a - ma
+            db = b - mb
+            va = float(np.sum(w * da * da))
+            vb = float(np.sum(w * db * db))
+            if va <= 0.0 or vb <= 0.0:
+                continue
+            cov = float(np.sum(w * da * db))
+            corr = float(np.clip(cov / np.sqrt(va * vb), -1.0, 1.0))
+            mat[i, j] = corr
+            mat[j, i] = corr
+    for i in range(n_codes):
+        if np.isfinite(mat[i, i]):
+            continue
+        xi = tail.iloc[:, i].to_numpy(dtype=float)
+        if int(np.sum(np.isfinite(xi))) >= min_pair_obs:
+            mat[i, i] = 1.0
+    matrix: list[list[float | None]] = []
+    for i in range(n_codes):
+        row: list[float | None] = []
+        for j in range(n_codes):
+            v = mat[i, j]
+            row.append(float(v) if np.isfinite(v) else None)
+        matrix.append(row)
+    return {
+        "ok": True,
+        "window": int(win),
+        "decay": float(lam),
+        "codes": codes,
+        "row_count": int(n_rows),
+        "start_date": (
+            pd.to_datetime(tail.index[0]).strftime("%Y-%m-%d") if n_rows > 0 else None
+        ),
+        "end_date": (
+            pd.to_datetime(tail.index[-1]).strftime("%Y-%m-%d") if n_rows > 0 else None
+        ),
+        "matrix": matrix,
+    }
+
+
 def _build_entry_signal_date_map(dates: pd.Index) -> dict[str, str | None]:
     ds = [str(pd.to_datetime(d).date()) for d in dates]
     out: dict[str, str | None] = {}
@@ -1876,6 +1971,8 @@ def _trade_returns_from_weight_series(
     w: pd.Series,
     ret_exec: pd.Series,
     *,
+    return_weight: pd.Series | None = None,
+    return_override: pd.Series | None = None,
     cost_bps: float,
     slippage_rate: float,
     exec_price: pd.Series,
@@ -1888,6 +1985,22 @@ def _trade_returns_from_weight_series(
         .astype(float)
         .reindex(dates)
         .fillna(0.0)
+    )
+    rw = (
+        pd.to_numeric(return_weight, errors="coerce")
+        .astype(float)
+        .reindex(dates)
+        .fillna(0.0)
+        if return_weight is not None
+        else ww.copy()
+    )
+    override = (
+        pd.to_numeric(return_override, errors="coerce")
+        .astype(float)
+        .reindex(dates)
+        .fillna(0.0)
+        if return_override is not None
+        else pd.Series(0.0, index=dates, dtype=float)
     )
     n = int(len(dates))
     if n <= 0:
@@ -1902,15 +2015,34 @@ def _trade_returns_from_weight_series(
     )
     slip_spread = float(slippage_rate)
     returns: list[float] = []
+    open_mtm_returns: list[float] = []
     trades: list[dict[str, Any]] = []
     active = False
     start_i = -1
     start_nav = 1.0
     nav_prev = 1.0
+    entry_px_exec: float | None = None
+
+    def _entry_exec_price(px_raw: float) -> float | None:
+        if not np.isfinite(px_raw) or px_raw <= 0.0:
+            return None
+        return float(px_raw + 0.5 * slip_spread) if slip_spread > 0.0 else float(px_raw)
+
+    def _exit_exec_price(px_raw: float) -> float | None:
+        if not np.isfinite(px_raw) or px_raw <= 0.0:
+            return None
+        if slip_spread > 0.0:
+            return float(max(1e-12, px_raw - 0.5 * slip_spread))
+        return float(px_raw)
+
     for i in range(n):
         cur = float(ww.iloc[i])
         prev = float(ww.iloc[i - 1]) if i > 0 else 0.0
+        ret_weight = float(rw.iloc[i])
         r = float(rr.iloc[i]) if np.isfinite(float(rr.iloc[i])) else 0.0
+        override_ret = (
+            float(override.iloc[i]) if np.isfinite(float(override.iloc[i])) else 0.0
+        )
         turnover = abs(float(cur) - float(prev)) / 2.0
         px_i = (
             float(px.iloc[i])
@@ -1923,12 +2055,16 @@ def _trade_returns_from_weight_series(
             else 0.0
         )
         day_ret = (
-            float(cur) * float(r) - float(turnover) * float(cost_rate) - float(slip_ret)
+            float(ret_weight) * float(r)
+            + float(override_ret)
+            - float(turnover) * float(cost_rate)
+            - float(slip_ret)
         )
         if (not active) and (prev <= eps) and (cur > eps):
             active = True
             start_i = int(i)
             start_nav = float(nav_prev)
+            entry_px_exec = _entry_exec_price(px_i)
         nav_cur = float(nav_prev) * (1.0 + float(day_ret))
         if active and (prev > eps) and (cur <= eps):
             tr = (
@@ -1937,12 +2073,24 @@ def _trade_returns_from_weight_series(
                 else float("nan")
             )
             returns.append(float(tr))
+            exit_px_exec = _exit_exec_price(px_i)
+            holding_days = int(max(1, i - start_i + 1)) if start_i >= 0 else None
+            holding_ret = (
+                float(exit_px_exec / entry_px_exec - 1.0)
+                if (entry_px_exec is not None and exit_px_exec is not None)
+                else None
+            )
             trades.append(
                 {
                     "entry_date": str(pd.to_datetime(dates[start_i]).date())
                     if start_i >= 0
                     else None,
+                    "entry_price": entry_px_exec,
                     "exit_date": str(pd.to_datetime(dates[i]).date()),
+                    "exit_price": exit_px_exec,
+                    "holding_days": holding_days,
+                    "holding_return": holding_ret,
+                    "total_equity_return": float(tr),
                     "return": float(tr),
                     "closed": True,
                 }
@@ -1950,6 +2098,7 @@ def _trade_returns_from_weight_series(
             active = False
             start_i = -1
             start_nav = float(nav_cur)
+            entry_px_exec = None
         nav_prev = float(nav_cur)
     if active and start_i >= 0:
         tr = (
@@ -1957,22 +2106,50 @@ def _trade_returns_from_weight_series(
             if float(start_nav) != 0
             else float("nan")
         )
-        returns.append(float(tr))
+        open_mtm_returns.append(float(tr))
+        last_px = (
+            float(px.iloc[n - 1])
+            if np.isfinite(float(px.iloc[n - 1])) and float(px.iloc[n - 1]) > 0.0
+            else float("nan")
+        )
+        exit_px_exec = _exit_exec_price(last_px)
+        holding_days = int(max(1, (n - 1) - start_i + 1))
+        holding_ret = (
+            float(exit_px_exec / entry_px_exec - 1.0)
+            if (entry_px_exec is not None and exit_px_exec is not None)
+            else None
+        )
         trades.append(
             {
                 "entry_date": str(pd.to_datetime(dates[start_i]).date()),
+                "entry_price": entry_px_exec,
                 "exit_date": str(pd.to_datetime(dates[n - 1]).date()),
+                "exit_price": exit_px_exec,
+                "holding_days": holding_days,
+                "holding_return": holding_ret,
+                "total_equity_return": float(tr),
                 "return": float(tr),
                 "closed": False,
             }
         )
-    return {"returns": returns, "trades": trades}
+    closed_trades = [dict(row) for row in trades if bool(row.get("closed"))]
+    open_trades = [dict(row) for row in trades if not bool(row.get("closed"))]
+    return {
+        "returns": returns,
+        "closed_returns": list(returns),
+        "open_mtm_returns": open_mtm_returns,
+        "trades": trades,
+        "closed_trades": closed_trades,
+        "open_trades": open_trades,
+    }
 
 
 def _trade_returns_from_weight_df(
     w: pd.DataFrame,
     ret_exec: pd.DataFrame,
     *,
+    return_weight: pd.DataFrame | None = None,
+    return_override: pd.DataFrame | None = None,
     cost_bps: float,
     slippage_rate: float,
     exec_price: pd.DataFrame,
@@ -1985,6 +2162,16 @@ def _trade_returns_from_weight_df(
         one = _trade_returns_from_weight_series(
             w[c] if c in w.columns else pd.Series(dtype=float),
             ret_exec[c] if c in ret_exec.columns else pd.Series(dtype=float),
+            return_weight=(
+                return_weight[c]
+                if return_weight is not None and c in return_weight.columns
+                else None
+            ),
+            return_override=(
+                return_override[c]
+                if return_override is not None and c in return_override.columns
+                else None
+            ),
             cost_bps=float(cost_bps),
             slippage_rate=float(slippage_rate),
             exec_price=exec_price[c]
@@ -1996,13 +2183,25 @@ def _trade_returns_from_weight_df(
         by_code_returns[str(c)] = [float(x) for x in (one.get("returns") or [])]
         by_code_trades[str(c)] = list(one.get("trades") or [])
     all_returns: list[float] = []
+    all_open_mtm_returns: list[float] = []
     all_trades: list[dict[str, Any]] = []
     for c in by_code_returns:
         all_returns.extend(by_code_returns[c])
-        all_trades.extend([{**x, "code": str(c)} for x in by_code_trades.get(c, [])])
+        code_trades = [{**x, "code": str(c)} for x in by_code_trades.get(c, [])]
+        all_trades.extend(code_trades)
+        all_open_mtm_returns.extend(
+            float(x["return"])
+            for x in code_trades
+            if not bool(x.get("closed"))
+            and np.isfinite(float(x.get("return", float("nan"))))
+        )
     return {
         "returns": [float(x) for x in all_returns],
+        "closed_returns": [float(x) for x in all_returns],
+        "open_mtm_returns": all_open_mtm_returns,
         "trades": all_trades,
+        "closed_trades": [x for x in all_trades if bool(x.get("closed"))],
+        "open_trades": [x for x in all_trades if not bool(x.get("closed"))],
         "returns_by_code": by_code_returns,
         "trades_by_code": by_code_trades,
     }
@@ -2535,11 +2734,31 @@ def _apply_r_multiple_take_profit(
     low: pd.Series,
     enabled: bool,
     reentry_mode: str,
+    execution_mode: str = "intraday",
+    execution_time: str = "full_day",
     atr_window: int,
     atr_n: float,
     tiers: list[dict[str, float]] | None,
     atr_stop_enabled: bool,
 ) -> tuple[pd.Series, dict[str, Any]]:
+    # Delegate to trend shared helper so bt engine keeps exact
+    # semantic parity for R pullback and dynamic ATR risk logic.
+    return _apply_r_multiple_take_profit_shared(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=enabled,
+        reentry_mode=reentry_mode,
+        execution_mode=execution_mode,
+        execution_time=execution_time,
+        atr_window=atr_window,
+        atr_n=atr_n,
+        tiers=tiers,
+        atr_stop_enabled=atr_stop_enabled,
+    )
+
     tiers_v = _normalize_r_take_profit_tiers(tiers)
     reentry_v = str(reentry_mode or "reenter").strip().lower()
     if reentry_v not in {"reenter", "wait_next_entry"}:
@@ -3398,6 +3617,16 @@ def _validate_bt_single_inputs(inp: Any) -> None:
         or risk_budget_pct > 0.03
     ):
         raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
+    cvar_window = int(getattr(inp, "cvar_window", 60) or 60)
+    if cvar_window < 20:
+        raise ValueError("cvar_window must be >= 20")
+    cvar_budget_pct = float(getattr(inp, "cvar_budget_pct", 0.02) or 0.02)
+    if (
+        (not np.isfinite(cvar_budget_pct))
+        or cvar_budget_pct < 0.001
+        or cvar_budget_pct > 0.10
+    ):
+        raise ValueError("cvar_budget_pct must be in [0.001, 0.10]")
     risk_budget_rebalance_mode = (
         str(
             getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative"
@@ -3674,6 +3903,9 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "quick_mode": bool(getattr(inp, "quick_mode", False)),
         "risk_budget_atr_window": int(getattr(inp, "risk_budget_atr_window", 20) or 20),
         "risk_budget_pct": float(getattr(inp, "risk_budget_pct", 0.01) or 0.01),
+        "cvar_risk_mgmt_enabled": bool(getattr(inp, "cvar_risk_mgmt_enabled", False)),
+        "cvar_window": int(getattr(inp, "cvar_window", 60) or 60),
+        "cvar_budget_pct": float(getattr(inp, "cvar_budget_pct", 0.02) or 0.02),
         "risk_budget_overcap_policy": str(
             getattr(inp, "risk_budget_overcap_policy", "scale") or "scale"
         ),
@@ -3980,6 +4212,17 @@ def _metrics_from_ret(ret: pd.Series, rf: float) -> dict[str, float]:
     }
     out["ulcer_performance_index"] = (
         float(ann_ret / (ulcer / 100.0)) if ulcer > 0.0 else float("nan")
+    )
+    var95, cvar95 = _historical_var_cvar_loss_shared(s, confidence=0.95)
+    out["var_95"] = (
+        float(var95)
+        if var95 is not None and np.isfinite(float(var95))
+        else float("nan")
+    )
+    out["cvar_95"] = (
+        float(cvar95)
+        if cvar95 is not None and np.isfinite(float(cvar95))
+        else float("nan")
     )
     return out
 
@@ -4549,6 +4792,9 @@ def _run_single_backtesting(
         getattr(inp, "bias_v_take_profit_tiers", None),
     )
     monthly_enabled = bool(getattr(inp, "monthly_risk_budget_enabled", False))
+    cvar_risk_mgmt_enabled = bool(getattr(inp, "cvar_risk_mgmt_enabled", False))
+    cvar_window = int(getattr(inp, "cvar_window", 60) or 60)
+    cvar_budget_pct = float(getattr(inp, "cvar_budget_pct", 0.02) or 0.02)
     ps = str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
     # Legacy `compute_trend_backtest` compounds returns with explicit execution-day weight
     # transitions (shift(1), open vs close legs). The optional Backtest.run fast path
@@ -4613,6 +4859,29 @@ def _run_single_backtesting(
         "blocked_entry_count": 0,
         "blocked_entry_count_by_code": {str(code): 0},
     }
+    cvar_position_scale_stats: dict[str, Any] = {
+        "enabled": bool(cvar_risk_mgmt_enabled),
+        "window": int(cvar_window),
+        "budget_pct": float(cvar_budget_pct),
+        "confidence": 0.95,
+        "scale_applied_count": 0,
+        "cvar_scale_trigger_count": 0,
+        "cvar_scale_trigger_episode_count": 0,
+        "cvar_scale_trigger_count_by_bucket": {
+            "mild_0.8_1.0": 0,
+            "medium_0.5_0.8": 0,
+            "strong_0.0_0.5": 0,
+        },
+        "cvar_scale_trigger_days": 0,
+        "cvar_scale_trigger_dates": [],
+        "cvar_estimate_available_count": 0,
+        "cvar_scale_fallback_count": 0,
+        "cvar_scale_fallback_reasons": [],
+        "cvar_scale_fallback_last_reason": None,
+        "mean_scale": 1.0,
+        "min_scale": 1.0,
+        "max_scale": 1.0,
+    }
     initial_account_amount = getattr(inp, "initial_account_amount", None)
     has_initial_account_amount = bool(
         initial_account_amount is not None
@@ -4623,13 +4892,22 @@ def _run_single_backtesting(
     base_pos = raw_pos.astype(float).fillna(0.0)
     r_profit_scaleout_mult = pd.Series(1.0, index=base_pos.index, dtype=float)
     raw_pos_for_exec = base_pos.copy()
+    risk_open = bt_df["SigOpen"].astype(float)
+    risk_close = bt_df["SigClose"].astype(float)
+    risk_high = bt_df["SigHigh"].astype(float)
+    risk_low = bt_df["SigLow"].astype(float)
+    if ep == "close":
+        risk_open = risk_open.shift(-1)
+        risk_close = risk_close.shift(-1)
+        risk_high = risk_high.shift(-1)
+        risk_low = risk_low.shift(-1)
     if not simple_backtesting_mode:
         raw_pos_for_exec, atr_stop_stats = _apply_atr_stop(
             raw_pos_for_exec,
-            open_=bt_df["SigOpen"].astype(float),
-            close=bt_df["SigClose"].astype(float),
-            high=bt_df["SigHigh"].astype(float),
-            low=bt_df["SigLow"].astype(float),
+            open_=risk_open,
+            close=risk_close,
+            high=risk_high,
+            low=risk_low,
             mode=atr_mode,
             atr_basis=atr_basis,
             reentry_mode=atr_reentry_mode,
@@ -4645,10 +4923,10 @@ def _run_single_backtesting(
         }
         raw_pos_for_exec, bias_v_tp_stats = _apply_bias_v_take_profit_shared(
             raw_pos_for_exec,
-            open_=bt_df["SigOpen"].astype(float),
-            close=bt_df["SigClose"].astype(float),
-            high=bt_df["SigHigh"].astype(float),
-            low=bt_df["SigLow"].astype(float),
+            open_=risk_open,
+            close=risk_close,
+            high=risk_high,
+            low=risk_low,
             enabled=bias_v_tp_enabled,
             reentry_mode=bias_v_tp_reentry_mode,
             execution_mode=bias_v_tp_execution_mode,
@@ -4658,12 +4936,12 @@ def _run_single_backtesting(
             atr_window=int(getattr(inp, "bias_v_atr_window", 20)),
             tiers=[dict(x) for x in bias_v_tp_tiers],
         )
-        raw_pos_for_exec, r_take_profit_stats = _apply_r_multiple_take_profit_shared(
+        raw_pos_for_exec, r_take_profit_stats = _apply_r_multiple_take_profit(
             raw_pos_for_exec,
-            open_=bt_df["SigOpen"].astype(float),
-            close=bt_df["SigClose"].astype(float),
-            high=bt_df["SigHigh"].astype(float),
-            low=bt_df["SigLow"].astype(float),
+            open_=risk_open,
+            close=risk_close,
+            high=risk_high,
+            low=risk_low,
             enabled=rtp_enabled,
             reentry_mode=rtp_reentry_mode,
             execution_mode=rtp_execution_mode,
@@ -4678,10 +4956,10 @@ def _run_single_backtesting(
         r_profit_scaleout_mult, r_profit_scaleout_stats = (
             _build_r_profit_scaleout_plan_shared(
                 raw_pos_for_exec.astype(float).fillna(0.0),
-                open_=bt_df["SigOpen"].astype(float),
-                close=bt_df["SigClose"].astype(float),
-                high=bt_df["SigHigh"].astype(float),
-                low=bt_df["SigLow"].astype(float),
+                open_=risk_open,
+                close=risk_close,
+                high=risk_high,
+                low=risk_low,
                 enabled=bool(rps_enabled),
                 execution_mode=str(rps_execution_mode),
                 execution_time=str(rps_execution_time),
@@ -4696,10 +4974,10 @@ def _run_single_backtesting(
         )
         _, ma_trailing_stop_stats = _build_ma_trailing_stop_plan_shared(
             raw_pos_for_exec.astype(float).fillna(0.0),
-            open_=bt_df["SigOpen"].astype(float),
-            close=bt_df["SigClose"].astype(float),
-            high=bt_df["SigHigh"].astype(float),
-            low=bt_df["SigLow"].astype(float),
+            open_=risk_open,
+            close=risk_close,
+            high=risk_high,
+            low=risk_low,
             enabled=bool(ma_trailing_stop_enabled),
             ma_type=str(ma_trailing_stop_ma_type),
             execution_mode=str(ma_trailing_stop_execution_mode),
@@ -4709,6 +4987,26 @@ def _run_single_backtesting(
             exit_window=int(ma_trailing_stop_exit_window),
             reduce_fraction=float(ma_trailing_stop_reduce_fraction),
         )
+        if ep == "close":
+            atr_stop_stats = _trend_semantic_helpers._advance_overlay_market_dates(
+                atr_stop_stats, raw_pos_for_exec.index
+            )
+            bias_v_tp_stats = _trend_semantic_helpers._advance_overlay_market_dates(
+                bias_v_tp_stats, raw_pos_for_exec.index
+            )
+            r_take_profit_stats = _trend_semantic_helpers._advance_overlay_market_dates(
+                r_take_profit_stats, raw_pos_for_exec.index
+            )
+            r_profit_scaleout_stats = (
+                _trend_semantic_helpers._advance_overlay_market_dates(
+                    r_profit_scaleout_stats, raw_pos_for_exec.index
+                )
+            )
+            ma_trailing_stop_stats = (
+                _trend_semantic_helpers._advance_overlay_market_dates(
+                    ma_trailing_stop_stats, raw_pos_for_exec.index
+                )
+            )
 
         sizing_scale = pd.Series(1.0, index=raw_pos_for_exec.index, dtype=float)
         if ps == "fixed_ratio":
@@ -4804,6 +5102,17 @@ def _run_single_backtesting(
         raw_pos_for_exec = (
             raw_pos_for_exec.clip(lower=0.0, upper=1.0) * sizing_scale
         ).astype(float)
+        if bool(cvar_risk_mgmt_enabled):
+            cvar_scaled, cvar_position_scale_stats = _apply_cvar_budget_scaling_shared(
+                raw_pos_for_exec.to_frame(code),
+                asset_returns=ret_exec_hfq.to_frame(code).reindex(
+                    raw_pos_for_exec.index
+                ),
+                enabled=True,
+                window=int(cvar_window),
+                budget_pct=float(cvar_budget_pct),
+            )
+            raw_pos_for_exec = cvar_scaled[code].astype(float)
 
         if monthly_enabled:
             atr_gate = _atr_from_hlc(
@@ -5114,6 +5423,7 @@ def _run_single_backtesting(
             "compatibility_meta": dict(risk_control_compatibility_meta),
             "vol_risk_adjust": vol_risk_stats,
             "vol_periodic_rebalance": vol_periodic_stats,
+            "cvar_risk_mgmt": cvar_position_scale_stats,
             "monthly_risk_budget_gate": monthly_gate_stats,
         },
     }
@@ -5558,6 +5868,10 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     trade_one = _trade_returns_from_weight_series(
         w_eff.reindex(nav.index).astype(float),
         ret_exec_s.reindex(nav.index).astype(float),
+        return_weight=w_ret.reindex(nav.index).astype(float),
+        return_override=(atr_over + bv_over + rtp_over + rps_over + ma_over)
+        .reindex(nav.index)
+        .astype(float),
         cost_bps=float(getattr(inp, "cost_bps", 0.0) or 0.0),
         slippage_rate=float(getattr(inp, "slippage_rate", 0.0) or 0.0),
         exec_price=px_exec_s.reindex(nav.index).ffill().astype(float),
@@ -5967,6 +6281,27 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 "vol_periodic_rebalance_trigger_count": int(
                     periodic_stats.get("periodic_rebalance_trigger_count", 0)
                 ),
+                "cvar_scale_trigger_count": int(
+                    (
+                        (sem_dbg.get("cvar_risk_mgmt") or {}).get(
+                            "cvar_scale_trigger_count", 0
+                        )
+                    )
+                ),
+                "cvar_scale_trigger_episode_count": int(
+                    (
+                        (sem_dbg.get("cvar_risk_mgmt") or {}).get(
+                            "cvar_scale_trigger_episode_count", 0
+                        )
+                    )
+                ),
+                "cvar_scale_fallback_count": int(
+                    (
+                        (sem_dbg.get("cvar_risk_mgmt") or {}).get(
+                            "cvar_scale_fallback_count", 0
+                        )
+                    )
+                ),
                 "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
                 "cash_management_data_available": bool(cash_data_available),
                 "cash_management_return_contribution": cash_contrib_total,
@@ -5997,7 +6332,13 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
         "rolling": _rolling_pack(nav),
         "attribution": attribution,
         "trade_statistics": {
+            "scope": "closed_trades_only",
             "all": {"n": int(single["trade_count"])},
+            "episode_counts": {
+                "all": len(trade_one.get("trades", [])),
+                "closed": len(trade_one.get("closed_trades", [])),
+                "open_mtm": len(trade_one.get("open_trades", [])),
+            },
             "overall": overall_stats,
             "by_code": by_code_stats,
             "trades": trade_stats_trades,
@@ -6112,6 +6453,7 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 },
             },
             "compatibility_meta": dict(sem_dbg.get("compatibility_meta") or {}),
+            "cvar_risk_mgmt": dict(sem_dbg.get("cvar_risk_mgmt") or {}),
             "monthly_risk_budget_gate": {
                 **dict(sem_dbg.get("monthly_risk_budget_gate") or {}),
                 "enabled": bool(getattr(inp, "monthly_risk_budget_enabled", False)),
@@ -6952,6 +7294,29 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     standard_event_scale_down_total = 0
     standard_transition_under_to_over_total = 0
     standard_transition_over_to_under_total = 0
+    cvar_position_scale_stats: dict[str, Any] = {
+        "enabled": bool(getattr(inp, "cvar_risk_mgmt_enabled", False)),
+        "window": int(getattr(inp, "cvar_window", 60) or 60),
+        "budget_pct": float(getattr(inp, "cvar_budget_pct", 0.02) or 0.02),
+        "confidence": 0.95,
+        "scale_applied_count": 0,
+        "cvar_scale_trigger_count": 0,
+        "cvar_scale_trigger_episode_count": 0,
+        "cvar_scale_trigger_count_by_bucket": {
+            "mild_0.8_1.0": 0,
+            "medium_0.5_0.8": 0,
+            "strong_0.0_0.5": 0,
+        },
+        "cvar_scale_trigger_days": 0,
+        "cvar_scale_trigger_dates": [],
+        "cvar_estimate_available_count": 0,
+        "cvar_scale_fallback_count": 0,
+        "cvar_scale_fallback_reasons": [],
+        "cvar_scale_fallback_last_reason": None,
+        "mean_scale": 1.0,
+        "min_scale": 1.0,
+        "max_scale": 1.0,
+    }
     fixed_ext_events: list[dict[str, Any]] = []
     fixed_skip_events: list[dict[str, Any]] = []
     if ps == "fixed_ratio":
@@ -7561,6 +7926,18 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             prev_rb_w = w_row.copy()
             prev_rb_active_set = set(active_set)
 
+    if bool(getattr(inp, "cvar_risk_mgmt_enabled", False)):
+        wdf, cvar_position_scale_stats = _apply_cvar_budget_scaling_shared(
+            wdf.astype(float),
+            asset_returns=ret_hfq_df.reindex(index=wdf.index, columns=wdf.columns)
+            .astype(float)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0),
+            enabled=True,
+            window=int(getattr(inp, "cvar_window", 60) or 60),
+            budget_pct=float(getattr(inp, "cvar_budget_pct", 0.02) or 0.02),
+        )
+
     monthly_attempted_total = 0
     monthly_blocked_total = 0
     if bool(getattr(inp, "monthly_risk_budget_enabled", False)):
@@ -7641,6 +8018,17 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         .ffill()
         .astype(float)
     )
+    close_sig_corr_df = (
+        pd.DataFrame(sig_close_map)
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .astype(float)
+    )
+    group_daily_ret_df = (
+        close_sig_corr_df.pct_change(fill_method=None)
+        .replace([np.inf, -np.inf], np.nan)
+        .astype(float)
+    )
+    ewma_corr_60 = _ewma_corr_matrix_latest(group_daily_ret_df, window=60, decay=0.94)
     ret_exec_open_day_df = (
         pd.DataFrame(ret_exec_open_day_map)
         .reindex(index=wdf.index, columns=wdf.columns)
@@ -7827,6 +8215,12 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         )
         for c in wdf.columns
     }
+    membership_mask = _trend_semantic_helpers._pool_membership_mask(
+        db,
+        codes=codes,
+        index=wdf.index,
+    )
+    wdf = wdf.where(membership_mask, 0.0).astype(float)
     w_post = wdf.shift(1).fillna(0.0).astype(float).clip(lower=0.0)
 
     def _apply_all_intraday_overlays_df(
@@ -7834,7 +8228,15 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         *,
         mode: str,
         scale_multiplier_mode: str = "absolute",
-    ) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
+    ) -> tuple[
+        pd.DataFrame,
+        pd.Series,
+        pd.Series,
+        pd.Series,
+        pd.Series,
+        pd.Series,
+        pd.DataFrame,
+    ]:
         del scale_multiplier_mode
         w_tmp, over_by_overlay = _apply_intraday_or_arbitration_portfolio(
             weights=weight_in.astype(float).copy(),
@@ -7849,6 +8251,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             open_sig_df=open_sig_df,
             close_sig_df=close_sig_df,
         )
+        over_by_overlay_asset = dict(over_by_overlay.get("_by_asset") or {})
         atr_over = over_by_overlay.get(
             "atr_stop", pd.Series(0.0, index=w_tmp.index, dtype=float)
         )
@@ -7864,6 +8267,26 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         ma_over = over_by_overlay.get(
             "ma_trailing_stop", pd.Series(0.0, index=w_tmp.index, dtype=float)
         )
+        risk_over_by_asset = sum(
+            (
+                over_by_overlay_asset.get(
+                    overlay,
+                    pd.DataFrame(
+                        0.0, index=w_tmp.index, columns=w_tmp.columns, dtype=float
+                    ),
+                )
+                for overlay in (
+                    "atr_stop",
+                    "bias_v_take_profit",
+                    "r_take_profit",
+                    "r_profit_scaleout",
+                    "ma_trailing_stop",
+                )
+            ),
+            start=pd.DataFrame(
+                0.0, index=w_tmp.index, columns=w_tmp.columns, dtype=float
+            ),
+        )
         return (
             w_tmp.astype(float),
             atr_over.astype(float),
@@ -7871,6 +8294,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             rtp_over.astype(float),
             rps_over.astype(float),
             ma_over.astype(float),
+            risk_over_by_asset.astype(float),
         )
 
     open_leg_mode = str(ep_port)
@@ -7881,6 +8305,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         rtp_over_post,
         rps_over_post,
         ma_over_post,
+        risk_over_by_asset_post,
     ) = _apply_all_intraday_overlays_df(w_post, mode=open_leg_mode)
     w_eff = w_post.astype(float)
     w_ret = w_eff.copy().astype(float)
@@ -7900,6 +8325,11 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     ma_trailing_stop_override_ret = (
         ma_over_post.reindex(w_eff.index).fillna(0.0).astype(float)
     )
+    risk_exit_override_by_asset = (
+        risk_over_by_asset_post.reindex(index=w_eff.index, columns=w_eff.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
     if ep_port == "close":
         w_close_base = w_eff.shift(1).fillna(0.0).astype(float)
         (
@@ -7909,6 +8339,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             r_take_profit_override_ret,
             r_profit_scaleout_override_ret,
             ma_trailing_stop_override_ret,
+            risk_exit_override_by_asset,
         ) = _apply_all_intraday_overlays_df(
             w_close_base,
             mode="close",
@@ -7973,6 +8404,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             ).astype(float)
             ma_trailing_stop_override_ret = (
                 ma_trailing_stop_override_ret * risk_scale
+            ).astype(float)
+            risk_exit_override_by_asset = risk_exit_override_by_asset.mul(
+                risk_scale, axis=0
             ).astype(float)
         if bool(
             str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
@@ -8175,13 +8609,11 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             },
         }
     nav = _as_nav(port_ret)
-    close_hfq = (
-        load_close_prices(
-            db, codes=list(nav_map.keys()), start=inp.start, end=inp.end, adjust="hfq"
-        )
-        .reindex(nav.index)
-        .ffill()
-    )
+    close_hfq = load_close_prices(
+        db, codes=list(nav_map.keys()), start=inp.start, end=inp.end, adjust="hfq"
+    ).reindex(nav.index)
+    if not dynamic_universe:
+        close_hfq = close_hfq.ffill()
     bh_ret = (
         hfq_close_daily_equal_weight_returns(
             close_hfq, dynamic_universe=dynamic_universe
@@ -8390,6 +8822,14 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     trade_pack = _trade_returns_from_weight_df(
         w_eff.reindex(index=nav.index, columns=w_eff.columns).astype(float).fillna(0.0),
         ret_exec_df.reindex(index=nav.index, columns=w_eff.columns)
+        .astype(float)
+        .fillna(0.0),
+        return_weight=w_ret.reindex(index=nav.index, columns=w_eff.columns)
+        .astype(float)
+        .fillna(0.0),
+        return_override=risk_exit_override_by_asset.reindex(
+            index=nav.index, columns=w_eff.columns
+        )
         .astype(float)
         .fillna(0.0),
         cost_bps=float(getattr(inp, "cost_bps", 0.0) or 0.0),
@@ -9553,6 +9993,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             "dates": [d.strftime("%Y-%m-%d") for d in nav.index],
             "position_effective": [float(x) for x in (w_eff > 0.0).mean(axis=1).values],
         },
+        "ewma_corr_60": ewma_corr_60,
         "metrics": {
             "strategy": {
                 **_metrics_from_ret(port_ret, float(inp.risk_free_rate)),
@@ -9608,6 +10049,22 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                     standard_transition_over_to_under_total
                 ),
                 "vol_periodic_rebalance_trigger_count": int(vol_periodic_trigger_total),
+                "cvar_scale_trigger_count": int(
+                    (cvar_position_scale_stats or {}).get("cvar_scale_trigger_count", 0)
+                    or 0
+                ),
+                "cvar_scale_trigger_episode_count": int(
+                    (cvar_position_scale_stats or {}).get(
+                        "cvar_scale_trigger_episode_count", 0
+                    )
+                    or 0
+                ),
+                "cvar_scale_fallback_count": int(
+                    (cvar_position_scale_stats or {}).get(
+                        "cvar_scale_fallback_count", 0
+                    )
+                    or 0
+                ),
                 "monthly_risk_budget_blocked_entry_count": int(monthly_blocked_total),
                 "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
                 "cash_management_data_available": bool(cash_data_available),
@@ -9639,7 +10096,13 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         "rolling": _rolling_pack(nav),
         "attribution": attribution,
         "trade_statistics": {
+            "scope": "closed_trades_only",
             "all": {"n": len(trades_with_r)},
+            "episode_counts": {
+                "all": len(trade_pack.get("trades", [])),
+                "closed": len(trade_pack.get("closed_trades", [])),
+                "open_mtm": len(trade_pack.get("open_trades", [])),
+            },
             "overall": overall_stats,
             "by_code": by_code_stats,
             "trades": list(trades_with_r),
@@ -9999,6 +10462,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "trigger_dates": er_exit_trigger_dates[:200],
                 "by_asset": er_exit_by_asset,
             },
+            "cvar_risk_mgmt": cvar_position_scale_stats,
             "monthly_risk_budget_gate": {
                 "enabled": bool(getattr(inp, "monthly_risk_budget_enabled", False)),
                 "budget_pct": float(

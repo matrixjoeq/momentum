@@ -35,6 +35,7 @@ from .schemas import (
     BaselineAnalysisRequest,
     BaselineCalendarEffectRequest,
     CalendarTimingStrategyRequest,
+    CalendarTimingMonteCarloRequest,
     BaselineMonteCarloRequest,
     RotationCalendarEffectRequest,
     RotationMonteCarloRequest,
@@ -43,6 +44,7 @@ from .schemas import (
     TrendBacktestRequest,
     TrendOosBootstrapRequest,
     TrendPortfolioBacktestRequest,
+    TrendPortfolioMonteCarloRequest,
     AssetGroupSuggestRequest,
     RotationCandidateScreenRequest,
     LeadLagAnalysisRequest,
@@ -102,6 +104,10 @@ from .schemas import (
     OffFundRegressionClassifyItem,
     OffFundRegressionClassifyRequest,
     OffFundRegressionClassifyResponse,
+    OffFundReplicationItem,
+    OffFundReplicationRequest,
+    OffFundReplicationResponse,
+    OffFundMonteCarloRequest,
     OffFundRegressionFactorConfigOut,
     OffFundRegressionFactorConfigUpsert,
     OffFundRegressionFactorAvailabilityItem,
@@ -192,6 +198,20 @@ from ..analysis.off_fund_regression import (
     choose_factor_series,
     classify_fund_by_regression,
     inspect_factor_availability,
+)
+from ..analysis.off_fund_replication import (
+    DEFAULT_LAMBDA_SUBSTITUTION,
+    DEFAULT_LAMBDA_TEMPORAL,
+    MAX_EXTRA_SOLVES,
+    MAX_FACTORS,
+    MAX_TARGETS,
+    ReplicationConfigError,
+    ReplicationFactorMeta,
+    replicate_fund_by_constrained_weights,
+    select_replication_factor_series,
+)
+from ..data.off_fund_replication_templates import (
+    get_replication_template,
 )
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
@@ -310,6 +330,7 @@ from ..db.global_benchmark_repo import (
 )
 from ..db.off_fund_regression_repo import (
     delete_off_fund_factor_config,
+    get_off_fund_factor_config,
     list_off_fund_factor_configs,
     set_active_off_fund_factor_config,
     upsert_off_fund_factor_config,
@@ -1894,6 +1915,11 @@ def baseline_analysis(
             getattr(payload, "dca_periodic_amount", 10000.0) or 0.0
         ),
         dca_frequency=str(getattr(payload, "dca_frequency", "monthly") or "monthly"),
+        dca_weekly_weekday=int(getattr(payload, "dca_weekly_weekday", 1) or 1),
+        dca_monthly_day=int(getattr(payload, "dca_monthly_day", 1) or 1),
+        dca_non_trading_shift=str(
+            getattr(payload, "dca_non_trading_shift", "next") or "next"
+        ),
         lppl_enabled=bool(getattr(payload, "lppl_enabled", False)),
         lppl_lookback_days=int(getattr(payload, "lppl_lookback_days", 504) or 504),
         lppl_min_points=int(getattr(payload, "lppl_min_points", 120) or 120),
@@ -1916,6 +1942,8 @@ def baseline_analysis(
         ),
         lppl_bootstrap_seed=getattr(payload, "lppl_bootstrap_seed", None),
         lppl_c_rel_min=float(getattr(payload, "lppl_c_rel_min", 0.05) or 0.05),
+        cvar_window=int(getattr(payload, "cvar_window", 60) or 60),
+        cvar_budget_pct=float(getattr(payload, "cvar_budget_pct", 0.02) or 0.02),
     )
     # API-level contract: for non-dynamic universe requests, any missing code
     # under the requested adjust should fail fast with a client-facing 400.
@@ -1976,6 +2004,7 @@ def analysis_baseline_garch_volatility(
         min_samples=int(payload.min_samples),
         return_scale=float(payload.return_scale),
         arch_lags=int(payload.arch_lags),
+        include_model_comparison=bool(payload.include_model_comparison),
     )
 
     meta = dict(base_meta)
@@ -2027,6 +2056,7 @@ def calendar_timing_strategy(
         start=_parse_yyyymmdd(payload.start),
         end=_parse_yyyymmdd(payload.end),
         adjust=payload.adjust,
+        decision_mode=str(getattr(payload, "decision_mode", "monthly") or "monthly"),
         decision_day=int(payload.decision_day),
         hold_days=int(payload.hold_days),
         position_mode=payload.position_mode,
@@ -2044,6 +2074,96 @@ def calendar_timing_strategy(
         return compute_calendar_timing_strategy_backtest(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/calendar-timing/montecarlo")
+def calendar_timing_montecarlo(
+    payload: CalendarTimingMonteCarloRequest, db: Session = Depends(get_session)
+) -> dict:
+    out = calendar_timing_strategy(payload, db=db)
+    nav_series = (
+        ((out or {}).get("nav") or {}).get("series", {})
+        if isinstance(out, dict)
+        else {}
+    )
+    strat_nav = pd.to_numeric(
+        pd.Series((nav_series or {}).get("STRAT", [])), errors="coerce"
+    ).astype(float)
+    if strat_nav.empty:
+        raise HTTPException(status_code=400, detail="calendar timing nav missing")
+    daily_ret = strat_nav.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    if payload.sample_window_days is not None:
+        daily_ret = daily_ret.tail(int(payload.sample_window_days))
+    if daily_ret.empty:
+        raise HTTPException(
+            status_code=400, detail="not enough daily returns for monte carlo"
+        )
+
+    trades_with_r = (
+        (((out or {}).get("trade_statistics") or {}).get("trades") or [])
+        if isinstance(out, dict)
+        else []
+    )
+    r_mult_obs = []
+    for tr in list(trades_with_r or []):
+        rv = (tr or {}).get("r_multiple")
+        try:
+            fv = float(rv)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(fv):
+            r_mult_obs.append(fv)
+
+    raw_cands = [
+        str(x).strip().lower() for x in (payload.fit_candidates or []) if str(x).strip()
+    ] or ["normal", "t", "skew_t", "ged", "lognorm"]
+    cands: list[str] = []
+    for c in raw_cands:
+        c2 = "lognorm" if c in {"lognorm_positive", "lognormal"} else c
+        if c2 not in {"normal", "t", "skew_t", "ged", "lognorm"}:
+            continue
+        if c2 not in cands:
+            cands.append(c2)
+    if not cands:
+        cands = ["normal", "t", "skew_t", "ged", "lognorm"]
+
+    decision_mode = str(
+        getattr(payload, "decision_mode", "monthly") or "monthly"
+    ).lower()
+    period_freq = "W-FRI" if decision_mode == "weekly" else "ME"
+
+    cfg = MonteCarloConfig(
+        n_sims=payload.n_sims, block_size=payload.block_size, seed=payload.seed
+    )
+    try:
+        mc = bootstrap_metrics_from_daily_returns(
+            daily_ret,
+            rf=0.0,
+            cfg=cfg,
+            period_freq=period_freq,
+            fit_candidates=cands,
+            fit_rule=str(getattr(payload, "fit_rule", "bic_ks") or "bic_ks"),
+            fit_ks_alpha=float(getattr(payload, "fit_ks_alpha", 0.05) or 0.05),
+            trade_r_multiples=r_mult_obs,
+            sqn_window=int(getattr(payload, "sqn_window", 100) or 100),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    meta = (out or {}).get("meta") if isinstance(out, dict) else {}
+    return {
+        "meta": {
+            "type": "calendar_timing_montecarlo",
+            "strategy_meta": meta,
+            "n_sims": payload.n_sims,
+            "block_size": payload.block_size,
+            "sample_window_days": payload.sample_window_days,
+            "fit_candidates": cands,
+            "fit_rule": str(getattr(payload, "fit_rule", "bic_ks") or "bic_ks"),
+            "fit_ks_alpha": float(getattr(payload, "fit_ks_alpha", 0.05) or 0.05),
+            "sqn_window": int(getattr(payload, "sqn_window", 100) or 100),
+        },
+        "mc": mc,
+    }
 
 
 def _load_vol_index_close_for_rotation_rules(
@@ -2498,6 +2618,9 @@ def trend_backtest(
         fixed_max_holdings=payload.fixed_max_holdings,
         risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
         risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
+        cvar_risk_mgmt_enabled=bool(getattr(payload, "cvar_risk_mgmt_enabled", False)),
+        cvar_window=int(getattr(payload, "cvar_window", 60) or 60),
+        cvar_budget_pct=float(getattr(payload, "cvar_budget_pct", 0.02) or 0.02),
         risk_budget_overcap_policy=str(
             getattr(payload, "risk_budget_overcap_policy", "scale")
         ),
@@ -2616,6 +2739,9 @@ def trend_portfolio_backtest(
         fixed_max_holdings=payload.fixed_max_holdings,
         risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
         risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
+        cvar_risk_mgmt_enabled=bool(getattr(payload, "cvar_risk_mgmt_enabled", False)),
+        cvar_window=int(getattr(payload, "cvar_window", 60) or 60),
+        cvar_budget_pct=float(getattr(payload, "cvar_budget_pct", 0.02) or 0.02),
         risk_budget_overcap_policy=str(
             getattr(payload, "risk_budget_overcap_policy", "scale")
         ),
@@ -2881,6 +3007,91 @@ def trend_portfolio_oos_bootstrap(
             meta.setdefault("engine", engine)
             meta.setdefault("engine_default", default_engine)
     return out
+
+
+@router.post("/analysis/trend/portfolio/montecarlo")
+def trend_portfolio_montecarlo(
+    payload: TrendPortfolioMonteCarloRequest, db: Session = Depends(get_session)
+) -> dict:
+    # Reuse trend portfolio backtest to ensure same strategy settings/logic.
+    out = trend_portfolio_backtest(payload, db=db)
+    nav_series = (
+        ((out or {}).get("nav") or {}).get("series", {})
+        if isinstance(out, dict)
+        else {}
+    )
+    strat_nav = pd.to_numeric(
+        pd.Series((nav_series or {}).get("STRAT", [])), errors="coerce"
+    ).astype(float)
+    if strat_nav.empty:
+        raise HTTPException(status_code=400, detail="trend portfolio nav missing")
+    daily_ret = strat_nav.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    if payload.sample_window_days is not None:
+        daily_ret = daily_ret.tail(int(payload.sample_window_days))
+    if daily_ret.empty:
+        raise HTTPException(
+            status_code=400, detail="not enough daily returns for monte carlo"
+        )
+
+    trades_with_r = (
+        (((out or {}).get("trade_statistics") or {}).get("trades") or [])
+        if isinstance(out, dict)
+        else []
+    )
+    r_mult_obs = []
+    for tr in list(trades_with_r or []):
+        rv = (tr or {}).get("r_multiple")
+        try:
+            fv = float(rv)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(fv):
+            r_mult_obs.append(fv)
+
+    raw_cands = [
+        str(x).strip().lower() for x in (payload.fit_candidates or []) if str(x).strip()
+    ] or ["normal", "t", "skew_t", "ged", "lognorm"]
+    cands: list[str] = []
+    for c in raw_cands:
+        c2 = "lognorm" if c in {"lognorm_positive", "lognormal"} else c
+        if c2 not in {"normal", "t", "skew_t", "ged", "lognorm"}:
+            continue
+        if c2 not in cands:
+            cands.append(c2)
+    if not cands:
+        cands = ["normal", "t", "skew_t", "ged", "lognorm"]
+
+    cfg = MonteCarloConfig(
+        n_sims=payload.n_sims, block_size=payload.block_size, seed=payload.seed
+    )
+    try:
+        mc = bootstrap_metrics_from_daily_returns(
+            daily_ret,
+            rf=0.0,
+            cfg=cfg,
+            fit_candidates=cands,
+            fit_rule=str(getattr(payload, "fit_rule", "bic_ks") or "bic_ks"),
+            fit_ks_alpha=float(getattr(payload, "fit_ks_alpha", 0.05) or 0.05),
+            trade_r_multiples=r_mult_obs,
+            sqn_window=int(getattr(payload, "sqn_window", 100) or 100),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    meta = (out or {}).get("meta") if isinstance(out, dict) else {}
+    return {
+        "meta": {
+            "type": "trend_portfolio_montecarlo",
+            "strategy_meta": meta,
+            "n_sims": payload.n_sims,
+            "block_size": payload.block_size,
+            "sample_window_days": payload.sample_window_days,
+            "fit_candidates": cands,
+            "fit_rule": str(getattr(payload, "fit_rule", "bic_ks") or "bic_ks"),
+            "fit_ks_alpha": float(getattr(payload, "fit_ks_alpha", 0.05) or 0.05),
+            "sqn_window": int(getattr(payload, "sqn_window", 100) or 100),
+        },
+        "mc": mc,
+    }
 
 
 @router.post("/analysis/groups/suggest")
@@ -4536,9 +4747,21 @@ def baseline_montecarlo(
 ) -> dict:
     # reuse baseline computation to ensure exact same portfolio construction
     base = baseline_analysis(payload, db=db)
+    nav_key = str(getattr(payload, "holding_mode", "EW") or "EW").strip().upper()
+    if nav_key not in {"EW", "RP", "IVOL", "CUSTOM"}:
+        nav_key = "EW"
     try:
+        nav_series = (
+            ((base or {}).get("nav") or {}).get("series", {})
+            if isinstance(base, dict)
+            else {}
+        )
+        if not isinstance(nav_series, dict):
+            nav_series = {}
+        if nav_key not in nav_series:
+            nav_key = "EW"
         nav = pd.Series(
-            base["nav"]["series"]["EW"],
+            nav_series.get(nav_key, []),
             index=pd.to_datetime(base["nav"]["dates"]),
             dtype=float,
         )
@@ -4546,9 +4769,13 @@ def baseline_montecarlo(
         raise HTTPException(
             status_code=500, detail=f"invalid baseline nav payload: {e}"
         ) from e
-    daily_ret = nav.pct_change().fillna(0.0)
+    daily_ret = nav.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
     if payload.sample_window_days is not None:
         daily_ret = daily_ret.tail(int(payload.sample_window_days))
+    if daily_ret.empty:
+        raise HTTPException(
+            status_code=400, detail="not enough daily returns for monte carlo"
+        )
     cfg = MonteCarloConfig(
         n_sims=payload.n_sims, block_size=payload.block_size, seed=payload.seed
     )
@@ -4572,8 +4799,9 @@ def baseline_montecarlo(
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {
         "meta": {
-            "type": "baseline",
+            "type": "holding_strategy",
             "codes": payload.codes,
+            "holding_mode": nav_key,
             "start": payload.start,
             "end": payload.end,
             "sample_window_days": payload.sample_window_days,
@@ -6130,6 +6358,13 @@ def _off_fund_factor_cfg_out(x) -> OffFundRegressionFactorConfigOut:
         benchmark_profile=str(x.benchmark_profile or "cn_stock_core"),
         benchmark_factors=raw_factors,
         effective_benchmark_factors=effective,
+        template_id=getattr(x, "template_id", None),
+        template_version=getattr(x, "template_version", None),
+        solver_params=getattr(x, "solver_params", None),
+        is_legacy=not bool(getattr(x, "template_id", None)),
+        legacy_dense_template=(
+            not bool(getattr(x, "template_id", None)) and not bool(raw_factors)
+        ),
     )
 
 
@@ -6145,8 +6380,19 @@ def _default_off_fund_research_state() -> OffFundResearchStateOut:
         drift_rebalance_enabled=True,
         drift_abs_threshold=0.05,
         drift_rel_threshold=0.25,
+        invest_mode="lump_sum",
+        dca_base_amount=100000.0,
+        dca_periodic_amount=10000.0,
+        dca_frequency="monthly",
+        dca_weekly_weekday=1,
+        dca_monthly_day=1,
+        dca_non_trading_shift="next",
         show_non_group_codes=True,
         pair_chart_prefs_json=None,
+        replication_rolling_window=252,
+        replication_min_samples=120,
+        replication_include_portfolio=True,
+        replication_drop_short_history_factors=False,
         meta=OffFundResearchStateMeta(),
     )
 
@@ -6154,27 +6400,19 @@ def _default_off_fund_research_state() -> OffFundResearchStateOut:
 _PAIR_CONTRACT_VERSION = "pair_contract_v1"
 _PAIR_PREFS_MAX_BYTES = 16 * 1024
 _PAIR_WARNING_ORDER = (
-    "prefs_trimmed_to_21",
+    "prefs_trimmed_to_60",
     "signal_degraded",
     "samples_truncated",
     "invalid_trade_date_filtered",
 )
 
 
-def _pick_pair_etf_code(aliases: tuple[str, ...]) -> str:
-    for alias in aliases:
-        code = str(alias or "").strip()
-        if code.isdigit() and len(code) == 6 and code[0] in {"1", "5"}:
-            return code
-    for alias in aliases:
-        code = str(alias or "").strip()
-        if code.isdigit() and len(code) == 6:
-            return code
-    for alias in aliases:
-        code = str(alias or "").strip()
-        if code:
-            return code
-    raise ValueError("pair factor aliases must not be empty")
+def _pick_pair_alias(aliases: tuple[str, ...], idx: int) -> str:
+    if idx < 0:
+        return ""
+    if idx >= len(aliases):
+        return ""
+    return str(aliases[idx] or "").strip()
 
 
 def _build_off_fund_pair_universe() -> list[OffFundRegressionPairUniverseItem]:
@@ -6183,7 +6421,7 @@ def _build_off_fund_pair_universe() -> list[OffFundRegressionPairUniverseItem]:
             key=str(spec.key),
             label=str(spec.label),
             aliases=[str(x) for x in spec.aliases],
-            etf_code=_pick_pair_etf_code(spec.aliases),
+            etf_code=_pick_pair_alias(spec.aliases, 1),
         )
         for spec in DEFAULT_CN_STOCK_FACTORS
     ]
@@ -6191,12 +6429,14 @@ def _build_off_fund_pair_universe() -> list[OffFundRegressionPairUniverseItem]:
 
 _PAIR_KEY_ORDER = tuple(str(spec.key) for spec in DEFAULT_CN_STOCK_FACTORS)
 _PAIR_ALLOWED_KEYS = set(_PAIR_KEY_ORDER)
+_PAIR_SLOT_MAX_COUNT = 60
+_PAIR_BENCHMARK_MARKETS = {"off_fund", "on_exchange"}
+_PAIR_RESERVED_META_KEYS = frozenset({"benchmark_market", "global_base"})
 _PAIR_SLOT_DEFAULT = {
-    f"pair_slot_{idx:02d}": key for idx, key in enumerate(_PAIR_KEY_ORDER[1:], start=1)
+    f"pair_slot_{idx:02d}": key
+    for idx, key in enumerate(_PAIR_KEY_ORDER[1 : _PAIR_SLOT_MAX_COUNT + 1], start=1)
 }
-_PAIR_EXTRA_SLOT_IDS = ("pair_slot_extra_01", "pair_slot_extra_02")
-_PAIR_EXTRA_SLOT_ID_SET = set(_PAIR_EXTRA_SLOT_IDS)
-_PAIR_SLOT_IDS = tuple(_PAIR_SLOT_DEFAULT.keys()) + _PAIR_EXTRA_SLOT_IDS
+_PAIR_SLOT_IDS = tuple(_PAIR_SLOT_DEFAULT.keys())
 
 
 def _pair_sorted_warnings(codes: list[str]) -> list[str]:
@@ -6255,8 +6495,11 @@ def _normalize_pair_chart_prefs_json(
             status_code=400, detail="pair_chart_prefs_json must be a JSON object"
         )
     warnings: list[str] = []
-    if len(payload) > len(_PAIR_SLOT_IDS):
-        warnings.append("prefs_trimmed_to_21")
+    if any(
+        str(k) not in _PAIR_SLOT_IDS and str(k) not in _PAIR_RESERVED_META_KEYS
+        for k in payload.keys()
+    ):
+        warnings.append("prefs_trimmed_to_60")
     out: dict[str, dict[str, str]] = {}
     for slot_id in _PAIR_SLOT_IDS:
         obj = payload.get(slot_id)
@@ -6264,13 +6507,6 @@ def _normalize_pair_chart_prefs_json(
             continue
         base_input = str(obj.get("base") or "").strip()
         peer_input = str(obj.get("peer") or "").strip()
-        # Extra empty slots should preserve blank values when users intentionally leave
-        # one or both sides empty; non-empty values are normalized by the same rules.
-        if slot_id in _PAIR_EXTRA_SLOT_ID_SET and (not base_input or not peer_input):
-            base = base_input if base_input in _PAIR_ALLOWED_KEYS else ""
-            peer = peer_input if peer_input in _PAIR_ALLOWED_KEYS else ""
-            out[slot_id] = {"base": base, "peer": peer}
-            continue
         base_raw = base_input or "CSI300"
         peer_raw = peer_input or _PAIR_SLOT_DEFAULT.get(slot_id, "CSI500")
         base = base_raw if base_raw in _PAIR_ALLOWED_KEYS else "CSI300"
@@ -6278,6 +6514,12 @@ def _normalize_pair_chart_prefs_json(
         if not peer:
             peer = _pair_fallback_peer(slot_id, base)
         out[slot_id] = {"base": base, "peer": peer}
+    benchmark_market = str(payload.get("benchmark_market") or "").strip().lower()
+    if benchmark_market in _PAIR_BENCHMARK_MARKETS:
+        out["benchmark_market"] = benchmark_market
+    global_base = str(payload.get("global_base") or "").strip()
+    if global_base in _PAIR_ALLOWED_KEYS:
+        out["global_base"] = global_base
     canon = json.dumps(out, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
     if reject_oversize and len(canon.encode("utf-8")) > _PAIR_PREFS_MAX_BYTES:
         raise _pair_413("pair_chart_prefs_json exceeds 16KB after normalization")
@@ -6310,12 +6552,51 @@ def get_off_fund_research_state_api(
         drift_rebalance_enabled=bool(st.drift_rebalance_enabled),
         drift_abs_threshold=float(st.drift_abs_threshold),
         drift_rel_threshold=float(st.drift_rel_threshold),
+        invest_mode=str(st.invest_mode or d.invest_mode),
+        dca_base_amount=float(
+            st.dca_base_amount if st.dca_base_amount is not None else d.dca_base_amount
+        ),
+        dca_periodic_amount=float(
+            st.dca_periodic_amount
+            if st.dca_periodic_amount is not None
+            else d.dca_periodic_amount
+        ),
+        dca_frequency=str(st.dca_frequency or d.dca_frequency),
+        dca_weekly_weekday=int(
+            st.dca_weekly_weekday
+            if st.dca_weekly_weekday is not None
+            else d.dca_weekly_weekday
+        ),
+        dca_monthly_day=int(
+            st.dca_monthly_day if st.dca_monthly_day is not None else d.dca_monthly_day
+        ),
+        dca_non_trading_shift=str(st.dca_non_trading_shift or d.dca_non_trading_shift),
         show_non_group_codes=bool(
             st.show_non_group_codes
             if st.show_non_group_codes is not None
             else d.show_non_group_codes
         ),
         pair_chart_prefs_json=pair_prefs_json,
+        replication_rolling_window=int(
+            st.replication_rolling_window
+            if st.replication_rolling_window is not None
+            else d.replication_rolling_window
+        ),
+        replication_min_samples=int(
+            st.replication_min_samples
+            if st.replication_min_samples is not None
+            else d.replication_min_samples
+        ),
+        replication_include_portfolio=bool(
+            st.replication_include_portfolio
+            if st.replication_include_portfolio is not None
+            else d.replication_include_portfolio
+        ),
+        replication_drop_short_history_factors=bool(
+            st.replication_drop_short_history_factors
+            if st.replication_drop_short_history_factors is not None
+            else d.replication_drop_short_history_factors
+        ),
         meta=_pair_meta(pair_warnings),
     )
 
@@ -6409,6 +6690,60 @@ def update_off_fund_research_state_api(
             st.drift_rel_threshold if st.drift_rel_threshold is not None else 0.25
         )
     )
+    invest_mode = (
+        str(payload.invest_mode)
+        if "invest_mode" in fields_set
+        else str(st.invest_mode or _default_off_fund_research_state().invest_mode)
+    )
+    dca_base_amount = (
+        float(payload.dca_base_amount)
+        if "dca_base_amount" in fields_set
+        else float(
+            st.dca_base_amount
+            if st.dca_base_amount is not None
+            else _default_off_fund_research_state().dca_base_amount
+        )
+    )
+    dca_periodic_amount = (
+        float(payload.dca_periodic_amount)
+        if "dca_periodic_amount" in fields_set
+        else float(
+            st.dca_periodic_amount
+            if st.dca_periodic_amount is not None
+            else _default_off_fund_research_state().dca_periodic_amount
+        )
+    )
+    dca_frequency = (
+        str(payload.dca_frequency)
+        if "dca_frequency" in fields_set
+        else str(st.dca_frequency or _default_off_fund_research_state().dca_frequency)
+    )
+    dca_weekly_weekday = (
+        int(payload.dca_weekly_weekday)
+        if "dca_weekly_weekday" in fields_set
+        else int(
+            st.dca_weekly_weekday
+            if st.dca_weekly_weekday is not None
+            else _default_off_fund_research_state().dca_weekly_weekday
+        )
+    )
+    dca_monthly_day = (
+        int(payload.dca_monthly_day)
+        if "dca_monthly_day" in fields_set
+        else int(
+            st.dca_monthly_day
+            if st.dca_monthly_day is not None
+            else _default_off_fund_research_state().dca_monthly_day
+        )
+    )
+    dca_non_trading_shift = (
+        str(payload.dca_non_trading_shift)
+        if "dca_non_trading_shift" in fields_set
+        else str(
+            st.dca_non_trading_shift
+            or _default_off_fund_research_state().dca_non_trading_shift
+        )
+    )
     show_non_group_codes = (
         bool(payload.show_non_group_codes)
         if "show_non_group_codes" in fields_set
@@ -6417,6 +6752,26 @@ def update_off_fund_research_state_api(
             if st.show_non_group_codes is not None
             else _default_off_fund_research_state().show_non_group_codes
         )
+    )
+    replication_rolling_window = (
+        int(payload.replication_rolling_window)
+        if "replication_rolling_window" in fields_set
+        else int(st.replication_rolling_window or 252)
+    )
+    replication_min_samples = (
+        int(payload.replication_min_samples)
+        if "replication_min_samples" in fields_set
+        else int(st.replication_min_samples or 120)
+    )
+    replication_include_portfolio = (
+        bool(payload.replication_include_portfolio)
+        if "replication_include_portfolio" in fields_set
+        else bool(st.replication_include_portfolio)
+    )
+    replication_drop_short_history_factors = (
+        bool(payload.replication_drop_short_history_factors)
+        if "replication_drop_short_history_factors" in fields_set
+        else bool(st.replication_drop_short_history_factors)
     )
     obj = upsert_off_fund_research_state(
         db,
@@ -6430,8 +6785,19 @@ def update_off_fund_research_state_api(
         drift_rebalance_enabled=drift_rebalance_enabled,
         drift_abs_threshold=drift_abs_threshold,
         drift_rel_threshold=drift_rel_threshold,
+        invest_mode=invest_mode,
+        dca_base_amount=dca_base_amount,
+        dca_periodic_amount=dca_periodic_amount,
+        dca_frequency=dca_frequency,
+        dca_weekly_weekday=dca_weekly_weekday,
+        dca_monthly_day=dca_monthly_day,
+        dca_non_trading_shift=dca_non_trading_shift,
         show_non_group_codes=show_non_group_codes,
         pair_chart_prefs_json=pair_prefs_json,
+        replication_rolling_window=replication_rolling_window,
+        replication_min_samples=replication_min_samples,
+        replication_include_portfolio=replication_include_portfolio,
+        replication_drop_short_history_factors=(replication_drop_short_history_factors),
     )
     db.commit()
     try:
@@ -6454,12 +6820,25 @@ def update_off_fund_research_state_api(
         drift_rebalance_enabled=bool(obj.drift_rebalance_enabled),
         drift_abs_threshold=float(obj.drift_abs_threshold),
         drift_rel_threshold=float(obj.drift_rel_threshold),
+        invest_mode=str(obj.invest_mode),
+        dca_base_amount=float(obj.dca_base_amount),
+        dca_periodic_amount=float(obj.dca_periodic_amount),
+        dca_frequency=str(obj.dca_frequency),
+        dca_weekly_weekday=int(obj.dca_weekly_weekday),
+        dca_monthly_day=int(obj.dca_monthly_day),
+        dca_non_trading_shift=str(obj.dca_non_trading_shift),
         show_non_group_codes=bool(
             obj.show_non_group_codes
             if obj.show_non_group_codes is not None
             else _default_off_fund_research_state().show_non_group_codes
         ),
         pair_chart_prefs_json=pair_out_json,
+        replication_rolling_window=int(obj.replication_rolling_window),
+        replication_min_samples=int(obj.replication_min_samples),
+        replication_include_portfolio=bool(obj.replication_include_portfolio),
+        replication_drop_short_history_factors=bool(
+            obj.replication_drop_short_history_factors
+        ),
         meta=_pair_meta(pair_warnings + out_warnings),
     )
 
@@ -6497,6 +6876,14 @@ def upsert_off_fund_regression_factor_config_api(
     name = str(payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
+    existing_config = get_off_fund_factor_config(db, name=name)
+    if payload.template_id is not None or (
+        existing_config is not None and existing_config.template_id is not None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="versioned system replication templates are immutable",
+        )
     factors = list(payload.benchmark_factors or [])
     if factors and len(factors) < 2:
         raise HTTPException(
@@ -6509,6 +6896,9 @@ def upsert_off_fund_regression_factor_config_api(
         benchmark_profile=str(payload.benchmark_profile or "cn_stock_core"),
         benchmark_factors=[x.model_dump() for x in factors] if factors else None,
         set_active=bool(payload.set_active),
+        template_id=payload.template_id,
+        template_version=payload.template_version,
+        solver_params=payload.solver_params,
     )
     db.commit()
     return _off_fund_factor_cfg_out(obj)
@@ -6518,6 +6908,12 @@ def upsert_off_fund_regression_factor_config_api(
 def delete_off_fund_regression_factor_config_api(
     name: str, db: Session = Depends(get_session)
 ) -> dict:
+    existing_config = get_off_fund_factor_config(db, name=str(name))
+    if existing_config is not None and existing_config.template_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="versioned system replication templates are immutable",
+        )
     ok = delete_off_fund_factor_config(db, name=str(name))
     if not ok:
         raise HTTPException(status_code=404, detail="factor config not found")
@@ -6892,6 +7288,459 @@ def analysis_off_fund_classify(
         factors=factor_meta,
         items=items,
     )
+
+
+@router.post(
+    "/analysis/off-fund/replicate",
+    response_model=OffFundReplicationResponse,
+)
+def analysis_off_fund_replicate(
+    payload: OffFundReplicationRequest,
+    db: Session = Depends(get_session),
+) -> OffFundReplicationResponse:
+    """Build an investable, long-only replication portfolio."""
+    try:
+        start_d = _parse_yyyymmdd(str(payload.start))
+        end_d = _parse_yyyymmdd(str(payload.end))
+        fund_adjust = normalize_adjust(str(payload.fund_adjust or "hfq"))
+        benchmark_adjust = normalize_adjust(str(payload.benchmark_adjust or "hfq"))
+    except (TypeError, ValueError):
+        return OffFundReplicationResponse(ok=False, error="invalid_request")
+    if end_d < start_d:
+        return OffFundReplicationResponse(ok=False, error="end_before_start")
+    if (
+        payload.lambda_substitution is not None or payload.lambda_temporal is not None
+    ) and not payload.advanced_mode:
+        return OffFundReplicationResponse(
+            ok=False,
+            error="advanced_mode_required_for_custom_parameters",
+        )
+
+    request_codes = list(dict.fromkeys(str(code).strip() for code in payload.codes))
+    target_count = len(request_codes) + int(bool(payload.include_portfolio))
+    if target_count > MAX_TARGETS:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "computation_budget_exceeded",
+                "max_targets": MAX_TARGETS,
+            },
+        )
+
+    if payload.benchmark_factors:
+        factor_rows = [
+            {
+                "key": str(factor.key).strip().upper(),
+                "label": str(factor.label or factor.key).strip(),
+                "aliases": [str(alias).strip() for alias in factor.aliases],
+                "reporting_group": str(
+                    factor.reporting_group or factor.label or factor.key
+                ).strip(),
+                "substitution_group": str(
+                    factor.substitution_group or factor.key
+                ).strip(),
+                "asset_class": str(factor.asset_class or "unknown").strip(),
+            }
+            for factor in payload.benchmark_factors
+        ]
+        template_id = "custom"
+        template_version = None
+    else:
+        template = get_replication_template(
+            payload.template_id, payload.template_version
+        )
+        if template is None:
+            return OffFundReplicationResponse(
+                ok=False, error="replication_template_not_found"
+            )
+        factor_rows = [factor.as_dict() for factor in template.factors]
+        template_id = template.template_id
+        template_version = template.template_version
+    factor_keys = [str(row.get("key") or "").strip() for row in factor_rows]
+    if (
+        any(not key for key in factor_keys)
+        or len(factor_keys) != len(set(factor_keys))
+        or any(
+            not [
+                alias for alias in list(row.get("aliases") or []) if str(alias).strip()
+            ]
+            for row in factor_rows
+        )
+    ):
+        return OffFundReplicationResponse(
+            ok=False, error="invalid_factor_configuration"
+        )
+    if len(factor_rows) < 2:
+        return OffFundReplicationResponse(ok=False, error="insufficient_factors")
+    if len(factor_rows) > MAX_FACTORS:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "computation_budget_exceeded",
+                "max_factors": MAX_FACTORS,
+            },
+        )
+
+    aliases = sorted(
+        {
+            str(alias)
+            for row in factor_rows
+            for alias in list(row.get("aliases") or [])
+            if str(alias).strip()
+        }
+    )
+    close_raw = load_close_prices(
+        db,
+        codes=aliases,
+        start=start_d,
+        end=end_d,
+        adjust=benchmark_adjust,
+    )
+    pool = list_off_fund_pool(db)
+    name_by_code = {str(item.code): str(item.name) for item in pool}
+    targets: list[tuple[str, str | None, pd.Series]] = []
+    for code in request_codes:
+        rows = list_off_fund_navs(
+            db,
+            code=code,
+            start_date=start_d,
+            end_date=end_d,
+            adjust=fund_adjust,
+            limit=800000,
+        )
+        nav = pd.Series(
+            [float(row.nav) if row.nav is not None else np.nan for row in rows],
+            index=[row.trade_date for row in rows],
+            dtype=float,
+        ).dropna()
+        targets.append((code, name_by_code.get(code), nav))
+    if payload.include_portfolio:
+        points: list[tuple[dt.date, float]] = []
+        for point in payload.portfolio_nav_series:
+            try:
+                date_value = (
+                    _parse_yyyymmdd(point.trade_date)
+                    if len(point.trade_date) == 8 and point.trade_date.isdigit()
+                    else pd.Timestamp(point.trade_date).date()
+                )
+                nav_value = float(point.nav)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(nav_value) and nav_value > 0.0:
+                points.append((date_value, nav_value))
+        if len(points) < 2:
+            return OffFundReplicationResponse(
+                ok=False, error="invalid_portfolio_nav_series"
+            )
+        portfolio_nav = (
+            pd.Series(
+                [value for _, value in points],
+                index=[date for date, _ in points],
+                dtype=float,
+            )
+            .sort_index()
+            .groupby(level=0)
+            .last()
+        )
+        targets.append(
+            (
+                str(payload.portfolio_code or "__PORTFOLIO__"),
+                str(payload.portfolio_name or "组合净值"),
+                portfolio_nav,
+            )
+        )
+
+    lambda_substitution = (
+        float(payload.lambda_substitution)
+        if payload.lambda_substitution is not None
+        else DEFAULT_LAMBDA_SUBSTITUTION
+    )
+    lambda_temporal = (
+        float(payload.lambda_temporal)
+        if payload.lambda_temporal is not None
+        else DEFAULT_LAMBDA_TEMPORAL
+    )
+    items: list[OffFundReplicationItem] = []
+    response_factors: list[dict[str, Any]] = []
+    selected_alias_signatures: set[tuple[tuple[str, str], ...]] = set()
+    diagnostic_code = (
+        str(payload.portfolio_code or "__PORTFOLIO__")
+        if payload.include_portfolio
+        else (targets[0][0] if targets else "")
+    )
+    remaining_extra_solves = MAX_EXTRA_SOLVES
+    try:
+        for code, name, nav in targets:
+            if len(nav) < 2:
+                items.append(
+                    OffFundReplicationItem(
+                        code=code,
+                        name=name,
+                        status="insufficient_target_samples",
+                        warnings=["target NAV has fewer than 2 observations"],
+                    )
+                )
+                continue
+            factor_close, factor_selected, factor_warnings = (
+                select_replication_factor_series(
+                    close_df=close_raw,
+                    factor_rows=factor_rows,
+                    target_nav=nav,
+                )
+            )
+            if factor_selected and not response_factors:
+                response_factors = factor_selected
+            selected_alias_signatures.add(
+                tuple(
+                    sorted(
+                        (
+                            str(row.get("key") or ""),
+                            str(row.get("selected_code") or ""),
+                        )
+                        for row in factor_selected
+                    )
+                )
+            )
+            if factor_close.shape[1] < 2:
+                items.append(
+                    OffFundReplicationItem(
+                        code=code,
+                        name=name,
+                        status="insufficient_benchmark_factors",
+                        selected_factors=factor_selected,
+                        warnings=factor_warnings,
+                    )
+                )
+                continue
+            selected_by_key = {str(row["key"]): row for row in factor_selected}
+            factor_meta = {
+                key: ReplicationFactorMeta(
+                    key=key,
+                    label=str(selected_by_key[key]["label"]),
+                    reporting_group=str(selected_by_key[key]["reporting_group"]),
+                    substitution_group=str(selected_by_key[key]["substitution_group"]),
+                    asset_class=str(selected_by_key[key]["asset_class"]),
+                )
+                for key in factor_close.columns
+            }
+            out = replicate_fund_by_constrained_weights(
+                fund_nav=nav,
+                factor_close_df=factor_close,
+                factor_meta=factor_meta,
+                rolling_window=int(payload.rolling_window),
+                min_samples=int(payload.min_samples),
+                include_series=bool(payload.include_weight_series),
+                max_series_points=int(payload.max_series_points),
+                lambda_substitution=lambda_substitution,
+                lambda_temporal=lambda_temporal,
+                drop_short_history_factors=bool(payload.drop_short_history_factors),
+                compute_latest_diagnostics=code == diagnostic_code,
+                extra_solve_budget=remaining_extra_solves,
+            )
+            remaining_extra_solves -= int(out.get("extra_solves_used") or 0)
+            if out.get("status") == "computation_budget_exceeded":
+                items.append(
+                    OffFundReplicationItem(
+                        code=code,
+                        name=name,
+                        status="computation_budget_exceeded",
+                        sample_days=int(out.get("sample_days") or 0),
+                        selected_factors=factor_selected,
+                        warnings=list(factor_warnings)
+                        + list(out.get("warnings") or []),
+                    )
+                )
+                continue
+            items.append(
+                OffFundReplicationItem(
+                    code=code,
+                    name=name,
+                    status=str(out.get("status") or "failed"),
+                    sample_days=int(out.get("sample_days") or 0),
+                    training_days=out.get("training_days"),
+                    oos_days=out.get("oos_days"),
+                    estimation_windows=out.get("estimation_windows"),
+                    effective_windows=out.get("effective_windows"),
+                    effective_start=out.get("effective_start"),
+                    effective_end=out.get("effective_end"),
+                    model_version=out.get("model_version"),
+                    solver_used=out.get("solver_used"),
+                    model_parameters=dict(out.get("model_parameters") or {}),
+                    selected_factors=factor_selected,
+                    asset_weights=dict(out.get("asset_weights") or {}),
+                    cash_weight=out.get("cash_weight"),
+                    group_weights=dict(out.get("group_weights") or {}),
+                    oos_metrics=dict(out.get("oos_metrics") or {}),
+                    tracking_error=(out.get("oos_metrics") or {}).get(
+                        "tracking_error_annualized"
+                    ),
+                    residual_drift=(out.get("oos_metrics") or {}).get(
+                        "residual_drift_annualized"
+                    ),
+                    geometric_active_return=(out.get("oos_metrics") or {}).get(
+                        "geometric_active_return"
+                    ),
+                    variance_explained=(out.get("oos_metrics") or {}).get(
+                        "variance_explained"
+                    ),
+                    metric_sample=(out.get("oos_metrics") or {}).get("sample"),
+                    stability=dict(out.get("stability") or {}),
+                    identifiability=dict(out.get("identifiability") or {}),
+                    factor_sensitivity=list(out.get("factor_sensitivity") or []),
+                    extra_solves_used=int(out.get("extra_solves_used") or 0),
+                    diagnostics_degraded=bool(out.get("diagnostics_degraded")),
+                    sensitivity_degraded=bool(out.get("sensitivity_degraded")),
+                    diagnostics_computed=bool(out.get("diagnostics_computed")),
+                    fit_tracking_error_annualized=out.get(
+                        "fit_tracking_error_annualized"
+                    ),
+                    dropped_near_zero_vol=list(out.get("dropped_near_zero_vol") or []),
+                    latest_solver=dict(out.get("latest_solver") or {}),
+                    coverage=dict(out.get("coverage") or {}),
+                    dropped_short_history_factors=list(
+                        out.get("dropped_short_history_factors") or []
+                    ),
+                    warnings=list(factor_warnings) + list(out.get("warnings") or []),
+                    weight_series=list(out.get("series") or []),
+                )
+            )
+    except ReplicationConfigError as exc:
+        return OffFundReplicationResponse(
+            ok=False, error="invalid_factor_configuration", meta={"detail": str(exc)}
+        )
+    has_coverage_conflict = any(item.status == "coverage_conflict" for item in items)
+    failed_items = [item for item in items if item.status != "ok"]
+    successful_items = [item for item in items if item.status == "ok"]
+    if has_coverage_conflict:
+        response_error = "coverage_conflict"
+    elif failed_items and not successful_items:
+        response_error = str(failed_items[0].status)
+    elif failed_items:
+        response_error = "partial_failure"
+    else:
+        response_error = None
+    return OffFundReplicationResponse(
+        ok=response_error is None,
+        error=response_error,
+        meta={
+            "template_id": template_id,
+            "template_version": template_version,
+            "requested_codes": request_codes,
+            "nonstandard_model": bool(
+                payload.lambda_substitution is not None
+                or payload.lambda_temporal is not None
+            ),
+            "rolling_window": int(payload.rolling_window),
+            "min_samples": int(payload.min_samples),
+            "requested_start": str(payload.start),
+            "requested_end": str(payload.end),
+            "target_specific_aliases": len(selected_alias_signatures) > 1,
+            "extra_solves_used": MAX_EXTRA_SOLVES - remaining_extra_solves,
+            "max_extra_solves": MAX_EXTRA_SOLVES,
+            "diagnostics_target_code": diagnostic_code,
+            "fund_adjust": fund_adjust,
+            "benchmark_adjust": benchmark_adjust,
+        },
+        factors=response_factors,
+        items=items,
+    )
+
+
+@router.post("/analysis/off-fund/montecarlo")
+def analysis_off_fund_montecarlo(payload: OffFundMonteCarloRequest) -> dict:
+    pts = list(getattr(payload, "portfolio_nav_series", []) or [])
+    vals: list[float] = []
+    idx: list[dt.date] = []
+    for p in pts:
+        d_raw = str(getattr(p, "trade_date", "") or "").strip()
+        nav_v = float(getattr(p, "nav", np.nan))
+        if not d_raw or not np.isfinite(nav_v) or nav_v <= 0.0:
+            continue
+        try:
+            d_v = (
+                _parse_yyyymmdd(d_raw)
+                if len(d_raw) == 8 and d_raw.isdigit()
+                else pd.Timestamp(d_raw).date()
+            )
+        except Exception:
+            continue
+        vals.append(nav_v)
+        idx.append(d_v)
+    if len(vals) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="portfolio_nav_series requires at least 2 valid points",
+        )
+    nav = (
+        pd.Series(vals, index=idx, dtype=float)
+        .sort_index()
+        .groupby(level=0)
+        .last()
+        .dropna()
+    )
+    if nav.empty or len(nav) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="portfolio_nav_series requires at least 2 valid points",
+        )
+    daily_ret = nav.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    if payload.sample_window_days is not None:
+        daily_ret = daily_ret.tail(int(payload.sample_window_days))
+    if daily_ret.empty:
+        raise HTTPException(
+            status_code=400, detail="not enough daily returns for monte carlo"
+        )
+
+    raw_cands = [
+        str(x).strip().lower() for x in (payload.fit_candidates or []) if str(x).strip()
+    ] or ["normal", "t", "skew_t", "ged", "lognorm"]
+    cands: list[str] = []
+    for c in raw_cands:
+        c2 = "lognorm" if c in {"lognorm_positive", "lognormal"} else c
+        if c2 not in {"normal", "t", "skew_t", "ged", "lognorm"}:
+            continue
+        if c2 not in cands:
+            cands.append(c2)
+    if not cands:
+        cands = ["normal", "t", "skew_t", "ged", "lognorm"]
+
+    reb = str(getattr(payload, "rebalance_cycle", "daily") or "daily").strip().lower()
+    period_freq = {
+        "weekly": "W-FRI",
+        "monthly": "ME",
+        "quarterly": "QE",
+        "yearly": "YE",
+        "daily": "B",
+        "none": "B",
+    }.get(reb, "B")
+    cfg = MonteCarloConfig(
+        n_sims=payload.n_sims, block_size=payload.block_size, seed=payload.seed
+    )
+    try:
+        mc = bootstrap_metrics_from_daily_returns(
+            daily_ret,
+            rf=0.0,
+            cfg=cfg,
+            period_freq=period_freq,
+            fit_candidates=cands,
+            fit_rule=str(getattr(payload, "fit_rule", "bic_ks") or "bic_ks"),
+            fit_ks_alpha=float(getattr(payload, "fit_ks_alpha", 0.05) or 0.05),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        "meta": {
+            "type": "off_fund_montecarlo",
+            "rebalance_cycle": reb,
+            "n_sims": payload.n_sims,
+            "block_size": payload.block_size,
+            "sample_window_days": payload.sample_window_days,
+            "fit_candidates": cands,
+            "fit_rule": str(getattr(payload, "fit_rule", "bic_ks") or "bic_ks"),
+            "fit_ks_alpha": float(getattr(payload, "fit_ks_alpha", 0.05) or 0.05),
+        },
+        "mc": mc,
+    }
 
 
 @router.get("/off-fund", response_model=list[OffFundPoolOut])

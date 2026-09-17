@@ -295,8 +295,21 @@ class OffFundResearchStateUpdate(BaseModel):
     drift_rebalance_enabled: bool = Field(default=True)
     drift_abs_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
     drift_rel_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+    invest_mode: Literal["lump_sum", "dca"] = Field(default="lump_sum")
+    dca_base_amount: float = Field(default=100000.0, ge=0.0)
+    dca_periodic_amount: float = Field(default=10000.0, ge=0.0)
+    dca_frequency: Literal["none", "daily", "weekly", "monthly"] = Field(
+        default="monthly"
+    )
+    dca_weekly_weekday: int = Field(default=1, ge=1, le=5)
+    dca_monthly_day: int = Field(default=1, ge=1, le=28)
+    dca_non_trading_shift: Literal["next"] = Field(default="next")
     show_non_group_codes: bool = Field(default=True)
     pair_chart_prefs_json: str | None = Field(default=None)
+    replication_rolling_window: int = Field(default=252, ge=40, le=2000)
+    replication_min_samples: int = Field(default=120, ge=40, le=2000)
+    replication_include_portfolio: bool = Field(default=True)
+    replication_drop_short_history_factors: bool = Field(default=False)
 
 
 class OffFundResearchStateMeta(BaseModel):
@@ -315,8 +328,19 @@ class OffFundResearchStateOut(BaseModel):
     drift_rebalance_enabled: bool = True
     drift_abs_threshold: float = 0.05
     drift_rel_threshold: float = 0.25
+    invest_mode: str = "lump_sum"
+    dca_base_amount: float = 100000.0
+    dca_periodic_amount: float = 10000.0
+    dca_frequency: str = "monthly"
+    dca_weekly_weekday: int = 1
+    dca_monthly_day: int = 1
+    dca_non_trading_shift: str = "next"
     show_non_group_codes: bool = True
     pair_chart_prefs_json: str | None = None
+    replication_rolling_window: int = 252
+    replication_min_samples: int = 120
+    replication_include_portfolio: bool = True
+    replication_drop_short_history_factors: bool = False
     meta: OffFundResearchStateMeta = Field(default_factory=OffFundResearchStateMeta)
 
 
@@ -328,11 +352,16 @@ class OffFundRegressionPairUniverseItem(BaseModel):
 
 
 class OffFundRegressionFactorRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     key: str = Field(min_length=1, max_length=64)
     label: str | None = Field(default=None, max_length=128)
     aliases: list[str] = Field(
         min_length=1, description="Candidate benchmark codes in priority order"
     )
+    reporting_group: str | None = Field(default=None, max_length=128)
+    substitution_group: str | None = Field(default=None, max_length=128)
+    asset_class: str | None = Field(default=None, max_length=64)
 
 
 class OffFundRegressionFactorConfigUpsert(BaseModel):
@@ -346,6 +375,9 @@ class OffFundRegressionFactorConfigUpsert(BaseModel):
         default=None,
         description="Optional custom factors; when set, overrides benchmark_profile",
     )
+    template_id: str | None = Field(default=None, max_length=64)
+    template_version: int | None = Field(default=None, ge=1)
+    solver_params: dict[str, float] | None = None
 
 
 class OffFundRegressionFactorConfigOut(BaseModel):
@@ -362,6 +394,11 @@ class OffFundRegressionFactorConfigOut(BaseModel):
             "otherwise factors expanded from benchmark_profile."
         ),
     )
+    template_id: str | None = None
+    template_version: int | None = None
+    solver_params: dict[str, float] | None = None
+    is_legacy: bool = False
+    legacy_dense_template: bool = False
 
 
 class OffFundRegressionPortfolioNavPoint(BaseModel):
@@ -463,6 +500,126 @@ class OffFundRegressionClassifyResponse(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
     factors: list[dict[str, Any]] = Field(default_factory=list)
     items: list[OffFundRegressionClassifyItem] = Field(default_factory=list)
+
+
+class OffFundReplicationRequest(BaseModel):
+    codes: list[str] = Field(min_length=1)
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    fund_adjust: str = Field(default="hfq")
+    benchmark_adjust: str = Field(default="hfq")
+    template_id: str = Field(default="cn_equity_size", max_length=64)
+    template_version: int | None = Field(default=None, ge=1)
+    benchmark_factors: list[OffFundRegressionFactorRequest] | None = None
+    rolling_window: int = Field(default=252, ge=40, le=2000)
+    min_samples: int = Field(default=120, ge=40, le=2000)
+    drop_short_history_factors: bool = False
+    include_weight_series: bool = False
+    max_series_points: int = Field(default=260, ge=0, le=2000)
+    include_portfolio: bool = False
+    portfolio_code: str = "__PORTFOLIO__"
+    portfolio_name: str = "组合净值"
+    portfolio_nav_series: list[OffFundRegressionPortfolioNavPoint] = Field(
+        default_factory=list
+    )
+    lambda_substitution: float | None = Field(default=None, ge=0.0, le=10.0)
+    lambda_temporal: float | None = Field(default=None, ge=0.0, le=10.0)
+    advanced_mode: bool = False
+
+
+class OffFundReplicationItem(BaseModel):
+    code: str
+    name: str | None = None
+    status: str
+    sample_days: int = 0
+    training_days: int | None = None
+    oos_days: int | None = None
+    estimation_windows: int | None = None
+    effective_windows: int | None = None
+    effective_start: str | None = None
+    effective_end: str | None = None
+    model_version: str | None = None
+    solver_used: str | None = None
+    model_parameters: dict[str, Any] = Field(default_factory=dict)
+    selected_factors: list[dict[str, Any]] = Field(default_factory=list)
+    asset_weights: dict[str, float] = Field(default_factory=dict)
+    cash_weight: float | None = None
+    group_weights: dict[str, float] = Field(default_factory=dict)
+    oos_metrics: dict[str, Any] = Field(default_factory=dict)
+    tracking_error: float | None = None
+    residual_drift: float | None = None
+    geometric_active_return: float | None = None
+    variance_explained: float | None = None
+    metric_sample: str | None = None
+    stability: dict[str, Any] = Field(default_factory=dict)
+    identifiability: dict[str, Any] = Field(default_factory=dict)
+    factor_sensitivity: list[dict[str, Any]] = Field(default_factory=list)
+    extra_solves_used: int = 0
+    diagnostics_degraded: bool = False
+    sensitivity_degraded: bool = False
+    diagnostics_computed: bool = False
+    fit_tracking_error_annualized: float | None = None
+    dropped_near_zero_vol: list[str] = Field(default_factory=list)
+    latest_solver: dict[str, Any] = Field(default_factory=dict)
+    coverage: dict[str, Any] = Field(default_factory=dict)
+    dropped_short_history_factors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    weight_series: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class OffFundReplicationResponse(BaseModel):
+    ok: bool
+    error: str | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+    factors: list[dict[str, Any]] = Field(default_factory=list)
+    items: list[OffFundReplicationItem] = Field(default_factory=list)
+
+
+class OffFundMonteCarloRequest(BaseModel):
+    n_sims: int = Field(
+        default=2000, ge=50, le=50000, description="Number of Monte Carlo simulations"
+    )
+    block_size: int = Field(
+        default=20, ge=1, le=252, description="Circular block size in trading days"
+    )
+    seed: int | None = Field(
+        default=None, description="Optional RNG seed for reproducibility"
+    )
+    sample_window_days: int | None = Field(
+        default=None,
+        ge=2,
+        le=20000,
+        description="Optional rolling window length (trading days) used as sampling pool; None means full backtest range.",
+    )
+    portfolio_nav_series: list[OffFundRegressionPortfolioNavPoint] = Field(
+        default_factory=list,
+        description=(
+            "Portfolio nav points, each item: "
+            "{trade_date:'YYYY-MM-DD|YYYYMMDD', nav:number}."
+        ),
+    )
+    rebalance_cycle: Literal[
+        "daily",
+        "weekly",
+        "monthly",
+        "quarterly",
+        "yearly",
+        "none",
+    ] = Field(default="daily")
+    fit_candidates: list[str] | None = Field(
+        default=None,
+        description="Distribution candidates for fitting, e.g. ['normal','t','skew_t','ged','lognorm']",
+    )
+    fit_rule: str = Field(
+        default="bic_ks",
+        description="Best-fit selection rule: bic | bic_ks",
+    )
+    fit_ks_alpha: float = Field(
+        default=0.05,
+        gt=0.0,
+        lt=1.0,
+        description="KS significance threshold when fit_rule=bic_ks",
+    )
 
 
 class OffFundRegressionFactorAvailabilityItem(BaseModel):
@@ -1108,7 +1265,7 @@ class BaselineAnalysisRequest(BaseModel):
     )
     dca_base_amount: float = Field(
         default=100000.0,
-        gt=0.0,
+        ge=0.0,
         description="Base position amount invested on the first trading day when DCA is enabled.",
     )
     dca_periodic_amount: float = Field(
@@ -1121,6 +1278,33 @@ class BaselineAnalysisRequest(BaseModel):
     ] = Field(
         default="monthly",
         description="Periodic DCA frequency. 'none' means only the first-day base amount.",
+    )
+    dca_weekly_weekday: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description="When dca_frequency=weekly: target weekday (1=Mon ... 5=Fri).",
+    )
+    dca_monthly_day: int = Field(
+        default=1,
+        ge=1,
+        le=28,
+        description="When dca_frequency=monthly: target day-of-month (1..28).",
+    )
+    dca_non_trading_shift: Literal["next"] = Field(
+        default="next",
+        description="How to handle non-trading schedule day; currently only next trading day is supported.",
+    )
+    cvar_window: int = Field(
+        default=60,
+        ge=20,
+        description="Holding-strategy HS CVaR window (trading days), default 60.",
+    )
+    cvar_budget_pct: float = Field(
+        default=0.02,
+        ge=0.001,
+        le=0.10,
+        description="Daily loss budget as a decimal (2% = 0.02). Shrink-only overlay.",
     )
     lppl_enabled: bool = Field(
         default=False,
@@ -1887,6 +2071,10 @@ class BaselineGarchVolatilityRequest(BaseModel):
         le=10000.0,
         description="Scale applied before fitting, e.g. 100 means percent returns",
     )
+    include_model_comparison: bool = Field(
+        default=False,
+        description="If true, fit and rank six GARCH-family variants",
+    )
 
 
 class BaselineGarchArchLmOut(BaseModel):
@@ -1896,6 +2084,7 @@ class BaselineGarchArchLmOut(BaseModel):
     stat: float | None = None
     pvalue: float | None = None
     significant: bool | None = None
+    conclusion: str | None = None
 
 
 class BaselineGarchParamsOut(BaseModel):
@@ -1927,8 +2116,24 @@ class BaselineGarchDiagnosticsOut(BaseModel):
     std_resid_std: float | None = None
     std_resid_skew: float | None = None
     std_resid_kurtosis_excess: float | None = None
+    normality_jb: dict[str, Any] = Field(default_factory=dict)
+    t_dist_gof: dict[str, Any] = Field(default_factory=dict)
+    ged_dist_gof: dict[str, Any] = Field(default_factory=dict)
+    skew_t_dist_gof: dict[str, Any] = Field(default_factory=dict)
+    normality_jb_pre: dict[str, Any] = Field(default_factory=dict)
+    t_dist_gof_pre: dict[str, Any] = Field(default_factory=dict)
+    ged_dist_gof_pre: dict[str, Any] = Field(default_factory=dict)
+    skew_t_dist_gof_pre: dict[str, Any] = Field(default_factory=dict)
+    stationarity_adf_pre: dict[str, Any] = Field(default_factory=dict)
+    stationarity_adf_post: dict[str, Any] = Field(default_factory=dict)
+    autocorr_acf_ljung_pre: dict[str, Any] = Field(default_factory=dict)
+    autocorr_acf_ljung_post: dict[str, Any] = Field(default_factory=dict)
     arch_lm_pre: BaselineGarchArchLmOut
     arch_lm_post: BaselineGarchArchLmOut
+    var_backtest_95: dict[str, Any] = Field(default_factory=dict)
+    var_backtest_99: dict[str, Any] = Field(default_factory=dict)
+    mean_model_selection: dict[str, Any] = Field(default_factory=dict)
+    model_comparison: dict[str, Any] = Field(default_factory=dict)
 
 
 class BaselineGarchInterpretationOut(BaseModel):
@@ -2102,9 +2307,13 @@ class CalendarTimingStrategyRequest(BaseModel):
     adjust: str = Field(
         default="none", description="qfq/hfq/none for execution price series"
     )
+    decision_mode: Literal["monthly", "weekly"] = Field(
+        default="monthly",
+        description="Decision-day mode: monthly (natural day in month) | weekly (weekday-like trading index in week).",
+    )
     decision_day: int = Field(
         default=1,
-        description="Monthly natural decision day in [-28,28] excluding 0. Negative means from month-end.",
+        description="Decision-day anchor. monthly: [-28,28]\\{0} (negative from month-end natural day); weekly: [-5,5]\\{0} (negative from week-end).",
     )
     hold_days: int = Field(
         default=1, ge=1, le=252, description="Holding days from execution day"
@@ -2939,6 +3148,21 @@ class TrendBacktestRequest(BaseModel):
         le=0.03,
         description="NAV risk budget for 1 ATR move (0.01 = 1%)",
     )
+    cvar_risk_mgmt_enabled: bool = Field(
+        default=False,
+        description="Enable CVaR(95%) based position scaling (shrink-only)",
+    )
+    cvar_window: int = Field(
+        default=60,
+        ge=20,
+        description="Rolling window (trading days) for historical CVaR(95%) estimate",
+    )
+    cvar_budget_pct: float = Field(
+        default=0.02,
+        ge=0.001,
+        le=0.10,
+        description="CVaR budget as NAV fraction (0.02 = 2%)",
+    )
     risk_budget_overcap_policy: str = Field(
         default="scale",
         description="When risk-budget new entry exceeds total 100% exposure: scale|skip_entry|replace_entry|leverage_entry",
@@ -3441,6 +3665,21 @@ class TrendPortfolioBacktestRequest(BaseModel):
         le=0.03,
         description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)",
     )
+    cvar_risk_mgmt_enabled: bool = Field(
+        default=False,
+        description="Enable CVaR(95%) based position scaling (shrink-only)",
+    )
+    cvar_window: int = Field(
+        default=60,
+        ge=20,
+        description="Rolling window (trading days) for historical CVaR(95%) estimate",
+    )
+    cvar_budget_pct: float = Field(
+        default=0.02,
+        ge=0.001,
+        le=0.10,
+        description="CVaR budget as NAV fraction (0.02 = 2%)",
+    )
     risk_budget_overcap_policy: str = Field(
         default="scale",
         description="When risk-budget new entry exceeds total 100% exposure: scale|skip_entry|replace_entry|leverage_entry",
@@ -3889,6 +4128,52 @@ class BaselineMonteCarloRequest(BaselineAnalysisRequest, MonteCarloRequest):
 
 class RotationMonteCarloRequest(RotationBacktestRequest, MonteCarloRequest):
     pass
+
+
+class TrendPortfolioMonteCarloRequest(TrendPortfolioBacktestRequest, MonteCarloRequest):
+    fit_candidates: list[str] | None = Field(
+        default=None,
+        description="Distribution candidates for fitting, e.g. ['normal','t','skew_t','ged','lognorm']",
+    )
+    fit_rule: str = Field(
+        default="bic_ks",
+        description="Best-fit selection rule: bic | bic_ks",
+    )
+    fit_ks_alpha: float = Field(
+        default=0.05,
+        gt=0.0,
+        lt=1.0,
+        description="KS significance threshold when fit_rule=bic_ks",
+    )
+    sqn_window: int = Field(
+        default=100,
+        ge=20,
+        le=500,
+        description="Rolling trades window for SQN median metric",
+    )
+
+
+class CalendarTimingMonteCarloRequest(CalendarTimingStrategyRequest, MonteCarloRequest):
+    fit_candidates: list[str] | None = Field(
+        default=None,
+        description="Distribution candidates for fitting, e.g. ['normal','t','skew_t','ged','lognorm']",
+    )
+    fit_rule: str = Field(
+        default="bic_ks",
+        description="Best-fit selection rule: bic | bic_ks",
+    )
+    fit_ks_alpha: float = Field(
+        default=0.05,
+        gt=0.0,
+        lt=1.0,
+        description="KS significance threshold when fit_rule=bic_ks",
+    )
+    sqn_window: int = Field(
+        default=100,
+        ge=20,
+        le=500,
+        description="Rolling trades window for SQN median metric",
+    )
 
 
 class RotationOosBootstrapRequest(BaseModel):

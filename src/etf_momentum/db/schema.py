@@ -172,8 +172,42 @@ def _has_column(engine: Engine, table: str, column: str) -> bool:
 
 
 def _add_column(engine: Engine, table: str, ddl: str) -> None:
-    with engine.begin() as conn:
-        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+    column = str(ddl).split(maxsplit=1)[0]
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+    except SQLAlchemyError:
+        # Another application instance may have completed the same additive
+        # migration after our preflight inspection.
+        if _has_column(engine, table, column):
+            return
+        raise
+
+
+def _add_unique_template_identity_index(engine: Engine, index_name: str) -> None:
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"CREATE UNIQUE INDEX {index_name} "
+                    "ON off_fund_regression_factor_config "
+                    "(template_id, template_version)"
+                )
+            )
+    except SQLAlchemyError:
+        inspector = inspect(engine)
+        names = {
+            str(item.get("name") or "")
+            for item in inspector.get_indexes("off_fund_regression_factor_config")
+        } | {
+            str(item.get("name") or "")
+            for item in inspector.get_unique_constraints(
+                "off_fund_regression_factor_config"
+            )
+        }
+        if index_name in names:
+            return
+        raise
 
 
 def ensure_runtime_schema(engine: Engine) -> None:
@@ -192,11 +226,49 @@ def ensure_runtime_schema(engine: Engine) -> None:
         off_fund_research_cols = {
             "pair_chart_prefs_json": "pair_chart_prefs_json TEXT",
             "show_non_group_codes": "show_non_group_codes BOOLEAN NOT NULL DEFAULT 1",
+            "invest_mode": "invest_mode VARCHAR(16) NOT NULL DEFAULT 'lump_sum'",
+            "dca_base_amount": "dca_base_amount FLOAT NOT NULL DEFAULT 100000",
+            "dca_periodic_amount": "dca_periodic_amount FLOAT NOT NULL DEFAULT 10000",
+            "dca_frequency": "dca_frequency VARCHAR(16) NOT NULL DEFAULT 'monthly'",
+            "dca_weekly_weekday": "dca_weekly_weekday INTEGER NOT NULL DEFAULT 1",
+            "dca_monthly_day": "dca_monthly_day INTEGER NOT NULL DEFAULT 1",
+            "dca_non_trading_shift": "dca_non_trading_shift VARCHAR(16) NOT NULL DEFAULT 'next'",
+            "replication_rolling_window": "replication_rolling_window INTEGER NOT NULL DEFAULT 252",
+            "replication_min_samples": "replication_min_samples INTEGER NOT NULL DEFAULT 120",
+            "replication_include_portfolio": "replication_include_portfolio BOOLEAN NOT NULL DEFAULT 1",
+            "replication_drop_short_history_factors": "replication_drop_short_history_factors BOOLEAN NOT NULL DEFAULT 0",
         }
         for col, ddl in off_fund_research_cols.items():
             if _has_column(engine, "off_fund_research_state", col):
                 continue
             _add_column(engine, "off_fund_research_state", ddl)
+
+    if inspect(engine).has_table("off_fund_regression_factor_config"):
+        replication_config_cols = {
+            "template_id": "template_id VARCHAR(64)",
+            "template_version": "template_version INTEGER",
+            "solver_params_json": "solver_params_json TEXT",
+        }
+        for col, ddl in replication_config_cols.items():
+            if _has_column(engine, "off_fund_regression_factor_config", col):
+                continue
+            _add_column(engine, "off_fund_regression_factor_config", ddl)
+        index_name = "uq_off_fund_factor_template_identity"
+        existing_indexes = {
+            str(item.get("name") or "")
+            for item in inspect(engine).get_indexes("off_fund_regression_factor_config")
+        }
+        existing_constraints = {
+            str(item.get("name") or "")
+            for item in inspect(engine).get_unique_constraints(
+                "off_fund_regression_factor_config"
+            )
+        }
+        if (
+            index_name not in existing_indexes
+            and index_name not in existing_constraints
+        ):
+            _add_unique_template_identity_index(engine, index_name)
 
     if inspect(engine).has_table("live_strategy_profile"):
         live_strategy_profile_cols = {

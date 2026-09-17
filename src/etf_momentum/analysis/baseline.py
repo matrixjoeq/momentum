@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from ..db.models import EtfPrice
 from .erc_weights import erc_weights_from_return_history
 from .execution_timing import forward_align_returns
+from .var_cvar import build_holding_cvar_overlay, public_cvar_overlay
 
 try:
     _LPPLS_MODULE = importlib.import_module("lppls.lppls")
@@ -45,7 +46,11 @@ def hfq_close_daily_equal_weight_returns(
     - dynamic_universe: mean across assets with price that day only (skipna).
     - else: intersection / static — missing return treated as 0 before cross-sectional mean.
     """
-    r = close_hfq.astype(float).pct_change().replace([np.inf, -np.inf], np.nan)
+    r = (
+        close_hfq.astype(float)
+        .pct_change(fill_method=None)
+        .replace([np.inf, -np.inf], np.nan)
+    )
     if dynamic_universe:
         out = r.mean(axis=1, skipna=True).fillna(0.0).astype(float)
     else:
@@ -89,6 +94,9 @@ class BaselineInputs:
     dca_base_amount: float = 100000.0
     dca_periodic_amount: float = 10000.0
     dca_frequency: str = "monthly"  # daily/weekly/monthly/quarterly/yearly/none
+    dca_weekly_weekday: int = 1  # 1=Mon .. 5=Fri
+    dca_monthly_day: int = 1  # 1..28
+    dca_non_trading_shift: str = "next"  # currently only next is supported
     # LPPL crash prediction block (distribution panel)
     lppl_enabled: bool = False
     lppl_lookback_days: int = 504
@@ -104,6 +112,9 @@ class BaselineInputs:
     lppl_bootstrap_block_size: int = 10
     lppl_bootstrap_seed: int | None = None
     lppl_c_rel_min: float = 0.05
+    # Historical-simulation CVaR overlay (shrink-only). Does not change orig NAV.
+    cvar_window: int = 60
+    cvar_budget_pct: float = 0.02
 
 
 def _inv_vol_weights(vol: pd.Series) -> pd.Series:
@@ -733,6 +744,9 @@ def _build_dca_contribution_series(
     base_amount: float,
     periodic_amount: float,
     frequency: str,
+    weekly_weekday: int = 1,
+    monthly_day: int = 1,
+    non_trading_shift: str = "next",
 ) -> pd.Series:
     idx = pd.DatetimeIndex(index)
     out = pd.Series(0.0, index=idx, dtype=float)
@@ -743,11 +757,47 @@ def _build_dca_contribution_series(
     if per_amt <= 0.0:
         return out
     freq = str(frequency or "monthly").strip().lower()
+    shift = str(non_trading_shift or "next").strip().lower()
+    if shift != "next":
+        raise ValueError("dca_non_trading_shift must be 'next'")
     if freq == "none":
         return out
     if freq == "daily":
         if len(out) > 1:
             out.iloc[1:] = out.iloc[1:] + per_amt
+        return out
+    if freq == "weekly":
+        wd = int(weekly_weekday)
+        if wd < 1 or wd > 5:
+            raise ValueError("dca_weekly_weekday must be within [1..5]")
+        start = pd.Timestamp(idx[0]).normalize()
+        end = pd.Timestamp(idx[-1]).normalize()
+        first_monday = start - pd.Timedelta(days=int(start.weekday()))
+        cur_monday = first_monday
+        while cur_monday <= end:
+            target = cur_monday + pd.Timedelta(days=wd - 1)
+            pos = int(idx.searchsorted(target, side="left"))
+            if pos >= len(idx):
+                break
+            if pos >= 1:
+                out.iloc[pos] = out.iloc[pos] + per_amt
+            cur_monday = cur_monday + pd.Timedelta(days=7)
+        return out
+    if freq == "monthly":
+        md = int(monthly_day)
+        if md < 1 or md > 28:
+            raise ValueError("dca_monthly_day must be within [1..28]")
+        start = pd.Timestamp(idx[0]).normalize()
+        end = pd.Timestamp(idx[-1]).normalize()
+        cur = pd.Timestamp(year=int(start.year), month=int(start.month), day=1)
+        while cur <= end:
+            target = cur + pd.Timedelta(days=md - 1)
+            pos = int(idx.searchsorted(target, side="left"))
+            if pos >= len(idx):
+                break
+            if pos >= 1:
+                out.iloc[pos] = out.iloc[pos] + per_amt
+            cur = cur + pd.offsets.MonthBegin(1)
         return out
     labels = _rebalance_labels(idx, freq, weekly_anchor="FRI")
     prev = labels[0]
@@ -810,6 +860,9 @@ def _compute_dca_from_nav(
     base_amount: float,
     periodic_amount: float,
     frequency: str,
+    weekly_weekday: int = 1,
+    monthly_day: int = 1,
+    non_trading_shift: str = "next",
 ) -> dict[str, Any]:
     idx = pd.DatetimeIndex(nav_s.index)
     if len(idx) == 0:
@@ -819,6 +872,9 @@ def _compute_dca_from_nav(
                 "base_amount": float(base_amount),
                 "periodic_amount": float(periodic_amount),
                 "frequency": str(frequency),
+                "weekly_weekday": int(weekly_weekday),
+                "monthly_day": int(monthly_day),
+                "non_trading_shift": str(non_trading_shift),
             },
             "series": {
                 "dates": [],
@@ -842,6 +898,9 @@ def _compute_dca_from_nav(
                 "base_amount": float(base_amount),
                 "periodic_amount": float(periodic_amount),
                 "frequency": str(frequency),
+                "weekly_weekday": int(weekly_weekday),
+                "monthly_day": int(monthly_day),
+                "non_trading_shift": str(non_trading_shift),
             },
             "series": {
                 "dates": idx.strftime("%Y-%m-%d").tolist(),
@@ -863,6 +922,9 @@ def _compute_dca_from_nav(
         base_amount=float(base_amount),
         periodic_amount=float(periodic_amount),
         frequency=str(frequency),
+        weekly_weekday=int(weekly_weekday),
+        monthly_day=int(monthly_day),
+        non_trading_shift=str(non_trading_shift),
     )
     ret = (
         pd.to_numeric(nav_s, errors="coerce")
@@ -916,6 +978,9 @@ def _compute_dca_from_nav(
             "base_amount": float(base_amount),
             "periodic_amount": float(periodic_amount),
             "frequency": str(frequency),
+            "weekly_weekday": int(weekly_weekday),
+            "monthly_day": int(monthly_day),
+            "non_trading_shift": str(non_trading_shift),
         },
         "series": {
             "dates": idx.strftime("%Y-%m-%d").tolist(),
@@ -3912,6 +3977,11 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     dca_base_amount = float(getattr(inp, "dca_base_amount", 100000.0) or 0.0)
     dca_periodic_amount = float(getattr(inp, "dca_periodic_amount", 10000.0) or 0.0)
     dca_frequency = str(getattr(inp, "dca_frequency", "monthly") or "monthly")
+    dca_weekly_weekday = int(getattr(inp, "dca_weekly_weekday", 1) or 1)
+    dca_monthly_day = int(getattr(inp, "dca_monthly_day", 1) or 1)
+    dca_non_trading_shift = (
+        str(getattr(inp, "dca_non_trading_shift", "next") or "next").strip().lower()
+    )
     dca_frequency = dca_frequency.strip().lower()
     if dca_frequency not in {
         "none",
@@ -3924,12 +3994,29 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         raise ValueError(
             "dca_frequency must be one of: none|daily|weekly|monthly|quarterly|yearly"
         )
-    if dca_enabled and (not np.isfinite(dca_base_amount) or dca_base_amount <= 0.0):
-        raise ValueError("dca_base_amount must be > 0 when dca_enabled=true")
+    if dca_enabled and (not np.isfinite(dca_base_amount) or dca_base_amount < 0.0):
+        raise ValueError("dca_base_amount must be >= 0 when dca_enabled=true")
     if dca_enabled and (
         (not np.isfinite(dca_periodic_amount)) or dca_periodic_amount < 0.0
     ):
         raise ValueError("dca_periodic_amount must be >= 0 when dca_enabled=true")
+    if (
+        dca_enabled
+        and dca_base_amount == 0.0
+        and (dca_periodic_amount == 0.0 or dca_frequency == "none")
+    ):
+        raise ValueError(
+            "DCA with zero base amount requires a positive periodic amount "
+            "and a recurring frequency"
+        )
+    if dca_enabled and dca_frequency == "weekly":
+        if dca_weekly_weekday < 1 or dca_weekly_weekday > 5:
+            raise ValueError("dca_weekly_weekday must be within [1..5]")
+    if dca_enabled and dca_frequency == "monthly":
+        if dca_monthly_day < 1 or dca_monthly_day > 28:
+            raise ValueError("dca_monthly_day must be within [1..28]")
+    if dca_enabled and dca_non_trading_shift != "next":
+        raise ValueError("dca_non_trading_shift must be 'next'")
     cw_raw = dict(getattr(inp, "custom_weights", None) or {})
     cw = pd.Series(0.0, index=codes_eff, dtype=float)
     for k, v in cw_raw.items():
@@ -4012,6 +4099,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             base_amount=dca_base_amount,
             periodic_amount=dca_periodic_amount,
             frequency=dca_frequency,
+            weekly_weekday=dca_weekly_weekday,
+            monthly_day=dca_monthly_day,
+            non_trading_shift=dca_non_trading_shift,
         )
         for key, nav_s in nav_by_mode.items()
     }
@@ -4035,21 +4125,11 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         key: _dca_series_to_pd(dca_pack, "contribution").fillna(0.0)
         for key, dca_pack in dca_by_portfolio.items()
     }
-    perf_nav_by_portfolio: dict[str, pd.Series] = {}
-    for key, strat_nav in nav_by_mode.items():
-        if not dca_enabled:
-            perf_nav_by_portfolio[key] = strat_nav.astype(float)
-            continue
-        dca_nav = dca_account_nav_by_portfolio.get(key)
-        if (
-            dca_nav is None
-            or dca_nav.empty
-            or dca_nav.isna().any()
-            or (dca_nav <= 0.0).any()
-        ):
-            perf_nav_by_portfolio[key] = strat_nav.astype(float)
-            continue
-        perf_nav_by_portfolio[key] = dca_nav.astype(float)
+    # Core strategy performance metrics (annualized/rolling/period returns)
+    # should stay cashflow-neutral and must not treat DCA contribution as return.
+    perf_nav_by_portfolio: dict[str, pd.Series] = {
+        key: nav_s.astype(float) for key, nav_s in nav_by_mode.items()
+    }
     perf_ret_by_portfolio = {
         key: (
             nav_s.pct_change()
@@ -4060,26 +4140,6 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         for key, nav_s in perf_nav_by_portfolio.items()
     }
     bench_perf_ret = bench_ret.fillna(0.0).astype(float)
-    if dca_enabled:
-        bench_dca = _compute_dca_from_nav(
-            bench_nav,
-            enabled=True,
-            base_amount=dca_base_amount,
-            periodic_amount=dca_periodic_amount,
-            frequency=dca_frequency,
-        )
-        bench_dca_nav = _dca_series_to_pd(bench_dca, "account_value")
-        if (
-            (not bench_dca_nav.empty)
-            and (not bench_dca_nav.isna().any())
-            and (not (bench_dca_nav <= 0.0).any())
-        ):
-            bench_perf_ret = (
-                bench_dca_nav.pct_change()
-                .replace([np.inf, -np.inf], np.nan)
-                .fillna(0.0)
-                .astype(float)
-            )
     selected_nav = perf_nav_by_portfolio.get(
         mode, perf_nav_by_portfolio.get("EW", ew_nav)
     )
@@ -4307,7 +4367,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     metrics_ew.update(
         _trade_freq_from_weights(
             ew_w,
-            account_nav=(perf_nav_by_portfolio["EW"] if dca_enabled else None),
+            account_nav=(
+                dca_account_nav_by_portfolio.get("EW") if dca_enabled else None
+            ),
             contribution=(
                 dca_contribution_by_portfolio.get("EW") if dca_enabled else None
             ),
@@ -4316,7 +4378,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     metrics_rp.update(
         _trade_freq_from_weights(
             rp_w,
-            account_nav=(perf_nav_by_portfolio["RP"] if dca_enabled else None),
+            account_nav=(
+                dca_account_nav_by_portfolio.get("RP") if dca_enabled else None
+            ),
             contribution=(
                 dca_contribution_by_portfolio.get("RP") if dca_enabled else None
             ),
@@ -4325,7 +4389,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     metrics_ivol.update(
         _trade_freq_from_weights(
             ivol_w,
-            account_nav=(perf_nav_by_portfolio["IVOL"] if dca_enabled else None),
+            account_nav=(
+                dca_account_nav_by_portfolio.get("IVOL") if dca_enabled else None
+            ),
             contribution=(
                 dca_contribution_by_portfolio.get("IVOL") if dca_enabled else None
             ),
@@ -4334,7 +4400,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     metrics_custom.update(
         _trade_freq_from_weights(
             custom_w,
-            account_nav=(perf_nav_by_portfolio["CUSTOM"] if dca_enabled else None),
+            account_nav=(
+                dca_account_nav_by_portfolio.get("CUSTOM") if dca_enabled else None
+            ),
             contribution=(
                 dca_contribution_by_portfolio.get("CUSTOM") if dca_enabled else None
             ),
@@ -4501,7 +4569,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             contribution=dca_contribution_by_portfolio.get(
                 "EW", pd.Series(0.0, index=ret_common.index, dtype=float)
             ),
-            account_nav=perf_nav_by_portfolio["EW"],
+            account_nav=(
+                dca_account_nav_by_portfolio.get("EW", perf_nav_by_portfolio["EW"])
+            ),
         )
         attribution_rp = _compute_return_risk_contributions_money_weighted(
             asset_ret=attr_asset_ret,
@@ -4511,7 +4581,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             contribution=dca_contribution_by_portfolio.get(
                 "RP", pd.Series(0.0, index=ret_common.index, dtype=float)
             ),
-            account_nav=perf_nav_by_portfolio["RP"],
+            account_nav=(
+                dca_account_nav_by_portfolio.get("RP", perf_nav_by_portfolio["RP"])
+            ),
         )
         attribution_ivol = _compute_return_risk_contributions_money_weighted(
             asset_ret=attr_asset_ret,
@@ -4521,7 +4593,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             contribution=dca_contribution_by_portfolio.get(
                 "IVOL", pd.Series(0.0, index=ret_common.index, dtype=float)
             ),
-            account_nav=perf_nav_by_portfolio["IVOL"],
+            account_nav=(
+                dca_account_nav_by_portfolio.get("IVOL", perf_nav_by_portfolio["IVOL"])
+            ),
         )
         attribution_custom = _compute_return_risk_contributions_money_weighted(
             asset_ret=attr_asset_ret,
@@ -4531,7 +4605,11 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             contribution=dca_contribution_by_portfolio.get(
                 "CUSTOM", pd.Series(0.0, index=ret_common.index, dtype=float)
             ),
-            account_nav=perf_nav_by_portfolio["CUSTOM"],
+            account_nav=(
+                dca_account_nav_by_portfolio.get(
+                    "CUSTOM", perf_nav_by_portfolio["CUSTOM"]
+                )
+            ),
         )
     else:
         attribution_ew = _compute_return_risk_contributions(
@@ -4770,6 +4848,97 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         if out_by_period:
             mirror_timeseries[code] = out_by_period
 
+    from ..strategy.rotation import _build_current_holdings_snapshot
+
+    weights_by_portfolio = {
+        "EW": ew_w,
+        "RP": rp_w,
+        "IVOL": ivol_w,
+        "CUSTOM": custom_w,
+    }
+    nav_exec = nav_common.reindex(index=ret_common.index, columns=codes_eff)
+    price_exec = close_ff_common.reindex(index=ret_common.index, columns=codes_eff)
+    current_holdings_by_portfolio: dict[str, list[dict[str, Any]]] = {}
+    for port_key, w_df in weights_by_portfolio.items():
+        w_aligned = w_df.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0)
+        current_holdings_by_portfolio[port_key] = _build_current_holdings_snapshot(
+            w_aligned,
+            codes=codes_eff,
+            asset_nav_exec=nav_exec,
+            asset_price_exec=price_exec,
+        )
+    current_holdings = current_holdings_by_portfolio.get(
+        mode, current_holdings_by_portfolio["EW"]
+    )
+
+    cvar_window = int(getattr(inp, "cvar_window", 60) or 60)
+    cvar_budget_pct = float(getattr(inp, "cvar_budget_pct", 0.02) or 0.02)
+    # CVaR historical simulation must preserve missing observations. Strategy
+    # returns may use forward-filled prices, but HS skips a day whenever any
+    # held asset has no genuine close-to-close return.
+    hs_asset_ret = (
+        close_common.reindex(index=ret_common.index, columns=codes_eff)
+        .astype(float)
+        .pct_change(fill_method=None)
+        .replace([np.inf, -np.inf], np.nan)
+    )
+
+    def _cvar_pack(
+        w_df: pd.DataFrame, orig_ret: pd.Series, orig_nav: pd.Series
+    ) -> dict[str, Any]:
+        raw = build_holding_cvar_overlay(
+            w_df.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0),
+            hs_asset_ret,
+            orig_ret.reindex(ret_common.index).fillna(0.0),
+            orig_nav.reindex(ret_common.index),
+            window=cvar_window,
+            budget_pct=cvar_budget_pct,
+        )
+        nav_s = raw["_nav_sim"]
+        r_s = raw["_r_sim"]
+        if nav_s is None or len(nav_s) == 0:
+            cum = 0.0
+            ann = 0.0
+            vol = 0.0
+            mdd = 0.0
+        else:
+            n0 = float(nav_s.iloc[0]) if float(nav_s.iloc[0]) else 1.0
+            cum = float(nav_s.iloc[-1] / n0 - 1.0)
+            ann = _annualized_return(nav_s)
+            vol = _annualized_vol(r_s)
+            mdd = _max_drawdown(nav_s)
+        return public_cvar_overlay(
+            raw,
+            cumulative_return=cum,
+            annualized_return=ann,
+            annualized_volatility=vol,
+            max_drawdown=mdd,
+        )
+
+    cvar_overlay = {
+        "window": int(cvar_window),
+        "budget_pct": float(cvar_budget_pct),
+        "confidence": 0.95,
+        "by_portfolio": {
+            "EW": _cvar_pack(
+                ew_w, perf_ret_by_portfolio["EW"], perf_nav_by_portfolio["EW"]
+            ),
+            "RP": _cvar_pack(
+                rp_w, perf_ret_by_portfolio["RP"], perf_nav_by_portfolio["RP"]
+            ),
+            "IVOL": _cvar_pack(
+                ivol_w,
+                perf_ret_by_portfolio["IVOL"],
+                perf_nav_by_portfolio["IVOL"],
+            ),
+            "CUSTOM": _cvar_pack(
+                custom_w,
+                perf_ret_by_portfolio["CUSTOM"],
+                perf_nav_by_portfolio["CUSTOM"],
+            ),
+        },
+    }
+
     return {
         "date_range": {
             "start": inp.start.strftime("%Y%m%d"),
@@ -4808,4 +4977,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             "dates": ew_active_count.index.date.astype(str).tolist(),
             "values": ew_active_count.astype(int).tolist(),
         },
+        "current_holdings": current_holdings,
+        "current_holdings_by_portfolio": current_holdings_by_portfolio,
+        "cvar_overlay": cvar_overlay,
     }

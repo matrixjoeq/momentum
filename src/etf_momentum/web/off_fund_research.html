@@ -125,6 +125,73 @@
           <label>偏离阈值-相对目标(0~1)</label>
           <input id="driftRelThreshold" value="0.25" />
         </div>
+        <div>
+          <label>投入方式</label>
+          <select id="offInvestMode">
+            <option value="lump_sum" selected>一次性买入</option>
+            <option value="dca">定投</option>
+          </select>
+        </div>
+        <div>
+          <label>定投底仓金额</label>
+          <input id="offDcaBaseAmount" value="100000" />
+        </div>
+        <div>
+          <label>定投频率</label>
+          <select id="offDcaFrequency">
+            <option value="none">无追加（仅底仓）</option>
+            <option value="daily">每日</option>
+            <option value="weekly">每周</option>
+            <option value="monthly" selected>每月</option>
+          </select>
+        </div>
+        <div>
+          <label>周投日期</label>
+          <select id="offDcaWeeklyWeekday">
+            <option value="1" selected>周一</option>
+            <option value="2">周二</option>
+            <option value="3">周三</option>
+            <option value="4">周四</option>
+            <option value="5">周五</option>
+          </select>
+        </div>
+        <div>
+          <label>月投日期</label>
+          <select id="offDcaMonthlyDay">
+            <option value="1" selected>1日</option>
+            <option value="2">2日</option>
+            <option value="3">3日</option>
+            <option value="4">4日</option>
+            <option value="5">5日</option>
+            <option value="6">6日</option>
+            <option value="7">7日</option>
+            <option value="8">8日</option>
+            <option value="9">9日</option>
+            <option value="10">10日</option>
+            <option value="11">11日</option>
+            <option value="12">12日</option>
+            <option value="13">13日</option>
+            <option value="14">14日</option>
+            <option value="15">15日</option>
+            <option value="16">16日</option>
+            <option value="17">17日</option>
+            <option value="18">18日</option>
+            <option value="19">19日</option>
+            <option value="20">20日</option>
+            <option value="21">21日</option>
+            <option value="22">22日</option>
+            <option value="23">23日</option>
+            <option value="24">24日</option>
+            <option value="25">25日</option>
+            <option value="26">26日</option>
+            <option value="27">27日</option>
+            <option value="28">28日</option>
+          </select>
+        </div>
+        <div>
+          <label>定投每期金额</label>
+          <input id="offDcaPeriodicAmount" value="10000" />
+        </div>
         <button id="run">运行持有策略回测</button>
       </div>
       <div class="muted" style="margin-top: 6px">
@@ -207,8 +274,95 @@
       <div id="navChart" style="width: 100%; height: 860px"></div>
       <table id="metricsTable"></table>
     </div>
+    <details class="panel">
+      <summary>
+        <h3 style="display: inline; margin: 0">
+          蒙特卡洛模拟（场外基金组合，默认折叠）
+        </h3>
+      </summary>
+      <div class="row" style="margin-top: 8px">
+        <div><label>模拟次数</label><input id="offMcN" value="2000" /></div>
+        <div>
+          <label>区块长度(交易日)</label><input id="offMcBlock" value="20" />
+        </div>
+        <div>
+          <label>滚动窗口(交易日，可空)</label>
+          <input id="offMcWindow" placeholder="如 2520 表示近10年" />
+        </div>
+        <div>
+          <label>随机种子(可空)</label
+          ><input id="offMcSeed" placeholder="如 42" />
+        </div>
+        <div>
+          <label>拟合候选(逗号分隔)</label>
+          <input id="offMcFitCandidates" value="normal,t,skew_t,ged,lognorm" />
+        </div>
+        <button id="runOffMc">运行蒙特卡洛（场外基金）</button>
+      </div>
+      <table id="offMcTable" style="margin-top: 8px"></table>
+      <div class="row" style="margin-top: 8px">
+        <div>
+          <label>直方图指标</label>
+          <select id="offMcMetric" style="min-width: 280px">
+            <option value="cumulative_return">累积收益</option>
+            <option value="annualized_return">年化收益</option>
+            <option value="annualized_volatility">年化波动</option>
+            <option value="max_drawdown">最大回撤</option>
+            <option value="sharpe_ratio">夏普</option>
+            <option value="calmar_ratio">卡玛</option>
+            <option value="sortino_ratio">索提诺</option>
+            <option value="ulcer_index">溃疡指标</option>
+            <option value="ulcer_performance">溃疡绩效</option>
+          </select>
+        </div>
+      </div>
+      <div
+        id="offMcHist"
+        style="width: 100%; height: 360px; margin-top: 6px"
+      ></div>
+      <div class="two" style="grid-template-columns: 1fr 1fr">
+        <div>
+          <div class="muted">分布拟合结果（按 BIC 排序）</div>
+          <table id="offMcFitTable"></table>
+        </div>
+        <div>
+          <div class="row" style="gap: 8px">
+            <label>Q-Q 分布</label>
+            <select id="offMcDist" style="min-width: 180px"></select>
+          </div>
+          <div id="offMcQQ" style="width: 100%; height: 360px"></div>
+        </div>
+      </div>
+      <div id="offMcReport" class="muted" style="margin-top: 8px"></div>
+    </details>
     <div class="panel">
-      <h3 style="margin: 0 0 8px 0">基金分类回归（A股基准）</h3>
+      <h3 style="margin: 0 0 8px 0">基金可投资复制归因（显式现金）</h3>
+      <details class="panel" style="margin-bottom: 12px">
+        <summary>
+          <h4 style="display: inline; margin: 0">基准对比图（默认折叠）</h4>
+        </summary>
+        <div class="row" style="margin-top: 8px">
+          <div>
+            <label>基准口径（全标的共享）</label>
+            <select id="offClsPairBenchmarkMarket" style="min-width: 180px">
+              <option value="off_fund">场外基金（alias 第1项）</option>
+              <option value="on_exchange" selected>
+                场内基金（alias 第2项）
+              </option>
+            </select>
+          </div>
+          <div>
+            <label>全局比较基准</label>
+            <select id="offClsPairGlobalBase" style="min-width: 220px"></select>
+          </div>
+        </div>
+        <div class="muted" style="margin-top: 8px">
+          默认：CSI300 对其余内置基准，口径均为 hfq
+          close。修改「全局比较基准」会覆盖全部对比图的基准；单张图可单独改基准。
+          风险调整相对动量按各标的60日样本波动率标准化日对数收益，先做对比减基准并滚动累计40日（图中展示该原值）；Z分数为同一序列的242日滚动标准化，不足341个价格点时无Z；不做截尾。
+        </div>
+        <div id="offClsPairCards" class="two" style="margin-top: 8px"></div>
+      </details>
       <div class="row">
         <div>
           <label>后端配置</label>
@@ -226,7 +380,7 @@
         <div>
           <label>因子配置</label>
           <select id="offClsFactorMode">
-            <option value="profile" selected>内置模板（cn_stock_core）</option>
+            <option value="profile" selected>版本化复制模板</option>
             <option value="custom">自定义因子列表</option>
           </select>
         </div>
@@ -236,17 +390,18 @@
         <div>
           <label>最小样本(日)</label><input id="offClsMinSamples" value="120" />
         </div>
-        <div>
-          <label>均衡判定阈值(top1-top2)</label>
-          <input id="offClsGap" value="0.08" />
-        </div>
         <label style="display: flex; align-items: center; gap: 6px; margin: 0">
           <input id="offClsIncludePortfolio" type="checkbox" checked />
           <span>包含组合净值归因</span>
         </label>
+        <label style="display: flex; align-items: center; gap: 6px; margin: 0">
+          <input id="offClsDropShortHistory" type="checkbox" />
+          <span>允许剔除导致历史缩短的因子</span>
+        </label>
         <button id="offClsCheckFactors">检查因子历史覆盖</button>
-        <button id="runCls">运行基金分类回归</button>
+        <button id="runCls">运行复制归因</button>
       </div>
+      <div id="offClsActionStatus" class="muted" style="margin-top: 6px"></div>
       <div style="margin-top: 8px">
         <div class="muted">自定义因子（每行：KEY|标签=代码1,代码2...）</div>
         <textarea
@@ -258,27 +413,24 @@
         </div>
       </div>
       <div class="muted" style="margin-top: 6px">
-        口径：基金与基准均使用日度后复权（hfq）收益。当前内置 cn_stock_core
-        模板由后端统一定义并下发。
+        口径：基金与基准均使用日度后复权（hfq）收益。默认复制模板为纯 A 股市值
+        v2；风险资产权重之和不超过 100%，剩余部分为零收益现金。
+      </div>
+      <div id="offClsTemplateNotice" class="muted"></div>
+      <div class="muted">
+        下表仅做全区间单因子预检；实际生效 alias
+        由后端针对每个目标按共同覆盖独立选择。
       </div>
       <table id="offClsFactorTable"></table>
-      <div class="muted" style="margin-top: 6px">本次回归实际生效因子</div>
-      <table id="offClsActiveFactors"></table>
-      <details class="panel" style="margin-top: 10px">
-        <summary>
-          <h4 style="display: inline; margin: 0">基准对比图（默认折叠）</h4>
-        </summary>
-        <div class="muted" style="margin-top: 8px">
-          默认：CSI300 对其余内置基准，口径均为 hfq close
-        </div>
-        <div id="offClsPairCards" class="two" style="margin-top: 8px"></div>
-      </details>
-      <table id="offClsTable"></table>
       <div class="muted" style="margin-top: 6px">
-        口径说明：未归因项=在当前因子模板下无法归因的权重部分，不等同于完整因子空间下的统计残差。
+        组合（无组合时为首个目标）实际生效因子
       </div>
-      <div class="muted" style="margin-top: 10px">
-        因子日度占比变化（按当前回归设置；仅展示本次回归有有效序列的基金）
+      <table id="offClsActiveFactors"></table>
+      <table id="offClsTable" style="margin-top: 10px"></table>
+      <div id="offClsDiagnostics" class="muted" style="margin-top: 8px"></div>
+      <div class="muted" style="margin-top: 6px">
+        口径说明：全部权重均为可投资复制权重，不代表基金披露持仓。现金为预算剩余；
+        残差漂移可能同时包含增强收益、费用、估值滞后和遗漏资产。
       </div>
       <div class="row" style="margin-top: 6px">
         <div>
@@ -295,6 +447,24 @@
             <option value="all" selected>全部</option>
           </select>
         </div>
+      </div>
+      <div
+        class="muted"
+        style="margin-top: 10px"
+        id="offClsReplicationNavTitle"
+      >
+        复制净值对比（样本外：基金/组合 vs 基准复制组合，曲线均归一化至起点=1）
+      </div>
+      <div
+        id="offClsReplicationNavChart"
+        style="width: 100%; height: 360px; margin-top: 8px"
+      ></div>
+      <div
+        class="muted"
+        style="margin-top: 10px"
+        id="offClsReplicationWeightTitle"
+      >
+        复制权重日度变化（样本外 lag-1 权重；下方主表仅展示最新一期）
       </div>
       <div
         id="offClsExposureChart"
@@ -593,7 +763,13 @@
       const fmtNum = (x, n = 4) =>
         Number.isFinite(Number(x)) ? Number(x).toFixed(n) : "-";
       const setMsg = (x) => {
-        $("msg").textContent = x || "";
+        const msgEl = $("msg");
+        if (msgEl) msgEl.textContent = x || "";
+      };
+      const setClsActionMsg = (x) => {
+        setMsg(x);
+        const el = $("offClsActionStatus");
+        if (el) el.textContent = x || "";
       };
       function renderOffRegimePanel({ dates, close }) {
         if (!window.MarketRegimeUI) return;
@@ -761,13 +937,17 @@
       let subgroupInnerWeightsByPersistent = {}; // groupName -> "code=weight"
       let activeSubgroupByPersistent = {}; // groupName -> active subgroup id in UI
       let lastCtx = null;
+      let lastOffMc = null;
       let offClsConfigs = [];
+      let offClsSelectedConfig = null;
+      let offClsCustomExplicitlyEdited = false;
       let persistTimer = null;
       let lastPersistPayload = "";
       let offParamPersistTimer = null;
       let offParamPersistPayload = "";
       let offParamHydrating = false;
       let offClsLastRows = [];
+      let offClsLastIsReplication = false;
       let offClsLastFactorLabelByKey = {};
       let offClsLastFactorOrder = [];
       let offClsExposureSelectedCode = "";
@@ -783,9 +963,26 @@
         yearly: { page: 1, rows: [] },
       };
       const OFF_FUND_PAIR_PREFS_STORAGE_KEY = "offFundResearch.pairPrefs.v1";
+      const OFF_CLS_CFG_STORAGE_KEY = "offFundResearch.clsConfigName.v1";
       const OFF_FUND_PAIR_PRICE_LIMIT = 8000;
       const OFF_FUND_PAIR_FETCH_TIMEOUT_MS = 10000;
       const OFF_FUND_PAIR_FETCH_CONCURRENCY = 4;
+      const OFF_FUND_PAIR_VOLATILITY_WINDOW = 60;
+      const OFF_FUND_PAIR_MOMENTUM_WINDOW = 40;
+      const OFF_FUND_PAIR_MOMENTUM_Z_WINDOW = 242;
+      const OFF_FUND_PAIR_MIN_DAILY_VOLATILITY = 1e-8;
+      const OFF_FUND_PAIR_MOMENTUM_RAW_REQUIRED_SAMPLES =
+        OFF_FUND_PAIR_VOLATILITY_WINDOW + OFF_FUND_PAIR_MOMENTUM_WINDOW;
+      const OFF_FUND_PAIR_MOMENTUM_Z_REQUIRED_SAMPLES =
+        OFF_FUND_PAIR_VOLATILITY_WINDOW +
+        OFF_FUND_PAIR_MOMENTUM_WINDOW +
+        OFF_FUND_PAIR_MOMENTUM_Z_WINDOW -
+        1;
+      const OFF_FUND_PAIR_BENCHMARK_MARKETS = new Set([
+        "off_fund",
+        "on_exchange",
+      ]);
+      const OFF_FUND_PAIR_DEFAULT_BENCHMARK_MARKET = "on_exchange";
       const OFF_FUND_PAIR_FALLBACK_UNIVERSE = [
         { key: "CSI300", label: "沪深300", etf_code: "510300" },
         { key: "CSI500", label: "中证500", etf_code: "510500" },
@@ -883,6 +1080,7 @@
           etf_code: "511880",
         },
       ];
+      const OFF_FUND_PAIR_MAX_SLOT_COUNT = 60;
       let OFF_FUND_PAIR_UNIVERSE = OFF_FUND_PAIR_FALLBACK_UNIVERSE.map((x) => ({
         ...x,
       }));
@@ -891,12 +1089,8 @@
       let OFF_FUND_PAIR_DEFAULT_PEERS = [];
       let OFF_FUND_PAIR_CARD_IDS = [];
       let OFF_FUND_PAIR_DEFAULT_PREFS = {};
-      const OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID = "pair_slot_extra_01";
-      const OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID_2 = "pair_slot_extra_02";
-      const OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_IDS = [
-        OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID,
-        OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_ID_2,
-      ];
+      let offPairBenchmarkMarket = OFF_FUND_PAIR_DEFAULT_BENCHMARK_MARKET;
+      let offPairGlobalBase = "CSI300";
       function _rebuildOffFundPairUniverseDerived() {
         OFF_FUND_PAIR_UNIVERSE_BY_KEY = Object.fromEntries(
           OFF_FUND_PAIR_UNIVERSE.map((x) => [x.key, x]),
@@ -904,28 +1098,18 @@
         OFF_FUND_PAIR_ETF_CODE_SET = new Set(
           OFF_FUND_PAIR_UNIVERSE.map((x) => String(x.etf_code)),
         );
-        OFF_FUND_PAIR_DEFAULT_PEERS = OFF_FUND_PAIR_UNIVERSE.map(
-          (x) => x.key,
-        ).filter((k) => k !== "CSI300");
-        const autoCardIds = OFF_FUND_PAIR_DEFAULT_PEERS.map(
+        OFF_FUND_PAIR_DEFAULT_PEERS = OFF_FUND_PAIR_UNIVERSE.map((x) => x.key)
+          .filter((k) => k !== "CSI300")
+          .slice(0, OFF_FUND_PAIR_MAX_SLOT_COUNT);
+        OFF_FUND_PAIR_CARD_IDS = OFF_FUND_PAIR_DEFAULT_PEERS.map(
           (_, i) => `pair_slot_${String(i + 1).padStart(2, "0")}`,
         );
-        OFF_FUND_PAIR_CARD_IDS = [
-          ...autoCardIds,
-          ...OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_IDS,
-        ];
         OFF_FUND_PAIR_DEFAULT_PREFS = Object.fromEntries(
-          autoCardIds.map((cardId, idx) => [
+          OFF_FUND_PAIR_CARD_IDS.map((cardId, idx) => [
             cardId,
             { base: "CSI300", peer: OFF_FUND_PAIR_DEFAULT_PEERS[idx] },
           ]),
         );
-        for (const cardId of OFF_FUND_PAIR_EXTRA_EMPTY_SLOT_IDS) {
-          OFF_FUND_PAIR_DEFAULT_PREFS[cardId] = {
-            base: "",
-            peer: "",
-          };
-        }
       }
       function _normalizeOffFundPairUniverse(rows) {
         const out = [];
@@ -936,13 +1120,28 @@
             .trim()
             .toUpperCase();
           const label = String((row && row.label) || key).trim();
-          const etfCode = String((row && row.etf_code) || "").trim();
-          if (!key || seen.has(key) || !/^\d{6}$/.test(etfCode)) continue;
-          out.push({ key, label, etf_code: etfCode });
+          if (!key || seen.has(key)) continue;
+          const aliasesRaw = Array.isArray(row && row.aliases)
+            ? row.aliases
+            : [];
+          const aliases = aliasesRaw.map((x) => String(x || "").trim());
+          const offFundCode = String(aliases[0] || "").trim();
+          const onExchangeCode = String(aliases[1] || "").trim();
+          out.push({
+            key,
+            label,
+            aliases: [offFundCode, onExchangeCode],
+            off_fund_code: offFundCode,
+            etf_code: onExchangeCode,
+          });
           seen.add(key);
         }
         if (!out.length || !out.some((x) => x.key === "CSI300")) {
-          return OFF_FUND_PAIR_FALLBACK_UNIVERSE.map((x) => ({ ...x }));
+          return OFF_FUND_PAIR_FALLBACK_UNIVERSE.map((x) => ({
+            ...x,
+            aliases: ["", String(x.etf_code || "").trim()],
+            off_fund_code: "",
+          }));
         }
         return out;
       }
@@ -960,7 +1159,7 @@
       let offPairRenderParamSnapshot = null;
       let offPairScheduledOpts = {};
       const OFF_FUND_PAIR_WARNING_ORDER = [
-        "prefs_trimmed_to_21",
+        "prefs_trimmed_to_60",
         "signal_degraded",
         "samples_truncated",
         "invalid_trade_date_filtered",
@@ -972,6 +1171,7 @@
         truncated_samples: "pair.truncated_samples",
         invalid_pair: "pair.invalid_pair",
         data_unavailable: "pair.data_unavailable",
+        market_alias_missing: "pair.market_alias_missing",
       };
       const OFF_FUND_PAIR_EMPTY_DATES_HASH =
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -1016,8 +1216,36 @@
           "pair.truncated_samples": "样本可能截断（达到接口上限）",
           "pair.invalid_pair": "输入配对非法（已自动回退）",
           "pair.data_unavailable": "数据不可用",
+          "pair.market_alias_missing": "所选场内/场外基准缺失",
         };
         return String(mp[String(messageKey || "")] || "未知状态");
+      }
+      function normalizeOffFundPairBenchmarkMarket(raw) {
+        const mode = String(raw || "")
+          .trim()
+          .toLowerCase();
+        return OFF_FUND_PAIR_BENCHMARK_MARKETS.has(mode)
+          ? mode
+          : OFF_FUND_PAIR_DEFAULT_BENCHMARK_MARKET;
+      }
+      function normalizeOffFundPairGlobalBase(raw) {
+        const key = String(raw || "")
+          .trim()
+          .toUpperCase();
+        return OFF_FUND_PAIR_UNIVERSE_BY_KEY[key] ? key : "CSI300";
+      }
+      function _syncOffFundPairGlobalBaseSelect() {
+        const sel = $("offClsPairGlobalBase");
+        if (!sel) return;
+        const options = OFF_FUND_PAIR_UNIVERSE.map((x) => {
+          const label = `${x.key} - ${x.label}`;
+          return `<option value="${esc(x.key)}">${esc(label)}</option>`;
+        }).join("");
+        sel.innerHTML = options;
+        sel.value = normalizeOffFundPairGlobalBase(offPairGlobalBase);
+      }
+      function _pairSourceLabel(market) {
+        return String(market || "") === "off_fund" ? "场外" : "场内";
       }
       function _sortedPairWarnings(codes) {
         const set = new Set((codes || []).map((x) => String(x || "")));
@@ -1075,7 +1303,23 @@
         return base;
       }
       function offFundPairPrefsToJson(prefs) {
-        return JSON.stringify(normalizeOffFundPairPrefs(prefs || {}));
+        const payload = normalizeOffFundPairPrefs(prefs || {});
+        payload.benchmark_market = normalizeOffFundPairBenchmarkMarket(
+          offPairBenchmarkMarket,
+        );
+        payload.global_base = normalizeOffFundPairGlobalBase(offPairGlobalBase);
+        return JSON.stringify(payload);
+      }
+      function _decodeOffFundPairStatePayload(payloadLike) {
+        const payload =
+          payloadLike && typeof payloadLike === "object" ? payloadLike : {};
+        return {
+          benchmarkMarket: normalizeOffFundPairBenchmarkMarket(
+            payload.benchmark_market,
+          ),
+          globalBase: normalizeOffFundPairGlobalBase(payload.global_base),
+          pairPrefs: normalizeOffFundPairPrefs(payload),
+        };
       }
       function persistOffFundPairPrefsLocal() {
         try {
@@ -1088,10 +1332,20 @@
       function loadOffFundPairPrefsLocal() {
         try {
           const raw = localStorage.getItem(OFF_FUND_PAIR_PREFS_STORAGE_KEY);
-          if (!raw) return _cloneOffFundPairPrefs();
-          return normalizeOffFundPairPrefs(JSON.parse(raw));
+          if (!raw) {
+            return {
+              benchmarkMarket: OFF_FUND_PAIR_DEFAULT_BENCHMARK_MARKET,
+              globalBase: "CSI300",
+              pairPrefs: _cloneOffFundPairPrefs(),
+            };
+          }
+          return _decodeOffFundPairStatePayload(JSON.parse(raw));
         } catch (_) {
-          return _cloneOffFundPairPrefs();
+          return {
+            benchmarkMarket: OFF_FUND_PAIR_DEFAULT_BENCHMARK_MARKET,
+            globalBase: "CSI300",
+            pairPrefs: _cloneOffFundPairPrefs(),
+          };
         }
       }
       function applyOffFundPairPrefs(prefs, { saveLocal = false } = {}) {
@@ -1109,6 +1363,38 @@
           if (peerSel) peerSel.value = String(pref.peer || "");
         }
         if (saveLocal) persistOffFundPairPrefsLocal();
+      }
+      function applyOffFundPairBenchmarkMarket(
+        mode,
+        { saveLocal = false } = {},
+      ) {
+        offPairBenchmarkMarket = normalizeOffFundPairBenchmarkMarket(mode);
+        const sel = $("offClsPairBenchmarkMarket");
+        if (sel) sel.value = offPairBenchmarkMarket;
+        if (saveLocal) persistOffFundPairPrefsLocal();
+      }
+      function applyOffFundPairGlobalBaseToAll(
+        baseKey,
+        { saveLocal = false } = {},
+      ) {
+        const clean = normalizeOffFundPairGlobalBase(baseKey);
+        offPairGlobalBase = clean;
+        _syncOffFundPairGlobalBaseSelect();
+        for (const cardId of OFF_FUND_PAIR_CARD_IDS) {
+          const pref = {
+            ...(OFF_FUND_PAIR_DEFAULT_PREFS[cardId] || {}),
+            ...(offPairPrefsByCard[cardId] || {}),
+          };
+          let peer = String(pref.peer || "").trim();
+          if (!peer || peer === clean || !OFF_FUND_PAIR_UNIVERSE_BY_KEY[peer]) {
+            peer = _pickFallbackPeer(clean);
+          }
+          offPairPrefsByCard[cardId] = { base: clean, peer };
+          offPairInvalidInputByCard[cardId] = false;
+        }
+        applyOffFundPairPrefs(offPairPrefsByCard, { saveLocal });
+        if (saveLocal) scheduleSaveOffParamState(120);
+        scheduleRenderAllOffFundPairCards(20);
       }
       function scheduleRenderAllOffFundPairCards(delayMs = 180, opts = {}) {
         const nextOpts = opts && typeof opts === "object" ? { ...opts } : {};
@@ -1149,11 +1435,12 @@
             const label = `${x.key} - ${x.label}`;
             return `<option value="${esc(x.key)}">${esc(label)}</option>`;
           }).join("");
-          return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center;"><strong>${esc(cardId)}</strong><span id="${esc(cardId)}_status" class="muted">等待计算</span></div><div class="row" style="margin-top:6px;"><div><label>基准</label><select id="${esc(cardId)}_base">${emptyOpt}${options}</select></div><div><label>对比</label><select id="${esc(cardId)}_peer">${emptyOpt}${options}</select></div></div><div id="${esc(cardId)}_plot" style="width:100%;height:780px;margin-top:6px;"></div></div>`;
+          return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center;"><strong>${esc(cardId)}</strong><span id="${esc(cardId)}_status" class="muted">等待计算</span></div><div class="row" style="margin-top:6px;"><div><label>基准</label><select id="${esc(cardId)}_base">${emptyOpt}${options}</select></div><div><label>对比</label><select id="${esc(cardId)}_peer">${emptyOpt}${options}</select></div><div style="align-self:end;"><button id="${esc(cardId)}_swap" type="button">对调基准/对比</button></div></div><div id="${esc(cardId)}_plot" style="width:100%;height:940px;margin-top:6px;"></div></div>`;
         }).join("");
         for (const cardId of OFF_FUND_PAIR_CARD_IDS) {
           const baseSel = $(`${cardId}_base`);
           const peerSel = $(`${cardId}_peer`);
+          const swapBtn = $(`${cardId}_swap`);
           if (baseSel)
             baseSel.addEventListener("change", () => {
               handleOffFundPairSelectionChanged(cardId);
@@ -1162,8 +1449,30 @@
             peerSel.addEventListener("change", () => {
               handleOffFundPairSelectionChanged(cardId);
             });
+          if (swapBtn)
+            swapBtn.addEventListener("click", () => {
+              swapOffFundPairSelection(cardId);
+            });
         }
         applyOffFundPairPrefs(offPairPrefsByCard, { saveLocal: false });
+        _syncOffFundPairGlobalBaseSelect();
+      }
+      function swapOffFundPairSelection(cardId) {
+        const pref =
+          offPairPrefsByCard[cardId] ||
+          OFF_FUND_PAIR_DEFAULT_PREFS[cardId] ||
+          {};
+        const baseSel = $(`${cardId}_base`);
+        const peerSel = $(`${cardId}_peer`);
+        const baseVal = String(
+          baseSel ? (baseSel.value ?? "") : pref.base != null ? pref.base : "",
+        ).trim();
+        const peerVal = String(
+          peerSel ? (peerSel.value ?? "") : pref.peer != null ? pref.peer : "",
+        ).trim();
+        if (baseSel) baseSel.value = peerVal;
+        if (peerSel) peerSel.value = baseVal;
+        handleOffFundPairSelectionChanged(cardId);
       }
       function handleOffFundPairSelectionChanged(cardId) {
         const pref =
@@ -1342,7 +1651,8 @@
                   Boolean(endIso) &&
                   String(lastDate) < String(endIso);
                 return {
-                  etfCode: code,
+                  code,
+                  market: "on_exchange",
                   dates,
                   closeByDate: byDate,
                   truncated,
@@ -1392,9 +1702,136 @@
           throw e;
         }
       }
+      async function _fetchOffFundNavSeries(fundCode, { start, end }) {
+        const code = String(fundCode || "").trim();
+        if (!code) throw new Error("empty off-fund code");
+        const cacheKey = `off_fund|${code}|${start}|${end}|hfq|${OFF_FUND_PAIR_PRICE_LIMIT}`;
+        if (offPairPriceCache.has(cacheKey))
+          return offPairPriceCache.get(cacheKey);
+        const task = (async () => {
+          const url = `/off-fund/${encodeURIComponent(code)}/navs?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&adjust=hfq&limit=${OFF_FUND_PAIR_PRICE_LIMIT}`;
+          const resp = await api(url, { method: "GET" });
+          const txt = await resp.text();
+          if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+          const rows = txt ? JSON.parse(txt) : [];
+          const byDate = new Map();
+          let invalidTradeDateFiltered = false;
+          for (const r of Array.isArray(rows) ? rows : []) {
+            const d = String((r && r.trade_date) || "")
+              .trim()
+              .slice(0, 10);
+            const nav = Number(r && r.nav);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+              invalidTradeDateFiltered = true;
+              continue;
+            }
+            if (!Number.isFinite(nav) || nav <= 0) continue;
+            byDate.set(d, nav);
+          }
+          const dates = Array.from(byDate.keys()).sort();
+          const lastDate = dates.length ? String(dates[dates.length - 1]) : "";
+          const endIso = _normalizePairDateToIso(end);
+          const truncated =
+            Array.isArray(rows) &&
+            rows.length >= OFF_FUND_PAIR_PRICE_LIMIT &&
+            Boolean(lastDate) &&
+            Boolean(endIso) &&
+            String(lastDate) < String(endIso);
+          return {
+            code,
+            market: "off_fund",
+            dates,
+            closeByDate: byDate,
+            truncated,
+            invalidTradeDateFiltered,
+          };
+        })();
+        offPairPriceCache.set(cacheKey, task);
+        try {
+          const out = await task;
+          offPairPriceCache.set(cacheKey, Promise.resolve(out));
+          return out;
+        } catch (e) {
+          offPairPriceCache.delete(cacheKey);
+          throw e;
+        }
+      }
+      function _resolvePairBenchmarkCode(info, benchmarkMarket) {
+        const aliases = Array.isArray(info && info.aliases) ? info.aliases : [];
+        const offFundCode = String(aliases[0] || "").trim();
+        const onExchangeCode = String(aliases[1] || "").trim();
+        if (benchmarkMarket === "off_fund") {
+          return {
+            code: offFundCode,
+            market: "off_fund",
+            missingRequestedAlias: !offFundCode,
+          };
+        }
+        return {
+          code: onExchangeCode,
+          market: "on_exchange",
+          missingRequestedAlias: !onExchangeCode,
+        };
+      }
+      async function _fetchPairBenchmarkSeries(target, window) {
+        if (!target || !target.code) throw new Error("empty benchmark target");
+        if (target.market === "off_fund") {
+          return _fetchOffFundNavSeries(target.code, window);
+        }
+        return _fetchOffFundEtfPriceSeries(target.code, window);
+      }
+      function _normalizedLogReturnsByDate(
+        series,
+        windowSize = OFF_FUND_PAIR_VOLATILITY_WINDOW,
+      ) {
+        const dates = Array.isArray(series && series.dates) ? series.dates : [];
+        const closes = dates.map((date) =>
+          Number(series && series.closeByDate && series.closeByDate.get(date)),
+        );
+        const logReturns = new Array(dates.length).fill(null);
+        for (let i = 1; i < dates.length; i += 1) {
+          const previous = closes[i - 1];
+          const current = closes[i];
+          if (
+            Number.isFinite(previous) &&
+            previous > 0 &&
+            Number.isFinite(current) &&
+            current > 0
+          ) {
+            logReturns[i] = Math.log(current / previous);
+          }
+        }
+        const window = Math.max(
+          2,
+          Math.floor(Number(windowSize) || OFF_FUND_PAIR_VOLATILITY_WINDOW),
+        );
+        const volatility = _rollingSampleStd(logReturns.slice(1), window);
+        const byDate = new Map();
+        for (let i = window; i < dates.length; i += 1) {
+          const dailyReturn = Number(logReturns[i]);
+          const dailyVolatility = Number(volatility[i - 1]);
+          if (
+            !Number.isFinite(dailyReturn) ||
+            !Number.isFinite(dailyVolatility) ||
+            dailyVolatility <= OFF_FUND_PAIR_MIN_DAILY_VOLATILITY
+          ) {
+            continue;
+          }
+          byDate.set(dates[i], dailyReturn / dailyVolatility);
+        }
+        return byDate;
+      }
       function _alignOffFundPairSeries(baseS, peerS) {
         const peerSet = new Set(peerS.dates || []);
         const dates = (baseS.dates || []).filter((d) => peerSet.has(d));
+        const baseNormalizedByDate = _normalizedLogReturnsByDate(
+          baseS,
+          OFF_FUND_PAIR_VOLATILITY_WINDOW,
+        );
+        const peerNormalizedByDate = _normalizedLogReturnsByDate(
+          peerS,
+          OFF_FUND_PAIR_VOLATILITY_WINDOW,
+        );
         const baseClose = [];
         const peerClose = [];
         for (const d of dates) {
@@ -1408,6 +1845,8 @@
         const finalDates = [];
         const finalBase = [];
         const finalPeer = [];
+        const finalBaseNormalizedLogReturn = [];
+        const finalPeerNormalizedLogReturn = [];
         let bi = 0;
         for (const d of dates) {
           const b = Number(baseS.closeByDate.get(d));
@@ -1417,12 +1856,20 @@
           finalDates.push(d);
           finalBase.push(baseClose[bi]);
           finalPeer.push(peerClose[bi]);
+          finalBaseNormalizedLogReturn.push(
+            baseNormalizedByDate.has(d) ? baseNormalizedByDate.get(d) : null,
+          );
+          finalPeerNormalizedLogReturn.push(
+            peerNormalizedByDate.has(d) ? peerNormalizedByDate.get(d) : null,
+          );
           bi += 1;
         }
         return {
           dates: finalDates,
           baseClose: finalBase,
           peerClose: finalPeer,
+          baseNormalizedLogReturn: finalBaseNormalizedLogReturn,
+          peerNormalizedLogReturn: finalPeerNormalizedLogReturn,
         };
       }
       function _rollingMean(values, windowSize) {
@@ -1467,6 +1914,81 @@
             sq += (v - mean) * (v - mean);
           }
           out[i] = Math.sqrt(sq / w);
+        }
+        return out;
+      }
+      function _rollingSampleStd(values, windowSize) {
+        const n = values.length;
+        const out = new Array(n).fill(null);
+        const w = Math.max(2, Math.floor(Number(windowSize) || 2));
+        for (let i = w - 1; i < n; i += 1) {
+          let ok = true;
+          let sum = 0;
+          for (let j = i - w + 1; j <= i; j += 1) {
+            const raw = values[j];
+            const v = Number(raw);
+            if (raw == null || !Number.isFinite(v)) {
+              ok = false;
+              break;
+            }
+            sum += v;
+          }
+          if (!ok) continue;
+          const mean = sum / w;
+          let sq = 0;
+          for (let j = i - w + 1; j <= i; j += 1) {
+            const v = Number(values[j]);
+            sq += (v - mean) * (v - mean);
+          }
+          out[i] = Math.sqrt(sq / (w - 1));
+        }
+        return out;
+      }
+      function _rollingSum(values, windowSize) {
+        const n = values.length;
+        const out = new Array(n).fill(null);
+        const w = Math.max(1, Math.floor(Number(windowSize) || 1));
+        for (let i = w - 1; i < n; i += 1) {
+          let ok = true;
+          let sum = 0;
+          for (let j = i - w + 1; j <= i; j += 1) {
+            const raw = values[j];
+            const v = Number(raw);
+            if (raw == null || !Number.isFinite(v)) {
+              ok = false;
+              break;
+            }
+            sum += v;
+          }
+          out[i] = ok ? sum : null;
+        }
+        return out;
+      }
+      function _rollingZScore(values, windowSize) {
+        const n = values.length;
+        const out = new Array(n).fill(null);
+        const w = Math.max(2, Math.floor(Number(windowSize) || 2));
+        for (let i = w - 1; i < n; i += 1) {
+          let ok = true;
+          let sum = 0;
+          for (let j = i - w + 1; j <= i; j += 1) {
+            const raw = values[j];
+            const v = Number(raw);
+            if (raw == null || !Number.isFinite(v)) {
+              ok = false;
+              break;
+            }
+            sum += v;
+          }
+          if (!ok) continue;
+          const mean = sum / w;
+          let sq = 0;
+          for (let j = i - w + 1; j <= i; j += 1) {
+            const v = Number(values[j]);
+            sq += (v - mean) * (v - mean);
+          }
+          const std = Math.sqrt(sq / (w - 1));
+          if (std > 0) out[i] = (Number(values[i]) - mean) / std;
         }
         return out;
       }
@@ -1526,6 +2048,9 @@
             ratioBbLower: [],
             diff40: [],
             diff40Ma242: [],
+            riskAdjustedMomentum40: [],
+            riskAdjustedMomentum40Ma242: [],
+            riskAdjustedMomentum40Z242: [],
             rsi14: [],
             rsi14Ma242: [],
           };
@@ -1548,6 +2073,9 @@
             ratioBbLower: [],
             diff40: [],
             diff40Ma242: [],
+            riskAdjustedMomentum40: [],
+            riskAdjustedMomentum40Ma242: [],
+            riskAdjustedMomentum40Z242: [],
             rsi14: [],
             rsi14Ma242: [],
           };
@@ -1594,6 +2122,83 @@
           diff40[i] = retPeer40 - retBase40;
         }
         const diff40Ma242 = _rollingMean(diff40, 242);
+        const normalizedRelativeReturn = new Array(n).fill(null);
+        const alignedBaseNormalized = Array.isArray(
+          aligned.baseNormalizedLogReturn,
+        )
+          ? aligned.baseNormalizedLogReturn
+          : [];
+        const alignedPeerNormalized = Array.isArray(
+          aligned.peerNormalizedLogReturn,
+        )
+          ? aligned.peerNormalizedLogReturn
+          : [];
+        if (
+          alignedBaseNormalized.length === n &&
+          alignedPeerNormalized.length === n
+        ) {
+          for (let i = 0; i < n; i += 1) {
+            const baseNormalized = Number(alignedBaseNormalized[i]);
+            const peerNormalized = Number(alignedPeerNormalized[i]);
+            if (
+              alignedBaseNormalized[i] == null ||
+              alignedPeerNormalized[i] == null ||
+              !Number.isFinite(baseNormalized) ||
+              !Number.isFinite(peerNormalized)
+            ) {
+              continue;
+            }
+            normalizedRelativeReturn[i] = peerNormalized - baseNormalized;
+          }
+        } else {
+          const baseSeries = {
+            dates,
+            closeByDate: new Map(
+              dates.map((date, i) => [date, Number(baseClose[i])]),
+            ),
+          };
+          const peerSeries = {
+            dates,
+            closeByDate: new Map(
+              dates.map((date, i) => [date, Number(peerClose[i])]),
+            ),
+          };
+          const baseNormalized = _normalizedLogReturnsByDate(
+            baseSeries,
+            OFF_FUND_PAIR_VOLATILITY_WINDOW,
+          );
+          const peerNormalized = _normalizedLogReturnsByDate(
+            peerSeries,
+            OFF_FUND_PAIR_VOLATILITY_WINDOW,
+          );
+          for (let i = 0; i < n; i += 1) {
+            const date = dates[i];
+            if (!baseNormalized.has(date) || !peerNormalized.has(date))
+              continue;
+            normalizedRelativeReturn[i] =
+              Number(peerNormalized.get(date)) -
+              Number(baseNormalized.get(date));
+          }
+        }
+        const riskAdjustedMomentum40 = _rollingSum(
+          normalizedRelativeReturn,
+          OFF_FUND_PAIR_MOMENTUM_WINDOW,
+        );
+        const riskAdjustedMomentum40Ma242 = _rollingSum(
+          riskAdjustedMomentum40,
+          242,
+        ).map((sum) =>
+          sum == null || !Number.isFinite(Number(sum))
+            ? null
+            : Number(sum) / 242,
+        );
+        const riskAdjustedMomentum40Z242 =
+          n >= OFF_FUND_PAIR_MOMENTUM_Z_REQUIRED_SAMPLES
+            ? _rollingZScore(
+                riskAdjustedMomentum40,
+                OFF_FUND_PAIR_MOMENTUM_Z_WINDOW,
+              )
+            : new Array(n).fill(null);
         const rsi14 = _computeRsi14(ratio);
         const rsi14Ma242 = _rollingMean(rsi14, 242);
         return {
@@ -1606,18 +2211,24 @@
           ratioBbLower,
           diff40,
           diff40Ma242,
+          riskAdjustedMomentum40,
+          riskAdjustedMomentum40Ma242,
+          riskAdjustedMomentum40Z242,
           rsi14,
           rsi14Ma242,
         };
       }
       function _deriveOffFundPairStatus({
         invalidPairInput,
+        missingRequestedAlias,
         fetchFailed,
         sampleCount,
         truncated,
         signalDegraded,
       }) {
         if (invalidPairInput) return _pairStatusRecord("invalid_pair");
+        if (missingRequestedAlias)
+          return _pairStatusRecord("market_alias_missing");
         if (fetchFailed || sampleCount <= 0)
           return _pairStatusRecord("data_unavailable");
         if (truncated) return _pairStatusRecord("truncated_samples");
@@ -1629,7 +2240,8 @@
         if (row === 1) return { xaxis: "x", yaxis: "y" };
         if (row === 2) return { xaxis: "x2", yaxis: "y2" };
         if (row === 3) return { xaxis: "x3", yaxis: "y3" };
-        return { xaxis: "x4", yaxis: "y4" };
+        if (row === 4) return { xaxis: "x4", yaxis: "y4" };
+        return { xaxis: "x5", yaxis: "y5" };
       }
       function _buildOffFundPairTraces(metrics, { baseLabel, peerLabel }) {
         const n = (metrics && metrics.dates && metrics.dates.length) || 0;
@@ -1640,6 +2252,8 @@
           "ratio",
           "rsi",
           "diff40",
+          "risk_adjusted_momentum40",
+          "risk_adjusted_momentum40_ma242",
           "ratio_ma242",
           "bb_upper",
           "bb_lower",
@@ -1654,6 +2268,11 @@
         }
         if (n >= 15) enabled.add("rsi");
         if (n >= 41) enabled.add("diff40");
+        if (n >= OFF_FUND_PAIR_MOMENTUM_RAW_REQUIRED_SAMPLES)
+          enabled.add("risk_adjusted_momentum40");
+        if (n >= OFF_FUND_PAIR_MOMENTUM_RAW_REQUIRED_SAMPLES + 242 - 1) {
+          enabled.add("risk_adjusted_momentum40_ma242");
+        }
         if (n >= 242) {
           enabled.add("ratio_ma242");
           enabled.add("bb_upper");
@@ -1682,13 +2301,13 @@
             line: { width: 1.6, color: "#ce93d8" },
           },
           rsi: {
-            row: 4,
+            row: 5,
             y: metrics.rsi14,
             name: "RSI14(比值)",
             line: { width: 1.4, color: "#aed581" },
           },
           rsi14_ma242: {
-            row: 4,
+            row: 5,
             y: metrics.rsi14Ma242,
             name: "RSI14 MA242",
             line: { width: 1.2, dash: "dot", color: "#8bc34a" },
@@ -1723,9 +2342,28 @@
             name: "40日收益差MA242",
             line: { width: 1.3, dash: "dot", color: "#f48fb1" },
           },
+          risk_adjusted_momentum40: {
+            row: 4,
+            y: metrics.riskAdjustedMomentum40,
+            name: "风险调整40日相对动量(60/40)",
+            line: { width: 1.5, color: "#80deea" },
+            extra: {
+              customdata: (metrics.riskAdjustedMomentum40Z242 || []).map((z) =>
+                Number.isFinite(Number(z)) ? Number(z).toFixed(3) : "无",
+              ),
+              hovertemplate:
+                "%{x}<br>40日累计原值: %{y:.3f}<br>Z242: %{customdata}<extra></extra>",
+            },
+          },
+          risk_adjusted_momentum40_ma242: {
+            row: 4,
+            y: metrics.riskAdjustedMomentum40Ma242,
+            name: "相对动量MA242",
+            line: { width: 1.3, dash: "dot", color: "#4dd0e1" },
+          },
         };
         const traces = [];
-        const pushTrace = (traceKey, row, y, name, line) => {
+        const pushTrace = (traceKey, row, y, name, line, extra = {}) => {
           const ax = _traceAxesForRow(row);
           traces.push({
             type: "scatter",
@@ -1735,6 +2373,7 @@
             name,
             meta: { trace_key: traceKey },
             line,
+            ...extra,
             ...ax,
           });
         };
@@ -1742,7 +2381,7 @@
           if (!enabled.has(k)) continue;
           const def = traceDefs[k];
           if (!def) continue;
-          pushTrace(k, def.row, def.y, def.name, def.line);
+          pushTrace(k, def.row, def.y, def.name, def.line, def.extra);
         }
         return traces;
       }
@@ -1795,15 +2434,27 @@
         const rsi = Array.isArray(metrics && metrics.rsi14)
           ? metrics.rsi14
           : [];
+        const riskAdjustedMomentum = Array.isArray(
+          metrics && metrics.riskAdjustedMomentum40,
+        )
+          ? metrics.riskAdjustedMomentum40
+          : [];
+        const riskAdjustedMomentumZ = Array.isArray(
+          metrics && metrics.riskAdjustedMomentum40Z242,
+        )
+          ? metrics.riskAdjustedMomentum40Z242
+          : [];
         const maxLen = commonDates.length;
         if (!(
           ratio.length === maxLen &&
           diff40.length === maxLen &&
-          rsi.length === maxLen
+          rsi.length === maxLen &&
+          riskAdjustedMomentum.length === maxLen &&
+          riskAdjustedMomentumZ.length === maxLen
         )) {
           throw new Error("signature_series_length_mismatch");
         }
-        const keySeries = `ratio:[${_seriesHashPart(ratio)}]|diff40:[${_seriesHashPart(diff40)}]|rsi:[${_seriesHashPart(rsi)}]`;
+        const keySeries = `ratio:[${_seriesHashPart(ratio)}]|diff40:[${_seriesHashPart(diff40)}]|riskAdjustedMomentum:[${_seriesHashPart(riskAdjustedMomentum)}]|riskAdjustedMomentumZ:[${_seriesHashPart(riskAdjustedMomentumZ)}]|rsi:[${_seriesHashPart(rsi)}]`;
         return {
           status_code: statusCode,
           ordered_trace_keys: orderedTraceKeys,
@@ -1897,22 +2548,32 @@
               : _offFundPairDateWindow();
           const start = String(safeSnapshot.start || "20110210");
           const end = String(safeSnapshot.end || todayYmd());
-          const baseCode = String(
-            offPairFactorEtfByKey[baseKey] || baseInfo.etf_code,
+          const benchmarkMarket = normalizeOffFundPairBenchmarkMarket(
+            offPairBenchmarkMarket,
           );
-          const peerCode = String(
-            offPairFactorEtfByKey[peerKey] || peerInfo.etf_code,
+          const baseTarget = _resolvePairBenchmarkCode(
+            baseInfo,
+            benchmarkMarket,
           );
+          const peerTarget = _resolvePairBenchmarkCode(
+            peerInfo,
+            benchmarkMarket,
+          );
+          const missingRequestedAlias =
+            Boolean(baseTarget.missingRequestedAlias) ||
+            Boolean(peerTarget.missingRequestedAlias);
           let baseSeries = null;
           let peerSeries = null;
           let fetchFailed = false;
-          try {
-            [baseSeries, peerSeries] = await Promise.all([
-              _fetchOffFundEtfPriceSeries(baseCode, { start, end }),
-              _fetchOffFundEtfPriceSeries(peerCode, { start, end }),
-            ]);
-          } catch (_) {
-            fetchFailed = true;
+          if (!missingRequestedAlias) {
+            try {
+              [baseSeries, peerSeries] = await Promise.all([
+                _fetchPairBenchmarkSeries(baseTarget, { start, end }),
+                _fetchPairBenchmarkSeries(peerTarget, { start, end }),
+              ]);
+            } catch (_) {
+              fetchFailed = true;
+            }
           }
           if (Number(offPairRequestVersionByCard[cardId]) !== version) return;
           const aligned =
@@ -1929,6 +2590,7 @@
             Boolean(peerSeries && peerSeries.invalidTradeDateFiltered);
           const status = _deriveOffFundPairStatus({
             invalidPairInput,
+            missingRequestedAlias,
             fetchFailed,
             sampleCount,
             truncated,
@@ -1966,7 +2628,8 @@
               zerolinecolor: plotTheme.plotGrid,
             },
             yaxis: {
-              domain: [0.78, 1],
+              domain: [0.81, 1],
+              title: "净值",
               type: "log",
               gridcolor: plotTheme.plotGrid,
               linecolor: plotTheme.plotGrid,
@@ -1983,7 +2646,9 @@
               zerolinecolor: plotTheme.plotGrid,
             },
             yaxis2: {
-              domain: [0.53, 0.75],
+              domain: [0.61, 0.78],
+              title: "比值",
+              type: "log",
               gridcolor: plotTheme.plotGrid,
               linecolor: plotTheme.plotGrid,
               zerolinecolor: plotTheme.plotGrid,
@@ -1999,7 +2664,8 @@
               zerolinecolor: plotTheme.plotGrid,
             },
             yaxis3: {
-              domain: [0.28, 0.5],
+              domain: [0.41, 0.58],
+              title: "40日收益差",
               gridcolor: plotTheme.plotGrid,
               linecolor: plotTheme.plotGrid,
               zerolinecolor: plotTheme.plotGrid,
@@ -2008,13 +2674,31 @@
               domain: [0, 1],
               anchor: "y4",
               matches: "x",
+              showticklabels: false,
               type: "date",
               gridcolor: plotTheme.plotGrid,
               linecolor: plotTheme.plotGrid,
               zerolinecolor: plotTheme.plotGrid,
             },
             yaxis4: {
-              domain: [0.03, 0.25],
+              domain: [0.21, 0.38],
+              title: "相对动量",
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
+            },
+            xaxis5: {
+              domain: [0, 1],
+              anchor: "y5",
+              matches: "x",
+              type: "date",
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
+            },
+            yaxis5: {
+              domain: [0.02, 0.18],
+              title: "RSI",
               range: [0, 100],
               gridcolor: plotTheme.plotGrid,
               linecolor: plotTheme.plotGrid,
@@ -2024,7 +2708,7 @@
               {
                 type: "line",
                 xref: "paper",
-                yref: "y4",
+                yref: "y5",
                 x0: 0,
                 x1: 1,
                 y0: 70,
@@ -2034,11 +2718,21 @@
               {
                 type: "line",
                 xref: "paper",
-                yref: "y4",
+                yref: "y5",
                 x0: 0,
                 x1: 1,
                 y0: 30,
                 y1: 30,
+                line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
+              },
+              {
+                type: "line",
+                xref: "paper",
+                yref: "y4",
+                x0: 0,
+                x1: 1,
+                y0: 0,
+                y1: 0,
                 line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
               },
             ],
@@ -2059,10 +2753,14 @@
           }
           if (Number(offPairRequestVersionByCard[cardId]) !== version) return;
           const baseUsed = String(
-            (baseSeries && baseSeries.etfCode) || baseCode,
+            (baseSeries && baseSeries.code) ||
+              (baseTarget && baseTarget.code) ||
+              "",
           );
           const peerUsed = String(
-            (peerSeries && peerSeries.etfCode) || peerCode,
+            (peerSeries && peerSeries.code) ||
+              (peerTarget && peerTarget.code) ||
+              "",
           );
           const signature = await _buildOffFundPairSignature({
             statusCode: status.status_code,
@@ -2079,13 +2777,14 @@
             samples: sampleCount,
             base_key: baseKey,
             peer_key: peerKey,
+            benchmark_market: benchmarkMarket,
             base_code: baseUsed,
             peer_code: peerUsed,
             signature,
           };
           window.__offFundPairSnapshots = offPairSnapshotsByCard;
           if (statusEl) {
-            statusEl.textContent = `${status.status_code}/${status.status_message_key} | samples=${sampleCount} | warnings=${warnings.join(",") || "-"} | base=${baseUsed} peer=${peerUsed}`;
+            statusEl.textContent = `${status.status_code}/${status.status_message_key} | source=${_pairSourceLabel(benchmarkMarket)} | samples=${sampleCount} | warnings=${warnings.join(",") || "-"} | base=${baseUsed || "-"} peer=${peerUsed || "-"}`;
           }
         } catch (error) {
           if (Number(offPairRequestVersionByCard[cardId]) !== version) return;
@@ -2247,8 +2946,47 @@
             ($("driftRelThreshold") && $("driftRelThreshold").value) || "0.25",
           ).trim(),
         );
+        const investModeRaw = String(
+          ($("offInvestMode") && $("offInvestMode").value) || "lump_sum",
+        )
+          .trim()
+          .toLowerCase();
+        const dcaBaseRaw = Number(
+          String(
+            ($("offDcaBaseAmount") && $("offDcaBaseAmount").value) || "100000",
+          ).trim(),
+        );
+        const dcaPeriodicRaw = Number(
+          String(
+            ($("offDcaPeriodicAmount") && $("offDcaPeriodicAmount").value) ||
+              "10000",
+          ).trim(),
+        );
+        const dcaFrequencyRaw = String(
+          ($("offDcaFrequency") && $("offDcaFrequency").value) || "monthly",
+        )
+          .trim()
+          .toLowerCase();
+        const dcaWeeklyWeekdayRaw = Number(
+          String(
+            ($("offDcaWeeklyWeekday") && $("offDcaWeeklyWeekday").value) || "1",
+          ).trim(),
+        );
+        const dcaMonthlyDayRaw = Number(
+          String(
+            ($("offDcaMonthlyDay") && $("offDcaMonthlyDay").value) || "1",
+          ).trim(),
+        );
         const clamp01 = (v, d) =>
           Number.isFinite(v) ? Math.min(1, Math.max(0, Number(v))) : d;
+        const investMode = ["lump_sum", "dca"].includes(investModeRaw)
+          ? investModeRaw
+          : "lump_sum";
+        const dcaFrequency = ["none", "daily", "weekly", "monthly"].includes(
+          dcaFrequencyRaw,
+        )
+          ? dcaFrequencyRaw
+          : "monthly";
         return {
           start_date: startDate || null,
           end_date: endDate || null,
@@ -2273,10 +3011,49 @@
             ) !== "0",
           drift_abs_threshold: clamp01(driftAbsRaw, 0.05),
           drift_rel_threshold: clamp01(driftRelRaw, 0.25),
+          invest_mode: investMode,
+          dca_base_amount:
+            Number.isFinite(dcaBaseRaw) && dcaBaseRaw >= 0
+              ? Number(dcaBaseRaw)
+              : 100000.0,
+          dca_periodic_amount:
+            Number.isFinite(dcaPeriodicRaw) && dcaPeriodicRaw >= 0
+              ? Number(dcaPeriodicRaw)
+              : 10000.0,
+          dca_frequency: dcaFrequency,
+          dca_weekly_weekday:
+            Number.isFinite(dcaWeeklyWeekdayRaw) &&
+            Math.floor(dcaWeeklyWeekdayRaw) === dcaWeeklyWeekdayRaw &&
+            dcaWeeklyWeekdayRaw >= 1 &&
+            dcaWeeklyWeekdayRaw <= 5
+              ? Number(dcaWeeklyWeekdayRaw)
+              : 1,
+          dca_monthly_day:
+            Number.isFinite(dcaMonthlyDayRaw) &&
+            Math.floor(dcaMonthlyDayRaw) === dcaMonthlyDayRaw &&
+            dcaMonthlyDayRaw >= 1 &&
+            dcaMonthlyDayRaw <= 28
+              ? Number(dcaMonthlyDayRaw)
+              : 1,
+          dca_non_trading_shift: "next",
           show_non_group_codes: !!(
             $("showNonGroupCodes") && $("showNonGroupCodes").checked
           ),
           pair_chart_prefs_json: offFundPairPrefsToJson(offPairPrefsByCard),
+          replication_rolling_window: Math.max(
+            40,
+            Math.floor(Number(($("offClsWindow") || {}).value || 252)),
+          ),
+          replication_min_samples: Math.max(
+            40,
+            Math.floor(Number(($("offClsMinSamples") || {}).value || 120)),
+          ),
+          replication_include_portfolio: !!(
+            $("offClsIncludePortfolio") && $("offClsIncludePortfolio").checked
+          ),
+          replication_drop_short_history_factors: !!(
+            $("offClsDropShortHistory") && $("offClsDropShortHistory").checked
+          ),
         };
       }
       function _applyOffParamStateToUi(st) {
@@ -2306,22 +3083,103 @@
           $("driftRelThreshold").value = String(
             s.drift_rel_threshold == null ? 0.25 : s.drift_rel_threshold,
           );
+        if ($("offInvestMode"))
+          $("offInvestMode").value = String(s.invest_mode || "lump_sum");
+        if ($("offDcaBaseAmount"))
+          $("offDcaBaseAmount").value = String(
+            s.dca_base_amount == null ? 100000 : s.dca_base_amount,
+          );
+        if ($("offDcaPeriodicAmount"))
+          $("offDcaPeriodicAmount").value = String(
+            s.dca_periodic_amount == null ? 10000 : s.dca_periodic_amount,
+          );
+        if ($("offDcaFrequency"))
+          $("offDcaFrequency").value = String(s.dca_frequency || "monthly");
+        if ($("offDcaWeeklyWeekday"))
+          $("offDcaWeeklyWeekday").value = String(
+            s.dca_weekly_weekday == null ? 1 : s.dca_weekly_weekday,
+          );
+        if ($("offDcaMonthlyDay"))
+          $("offDcaMonthlyDay").value = String(
+            s.dca_monthly_day == null ? 1 : s.dca_monthly_day,
+          );
         showNonGroupCodes =
           s.show_non_group_codes == null ? true : !!s.show_non_group_codes;
         if ($("showNonGroupCodes"))
           $("showNonGroupCodes").checked = !!showNonGroupCodes;
-        let pairPrefs = loadOffFundPairPrefsLocal();
+        if ($("offClsWindow"))
+          $("offClsWindow").value = String(
+            s.replication_rolling_window == null
+              ? 252
+              : s.replication_rolling_window,
+          );
+        if ($("offClsMinSamples"))
+          $("offClsMinSamples").value = String(
+            s.replication_min_samples == null ? 120 : s.replication_min_samples,
+          );
+        if ($("offClsIncludePortfolio"))
+          $("offClsIncludePortfolio").checked =
+            s.replication_include_portfolio == null
+              ? true
+              : !!s.replication_include_portfolio;
+        if ($("offClsDropShortHistory"))
+          $("offClsDropShortHistory").checked =
+            !!s.replication_drop_short_history_factors;
+        let pairState = loadOffFundPairPrefsLocal();
         if (
           typeof s.pair_chart_prefs_json === "string" &&
           String(s.pair_chart_prefs_json).trim()
         ) {
           try {
-            pairPrefs = normalizeOffFundPairPrefs(
+            pairState = _decodeOffFundPairStatePayload(
               JSON.parse(s.pair_chart_prefs_json),
             );
           } catch (_) {}
         }
-        applyOffFundPairPrefs(pairPrefs, { saveLocal: true });
+        applyOffFundPairBenchmarkMarket(pairState.benchmarkMarket, {
+          saveLocal: false,
+        });
+        offPairGlobalBase = pairState.globalBase;
+        applyOffFundPairPrefs(pairState.pairPrefs, { saveLocal: true });
+        _syncOffFundPairGlobalBaseSelect();
+        updateOffDcaUi();
+      }
+      function updateOffDcaUi() {
+        const investMode = String(
+          (
+            ($("offInvestMode") && $("offInvestMode").value) ||
+            "lump_sum"
+          ).trim(),
+        ).toLowerCase();
+        const dcaOn = investMode === "dca";
+        const freq = String(
+          (
+            ($("offDcaFrequency") && $("offDcaFrequency").value) ||
+            "monthly"
+          ).trim(),
+        ).toLowerCase();
+        const base = $("offDcaBaseAmount");
+        const periodic = $("offDcaPeriodicAmount");
+        const weekly = $("offDcaWeeklyWeekday");
+        const monthly = $("offDcaMonthlyDay");
+        const _toggleCtl = (el, show) => {
+          if (!el) return;
+          const wrap = el.closest("div");
+          if (wrap) wrap.style.display = show ? "" : "none";
+          el.disabled = !show;
+        };
+        if (base) {
+          _toggleCtl(base, dcaOn);
+        }
+        if (periodic) {
+          _toggleCtl(periodic, dcaOn);
+        }
+        if (weekly) {
+          _toggleCtl(weekly, dcaOn && freq === "weekly");
+        }
+        if (monthly) {
+          _toggleCtl(monthly, dcaOn && freq === "monthly");
+        }
       }
       async function saveOffParamStateToBackend({ quiet = true } = {}) {
         if (offParamHydrating) return;
@@ -3201,6 +4059,280 @@
         };
       }
 
+      function _parseIsoToUtcDate(s) {
+        const m = String(s || "")
+          .trim()
+          .match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return null;
+        const y = Number(m[1]);
+        const mo = Number(m[2]);
+        const d = Number(m[3]);
+        const dt = new Date(Date.UTC(y, mo - 1, d));
+        return Number.isFinite(dt.getTime()) ? dt : null;
+      }
+      function _utcAddDays(dt, n) {
+        const out = new Date(dt.getTime());
+        out.setUTCDate(out.getUTCDate() + Number(n || 0));
+        return out;
+      }
+      function _lowerBound(arr, target) {
+        let lo = 0;
+        let hi = arr.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (arr[mid] < target) lo = mid + 1;
+          else hi = mid;
+        }
+        return lo;
+      }
+      function _buildOffDcaContributionSeries({
+        dates,
+        baseAmount,
+        periodicAmount,
+        frequency,
+        weeklyWeekday,
+        monthlyDay,
+        nonTradingShift,
+      }) {
+        const out = new Array((dates || []).length).fill(0);
+        if (!Array.isArray(dates) || dates.length === 0) return out;
+        out[0] = Number(baseAmount || 0);
+        const perAmt = Number(periodicAmount || 0);
+        if (!(perAmt > 0)) return out;
+        const freq = String(frequency || "monthly")
+          .trim()
+          .toLowerCase();
+        const shift = String(nonTradingShift || "next")
+          .trim()
+          .toLowerCase();
+        if (shift !== "next")
+          throw new Error("dca_non_trading_shift must be 'next'");
+        if (freq === "none") return out;
+        if (freq === "daily") {
+          for (let i = 1; i < out.length; i += 1) out[i] += perAmt;
+          return out;
+        }
+        const idxDates = dates.map(_parseIsoToUtcDate);
+        const idxTs = idxDates.map((d) => (d ? d.getTime() : NaN));
+        const start = idxDates[0];
+        const end = idxDates[idxDates.length - 1];
+        if (!start || !end) return out;
+        if (freq === "weekly") {
+          const wd = Math.floor(Number(weeklyWeekday || 1));
+          if (wd < 1 || wd > 5)
+            throw new Error("dca_weekly_weekday must be within [1..5]");
+          const monBased = (start.getUTCDay() + 6) % 7;
+          let curMonday = _utcAddDays(start, -monBased);
+          while (curMonday.getTime() <= end.getTime()) {
+            const target = _utcAddDays(curMonday, wd - 1);
+            const pos = _lowerBound(idxTs, target.getTime());
+            if (pos >= idxTs.length) break;
+            if (pos >= 1) out[pos] += perAmt;
+            curMonday = _utcAddDays(curMonday, 7);
+          }
+          return out;
+        }
+        if (freq === "monthly") {
+          const md = Math.floor(Number(monthlyDay || 1));
+          if (md < 1 || md > 28)
+            throw new Error("dca_monthly_day must be within [1..28]");
+          let cur = new Date(
+            Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1),
+          );
+          while (cur.getTime() <= end.getTime()) {
+            const target = new Date(
+              Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth(), md),
+            );
+            const pos = _lowerBound(idxTs, target.getTime());
+            if (pos >= idxTs.length) break;
+            if (pos >= 1) out[pos] += perAmt;
+            cur = new Date(
+              Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1),
+            );
+          }
+          return out;
+        }
+        throw new Error(
+          "dca_frequency must be one of: none|daily|weekly|monthly",
+        );
+      }
+      function _xirrAnnualizedFromCashflows(cfDates, cfVals) {
+        if (!Array.isArray(cfDates) || !Array.isArray(cfVals)) return NaN;
+        if (cfDates.length !== cfVals.length || cfDates.length < 2) return NaN;
+        const vals = cfVals.map(Number);
+        if (!(vals.some((x) => x > 0) && vals.some((x) => x < 0))) return NaN;
+        const times = cfDates.map((d) => _parseIsoToUtcDate(d));
+        if (times.some((d) => !d)) return NaN;
+        const t0 = Math.min(...times.map((d) => d.getTime()));
+        const years = times.map((d) =>
+          Math.max(0, (d.getTime() - t0) / (365.2425 * 24 * 3600 * 1000)),
+        );
+        const npv = (rate) => {
+          if (!Number.isFinite(rate) || rate <= -0.999999) return NaN;
+          let s = 0;
+          for (let i = 0; i < vals.length; i += 1) {
+            const den = Math.pow(1 + rate, years[i]);
+            if (!Number.isFinite(den) || den === 0) return NaN;
+            s += vals[i] / den;
+          }
+          return Number.isFinite(s) ? s : NaN;
+        };
+        let lo = -0.9999;
+        let hi = 0.1;
+        let flo = npv(lo);
+        let fhi = npv(hi);
+        let bracketed =
+          Number.isFinite(flo) && Number.isFinite(fhi) && flo * fhi <= 0;
+        for (let i = 0; i < 40 && !bracketed; i += 1) {
+          hi = hi * 2 + 0.1;
+          fhi = npv(hi);
+          bracketed =
+            Number.isFinite(flo) && Number.isFinite(fhi) && flo * fhi <= 0;
+        }
+        if (!bracketed) return NaN;
+        let a = lo;
+        let b = hi;
+        let fa = flo;
+        for (let i = 0; i < 200; i += 1) {
+          const c = 0.5 * (a + b);
+          const fc = npv(c);
+          if (!Number.isFinite(fc)) return NaN;
+          if (Math.abs(fc) <= 1e-12 || Math.abs(b - a) <= 1e-12) return c;
+          if (fa * fc <= 0) b = c;
+          else {
+            a = c;
+            fa = fc;
+          }
+        }
+        return 0.5 * (a + b);
+      }
+      function _computeOffDcaFromNav({
+        dates,
+        nav,
+        enabled,
+        baseAmount,
+        periodicAmount,
+        frequency,
+        weeklyWeekday,
+        monthlyDay,
+        nonTradingShift,
+      }) {
+        const idx = Array.isArray(dates) ? dates.slice() : [];
+        const navArr = Array.isArray(nav) ? nav.map(Number) : [];
+        const n = Math.min(idx.length, navArr.length);
+        const config = {
+          base_amount: Number(baseAmount),
+          periodic_amount: Number(periodicAmount),
+          frequency: String(frequency || "monthly"),
+          weekly_weekday: Math.floor(Number(weeklyWeekday || 1)),
+          monthly_day: Math.floor(Number(monthlyDay || 1)),
+          non_trading_shift: String(nonTradingShift || "next"),
+        };
+        if (!n || !enabled) {
+          return {
+            enabled: !!enabled,
+            config,
+            series: {
+              dates: idx.slice(0, n),
+              contribution: Array.from({ length: n }, () => 0),
+              invested: Array.from({ length: n }, () => 0),
+              account_value: Array.from({ length: n }, () => 0),
+            },
+            metrics: {
+              dca_total_invested: null,
+              dca_final_value: null,
+              dca_cumulative_return: null,
+              dca_money_weighted_return: null,
+              dca_money_weighted_annualized_return: null,
+              dca_time_weighted_return: null,
+            },
+          };
+        }
+        const navX = navArr.slice(0, n);
+        const datesX = idx.slice(0, n);
+        const contrib = _buildOffDcaContributionSeries({
+          dates: datesX,
+          baseAmount: config.base_amount,
+          periodicAmount: config.periodic_amount,
+          frequency: config.frequency,
+          weeklyWeekday: config.weekly_weekday,
+          monthlyDay: config.monthly_day,
+          nonTradingShift: config.non_trading_shift,
+        });
+        const ret = new Array(n).fill(0);
+        for (let i = 1; i < n; i += 1) {
+          const p0 = Number(navX[i - 1]);
+          const p1 = Number(navX[i]);
+          ret[i] =
+            Number.isFinite(p0) && Number.isFinite(p1) && p0 > 0
+              ? p1 / p0 - 1
+              : 0;
+        }
+        const investedVals = [];
+        const accountVals = [];
+        let invested = 0;
+        let account = 0;
+        for (let i = 0; i < n; i += 1) {
+          invested += Number(contrib[i] || 0);
+          account =
+            (account + Number(contrib[i] || 0)) * (1 + Number(ret[i] || 0));
+          investedVals.push(invested);
+          accountVals.push(account);
+        }
+        const totalInvested = investedVals.length
+          ? Number(investedVals[n - 1])
+          : 0;
+        const finalValue = accountVals.length ? Number(accountVals[n - 1]) : 0;
+        const cumRet = totalInvested > 0 ? finalValue / totalInvested - 1 : NaN;
+        const twr = ret.reduce((acc, r) => acc * (1 + Number(r || 0)), 1) - 1;
+        const cfDates = [];
+        const cfVals = [];
+        for (let i = 0; i < n; i += 1) {
+          const c = Number(contrib[i] || 0);
+          if (c > 0) {
+            cfDates.push(datesX[i]);
+            cfVals.push(-c);
+          }
+        }
+        if (accountVals.length) {
+          cfDates.push(datesX[n - 1]);
+          cfVals.push(Number(accountVals[n - 1]));
+        }
+        const mwrAnn = _xirrAnnualizedFromCashflows(cfDates, cfVals);
+        const d0 = _parseIsoToUtcDate(datesX[0]);
+        const d1 = _parseIsoToUtcDate(datesX[n - 1]);
+        const spanYears =
+          d0 && d1
+            ? Math.max(
+                0,
+                (d1.getTime() - d0.getTime()) / (365.2425 * 24 * 3600 * 1000),
+              )
+            : 0;
+        const mwr = Number.isFinite(mwrAnn)
+          ? spanYears > 0
+            ? Math.pow(1 + mwrAnn, spanYears) - 1
+            : cumRet
+          : NaN;
+        return {
+          enabled: true,
+          config,
+          series: {
+            dates: datesX,
+            contribution: contrib.map((x) => Number(x || 0)),
+            invested: investedVals.map((x) => Number(x || 0)),
+            account_value: accountVals.map((x) => Number(x || 0)),
+          },
+          metrics: {
+            dca_total_invested: Number(totalInvested),
+            dca_final_value: Number(finalValue),
+            dca_cumulative_return: Number(cumRet),
+            dca_money_weighted_return: Number(mwr),
+            dca_money_weighted_annualized_return: Number(mwrAnn),
+            dca_time_weighted_return: Number(twr),
+          },
+        };
+      }
+
       function periodReturns(dates, nav, kind) {
         const keyFn = (d) => {
           const y = Number(d.slice(0, 4));
@@ -3529,6 +4661,241 @@
           `<tr><td>Q90</td><td>${f(q90)}</td></tr>` +
           `<tr><td>Q95</td><td>${f(q95)}</td></tr>` +
           `<tr><td>Q99</td><td>${f(q99)}</td></tr>`;
+      }
+      function _offMcMetricLabel(key) {
+        const mp = {
+          cumulative_return: "累积收益",
+          annualized_return: "年化收益",
+          annualized_volatility: "年化波动",
+          max_drawdown: "最大回撤",
+          sharpe_ratio: "夏普",
+          calmar_ratio: "卡玛",
+          sortino_ratio: "索提诺",
+          ulcer_index: "溃疡指标",
+          ulcer_performance: "溃疡绩效",
+          rolling_recent_100_sqn_median: "滚动近100次SQN中位数",
+        };
+        return mp[String(key || "")] || String(key || "-");
+      }
+      function renderOffMcTable(mc) {
+        const el = $("offMcTable");
+        if (!el) return;
+        const head =
+          "<tr><th>指标</th><th>实测值</th><th>均值</th><th>P05</th><th>P50</th><th>P95</th><th>P(r≤0)</th></tr>";
+        if (!mc || !mc.metrics) {
+          el.innerHTML = head;
+          return;
+        }
+        const order = [
+          "cumulative_return",
+          "annualized_return",
+          "annualized_volatility",
+          "max_drawdown",
+          "sharpe_ratio",
+          "calmar_ratio",
+          "sortino_ratio",
+          "ulcer_index",
+          "ulcer_performance",
+          "rolling_recent_100_sqn_median",
+        ];
+        const rows = order
+          .filter((k) => mc.metrics[k])
+          .map((k) => ({ k, v: mc.metrics[k] }));
+        const fmt = (k, x) => {
+          if (x == null || Number.isNaN(Number(x))) return "-";
+          if (
+            String(k).includes("return") ||
+            String(k).includes("volatility") ||
+            String(k).includes("drawdown")
+          )
+            return fmtPct(Number(x));
+          return fmtNum(Number(x), 4);
+        };
+        el.innerHTML =
+          head +
+          rows
+            .map(
+              ({ k, v }) =>
+                `<tr><td>${esc(_offMcMetricLabel(k))}</td><td>${fmt(k, v.observed)}</td><td>${fmt(k, v.mean)}</td><td>${fmt(k, v.p05)}</td><td>${fmt(k, v.p50)}</td><td>${fmt(k, v.p95)}</td><td>${v.p_value_le_0 == null || Number.isNaN(Number(v.p_value_le_0)) ? "-" : fmtPct(Number(v.p_value_le_0))}</td></tr>`,
+            )
+            .join("");
+      }
+      function plotOffMcHist(mc, metricKey) {
+        const el = $("offMcHist");
+        if (!el) return;
+        const m = mc && mc.metrics ? mc.metrics[metricKey] : null;
+        const h = m && m.hist ? m.hist : null;
+        const edges = Array.isArray(h && h.bin_edges) ? h.bin_edges : [];
+        const counts = Array.isArray(h && h.counts) ? h.counts : [];
+        if (edges.length < 2 || counts.length < 1) {
+          el.innerHTML = "<div class='muted'>无直方图数据</div>";
+          return;
+        }
+        const x = [];
+        for (let i = 0; i < counts.length; i += 1)
+          x.push((Number(edges[i]) + Number(edges[i + 1])) / 2);
+        const isPct =
+          String(metricKey).includes("return") ||
+          String(metricKey).includes("volatility") ||
+          String(metricKey).includes("drawdown");
+        Plotly.newPlot(
+          "offMcHist",
+          [
+            {
+              x,
+              y: counts,
+              type: "bar",
+              marker: { color: "#4c78a8" },
+              hovertemplate: isPct
+                ? "%{x:.2%}<br>频数=%{y}<extra></extra>"
+                : "%{x:.4f}<br>频数=%{y}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 20 },
+            xaxis: { tickformat: isPct ? ".0%" : ".4f", title: metricKey },
+            yaxis: { title: "count" },
+            annotations: [
+              {
+                xref: "paper",
+                yref: "paper",
+                x: 0.01,
+                y: 0.98,
+                showarrow: false,
+                text: `下溢=${h.underflow || 0}, 上溢=${h.overflow || 0}`,
+                font: { size: 12, color: "#666" },
+              },
+            ],
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+      function renderOffMcFit(mc, metricKey) {
+        const fitTable = $("offMcFitTable");
+        const distSel = $("offMcDist");
+        const qqEl = $("offMcQQ");
+        if (!fitTable || !distSel || !qqEl) return;
+        const m = mc && mc.metrics ? mc.metrics[metricKey] : null;
+        const fit = m && m.fit ? m.fit : null;
+        if (!fit) {
+          fitTable.innerHTML =
+            "<tr><th>分布</th><th>BIC</th><th>AIC</th><th>KS p值</th><th>AD统计量</th></tr>";
+          distSel.innerHTML = "";
+          qqEl.innerHTML = "<div class='muted'>无拟合数据</div>";
+          return;
+        }
+        const cands = Array.isArray(fit.candidates) ? fit.candidates : [];
+        const rows = [];
+        for (const d of cands) {
+          const r = fit.dists && fit.dists[d] ? fit.dists[d] : null;
+          if (!r || !r.ok) continue;
+          rows.push({
+            d,
+            bic: Number(r.bic),
+            aic: Number(r.aic),
+            ksp: r.ks ? Number(r.ks.p_value) : NaN,
+            ad: r.ad ? Number(r.ad.stat) : NaN,
+          });
+        }
+        rows.sort((a, b) => Number(a.bic) - Number(b.bic));
+        fitTable.innerHTML =
+          "<tr><th>分布</th><th>BIC</th><th>AIC</th><th>KS p值</th><th>AD统计量</th></tr>" +
+          rows
+            .map(
+              (r) =>
+                `<tr><td>${esc(r.d)}</td><td>${Number.isFinite(r.bic) ? r.bic.toFixed(2) : "-"}</td><td>${Number.isFinite(r.aic) ? r.aic.toFixed(2) : "-"}</td><td>${Number.isFinite(r.ksp) ? r.ksp.toFixed(4) : "-"}</td><td>${Number.isFinite(r.ad) ? r.ad.toFixed(2) : "-"}</td></tr>`,
+            )
+            .join("");
+        distSel.innerHTML = "";
+        for (const r of rows) {
+          const opt = document.createElement("option");
+          opt.value = r.d;
+          opt.textContent =
+            r.d + (r.d === fit.best_by_bic ? "（BIC 最优）" : "");
+          distSel.appendChild(opt);
+        }
+        const bestDist =
+          String(fit.best_by_rule || "").trim() ||
+          String(fit.best_by_bic || "").trim();
+        if (bestDist) distSel.value = bestDist;
+        const plotQQ = () => {
+          const d = String(distSel.value || "").trim();
+          const qq = fit.qq && fit.qq[d] ? fit.qq[d] : null;
+          if (
+            !qq ||
+            !Array.isArray(qq.emp) ||
+            !Array.isArray(qq.theory) ||
+            !qq.emp.length
+          ) {
+            qqEl.innerHTML = "<div class='muted'>无 Q-Q 数据</div>";
+            return;
+          }
+          const x = qq.theory;
+          const y = qq.emp;
+          const minv = Math.min(...x, ...y);
+          const maxv = Math.max(...x, ...y);
+          Plotly.newPlot(
+            "offMcQQ",
+            [
+              {
+                x,
+                y,
+                mode: "markers",
+                type: "scatter",
+                name: "Q-Q",
+                marker: { size: 6, color: "#4c78a8" },
+                hovertemplate:
+                  "理论分位=%{x:.4f}<br>样本分位=%{y:.4f}<extra></extra>",
+              },
+              {
+                x: [minv, maxv],
+                y: [minv, maxv],
+                mode: "lines",
+                name: "y=x",
+                line: { dash: "dot", color: "#999" },
+                hoverinfo: "skip",
+              },
+            ],
+            {
+              margin: { t: 20 },
+              xaxis: { title: "theoretical quantile" },
+              yaxis: { title: "empirical quantile" },
+            },
+            { responsive: true, displayModeBar: false },
+          );
+        };
+        distSel.onchange = plotQQ;
+        plotQQ();
+      }
+      function _offMcReportLines(mc) {
+        const mm =
+          mc && mc.metrics
+            ? mc.metrics.annualized_return ||
+              mc.metrics.cumulative_return ||
+              null
+            : null;
+        if (!mm) return ["场外基金组合：未返回可用于解读的绩效分布。"];
+        const obs = Number(mm.observed);
+        const p50 = Number(mm.p50);
+        const p05 = Number(mm.p05);
+        const p95 = Number(mm.p95);
+        const pLose = Number(mm.p_value_le_0);
+        const out = [];
+        out.push(
+          `场外基金组合：实测 ${fmtPct(obs)}，分布中位数 ${fmtPct(p50)}，区间 [P05=${fmtPct(p05)}, P95=${fmtPct(p95)}]。`,
+        );
+        if (Number.isFinite(obs) && Number.isFinite(p50)) {
+          out.push(
+            obs > p50
+              ? "实测结果高于分布中位数，处于历史重采样的偏上水平。"
+              : "实测结果不高于分布中位数，结果更接近常态或偏弱场景。",
+          );
+        }
+        if (Number.isFinite(pLose))
+          out.push(
+            `经验亏损概率约为 ${fmtPct(pLose)}（该指标<=0 的模拟占比）。`,
+          );
+        return out;
       }
       function renderCorrMatrix(ctx) {
         const names = (ctx.picked || []).map((c) => codeLabel(c));
@@ -3919,6 +5286,13 @@
         driftRebalanceEnabled,
         driftAbsThreshold,
         driftRelThreshold,
+        investMode,
+        dcaBaseAmount,
+        dcaPeriodicAmount,
+        dcaFrequency,
+        dcaWeeklyWeekday,
+        dcaMonthlyDay,
+        dcaNonTradingShift,
         assetGroupsText,
         groupWeightsText,
         innerCustomWeightsText,
@@ -3938,6 +5312,13 @@
           drift_rebalance_enabled: Boolean(driftRebalanceEnabled),
           drift_abs_threshold: Number(driftAbsThreshold),
           drift_rel_threshold: Number(driftRelThreshold),
+          invest_mode: String(investMode || "lump_sum"),
+          dca_base_amount: Number(dcaBaseAmount),
+          dca_periodic_amount: Number(dcaPeriodicAmount),
+          dca_frequency: String(dcaFrequency || "monthly"),
+          dca_weekly_weekday: Number(dcaWeeklyWeekday),
+          dca_monthly_day: Number(dcaMonthlyDay),
+          dca_non_trading_shift: String(dcaNonTradingShift || "next"),
           asset_groups_text: String(assetGroupsText || "").trim(),
           group_weights_text: String(groupWeightsText || "").trim(),
           inner_custom_weights_text: String(
@@ -3964,6 +5345,31 @@
         if (low === "unattributed" || low === "residual" || low === "cash")
           return "未归因项";
         return String((factorLabelByKey && factorLabelByKey[k]) || k);
+      }
+      function _offReplicationLabel(key, factorLabelByKey) {
+        const k = String(key || "").trim();
+        if (k.toLowerCase() === "cash") return "现金（零收益）";
+        return String((factorLabelByKey && factorLabelByKey[k]) || k);
+      }
+      function summarizeReplicationWeights(
+        weights,
+        cashWeight,
+        factorLabelByKey,
+      ) {
+        const rows = Object.entries(weights || {})
+          .filter(([, v]) => Number.isFinite(Number(v)) && Number(v) > 1e-8)
+          .map(([k, v]) => [k, Number(v)]);
+        if (Number.isFinite(Number(cashWeight)) && Number(cashWeight) > 1e-8)
+          rows.push(["cash", Number(cashWeight)]);
+        rows.sort((a, b) => b[1] - a[1]);
+        return rows.length
+          ? rows
+              .map(
+                ([k, v]) =>
+                  `${esc(_offReplicationLabel(k, factorLabelByKey))}:${fmtPct(v)}`,
+              )
+              .join("，")
+          : "-";
       }
       function _clearClsExposurePanel(msg) {
         const sel = $("offClsExposureCode");
@@ -4287,6 +5693,16 @@
           _clearClsFundTechPanel(String((e && e.message) || e || "绘图失败"));
         }
       }
+      function _normalizeClsSeriesDate(point) {
+        return String(
+          (point &&
+            (point.trade_date ||
+              point.effective_date ||
+              point.date ||
+              point.estimation_date)) ||
+            "",
+        ).trim();
+      }
       function _filterClsExposureSeriesByRange(points, rangeKey) {
         const arr = Array.isArray(points) ? points : [];
         if (!arr.length) return [];
@@ -4304,17 +5720,170 @@
                   ? 10
                   : 0;
         if (!years) return arr.slice();
-        const lastDate = String(
-          (arr[arr.length - 1] && arr[arr.length - 1].trade_date) || "",
-        );
+        const lastDate = _normalizeClsSeriesDate(arr[arr.length - 1]);
         const end = new Date(`${lastDate}T00:00:00`);
         if (!Number.isFinite(end.getTime())) return arr.slice();
         const start = new Date(end.getTime());
         start.setFullYear(start.getFullYear() - years);
         return arr.filter((p) => {
-          const d = new Date(`${String((p && p.trade_date) || "")}T00:00:00`);
+          const d = new Date(`${_normalizeClsSeriesDate(p)}T00:00:00`);
           return Number.isFinite(d.getTime()) && d >= start && d <= end;
         });
+      }
+      function _replicationOosPointFromWeightRow(row) {
+        const effectiveDate = String((row && row.effective_date) || "").trim();
+        if (!effectiveDate) return null;
+        const tgtRetRaw = row && row.target_return;
+        const targetReturn = tgtRetRaw != null ? Number(tgtRetRaw) : NaN;
+        const repNavRaw = row && row.replication_nav;
+        const replicationNav = repNavRaw != null ? Number(repNavRaw) : NaN;
+        const repRetRaw = row && row.replication_return;
+        const replicationReturn = repRetRaw != null ? Number(repRetRaw) : NaN;
+        const hasOos =
+          Number.isFinite(targetReturn) ||
+          Number.isFinite(replicationNav) ||
+          Number.isFinite(replicationReturn);
+        if (!hasOos) return null;
+        return {
+          trade_date: effectiveDate,
+          target_return: Number.isFinite(targetReturn) ? targetReturn : null,
+          replication_nav: Number.isFinite(replicationNav)
+            ? replicationNav
+            : null,
+          replication_return: Number.isFinite(replicationReturn)
+            ? replicationReturn
+            : null,
+          asset_weights: (row && row.asset_weights) || {},
+          cash_weight: Number(row && row.cash_weight),
+        };
+      }
+      function _replicationNavPointsFromWeightSeries(weightSeries) {
+        const rows = Array.isArray(weightSeries) ? weightSeries : [];
+        let fundNav = 1.0;
+        const out = [];
+        for (const row of rows) {
+          const oos = _replicationOosPointFromWeightRow(row);
+          if (!oos) continue;
+          if (Number.isFinite(oos.target_return)) {
+            fundNav *= 1.0 + oos.target_return;
+          }
+          if (!Number.isFinite(oos.replication_nav)) continue;
+          out.push({
+            trade_date: oos.trade_date,
+            fund_nav: fundNav,
+            replication_nav: oos.replication_nav,
+          });
+        }
+        return out;
+      }
+      function _replicationWeightPointsFromWeightSeries(weightSeries) {
+        const rows = Array.isArray(weightSeries) ? weightSeries : [];
+        const out = [];
+        for (const row of rows) {
+          const oos = _replicationOosPointFromWeightRow(row);
+          if (!oos) continue;
+          out.push({
+            trade_date: oos.trade_date,
+            exposures: {
+              ...oos.asset_weights,
+              cash: Number.isFinite(oos.cash_weight) ? oos.cash_weight : 0,
+            },
+          });
+        }
+        return out;
+      }
+      function _clearClsReplicationNavPanel(msg) {
+        const chart = $("offClsReplicationNavChart");
+        if (chart) {
+          chart.innerHTML = `<div class="muted" style="padding-top: 8px">${esc(String(msg || "暂无可用复制净值序列"))}</div>`;
+        }
+      }
+      async function _renderClsReplicationNavChartByCode(code) {
+        if (!offClsLastIsReplication) {
+          _clearClsReplicationNavPanel("请先运行基金复制归因。");
+          return;
+        }
+        const rows = Array.isArray(offClsLastRows) ? offClsLastRows : [];
+        const row =
+          rows.find(
+            (x) => String((x && x.code) || "") === String(code || ""),
+          ) || null;
+        const pointsRaw = _replicationNavPointsFromWeightSeries(
+          row && row.weight_series,
+        );
+        const points = _filterClsExposureSeriesByRange(
+          pointsRaw,
+          offClsExposureRangeKey,
+        );
+        if (!row || points.length < 2) {
+          _clearClsReplicationNavPanel("当前时间范围下无可用复制净值序列。");
+          return;
+        }
+        const dates = points.map((p) => String(p.trade_date || ""));
+        const baseFund = Number(points[0].fund_nav);
+        const baseRep = Number(points[0].replication_nav);
+        const fundY = points.map((p) =>
+          Number.isFinite(baseFund) && baseFund > 0
+            ? Number(p.fund_nav) / baseFund
+            : null,
+        );
+        const repY = points.map((p) =>
+          Number.isFinite(baseRep) && baseRep > 0
+            ? Number(p.replication_nav) / baseRep
+            : null,
+        );
+        const plotTheme = _offFundPairPlotThemeTokens();
+        const chartId = "offClsReplicationNavChart";
+        try {
+          await ensurePlotlyLoaded();
+          await window.Plotly.newPlot(
+            chartId,
+            [
+              {
+                type: "scatter",
+                mode: "lines",
+                name: "基金/组合净值",
+                x: dates,
+                y: fundY,
+                hovertemplate: "%{x}<br>基金/组合: %{y:.4f}<extra></extra>",
+              },
+              {
+                type: "scatter",
+                mode: "lines",
+                name: "复制组合净值",
+                x: dates,
+                y: repY,
+                hovertemplate: "%{x}<br>复制组合: %{y:.4f}<extra></extra>",
+              },
+            ],
+            {
+              margin: { t: 30, b: 120 },
+              paper_bgcolor: plotTheme.plotBg,
+              plot_bgcolor: plotTheme.plotBg,
+              font: { color: plotTheme.plotFg },
+              title: `${esc(row.code || "-")} ${esc(row.name || "")} · 复制净值对比`,
+              legend: { orientation: "h", y: -0.35 },
+              yaxis: {
+                title: "归一化净值",
+                gridcolor: plotTheme.plotGrid,
+                linecolor: plotTheme.plotGrid,
+                zerolinecolor: plotTheme.plotGrid,
+              },
+              xaxis: {
+                title: "日期",
+                type: "category",
+                gridcolor: plotTheme.plotGrid,
+                linecolor: plotTheme.plotGrid,
+                zerolinecolor: plotTheme.plotGrid,
+              },
+            },
+            { responsive: true, displaylogo: false },
+          );
+        } catch (e) {
+          _clearClsReplicationNavPanel(
+            String((e && e.message) || e || "绘图失败"),
+          );
+        }
       }
       function _renderClsExposureChartByCode(code) {
         const rows = Array.isArray(offClsLastRows) ? offClsLastRows : [];
@@ -4322,13 +5891,18 @@
           rows.find(
             (x) => String((x && x.code) || "") === String(code || ""),
           ) || null;
-        const pointsRaw = Array.isArray(row && row.exposure_series)
-          ? row.exposure_series
-          : [];
+        const pointsRaw = offClsLastIsReplication
+          ? _replicationWeightPointsFromWeightSeries(row && row.weight_series)
+          : Array.isArray(row && row.exposure_series)
+            ? row.exposure_series
+            : [];
         const points = _filterClsExposureSeriesByRange(
           pointsRaw,
           offClsExposureRangeKey,
         );
+        const exposureLabel = offClsLastIsReplication
+          ? _offReplicationLabel
+          : _offClsExposureLabel;
         if (!row || !points.length) {
           const chart = $("offClsExposureChart");
           if (chart) {
@@ -4367,17 +5941,17 @@
           if (stats) stats.innerHTML = "";
           return;
         }
-        const dates = pointsDense.map((p) => String((p && p.trade_date) || ""));
+        const dates = pointsDense.map((p) => _normalizeClsSeriesDate(p));
         const traces = orderedKeys.map((k) => {
           const trace = {
             type: "bar",
-            name: _offClsExposureLabel(k, offClsLastFactorLabelByKey),
+            name: exposureLabel(k, offClsLastFactorLabelByKey),
             x: dates,
             y: pointsDense.map((p) => {
               const v = Number((p && p.exposures && p.exposures[k]) || NaN);
               return Number.isFinite(v) ? v : null;
             }),
-            hovertemplate: `%{x}<br>${esc(_offClsExposureLabel(k, offClsLastFactorLabelByKey))}: %{y:.2%}<extra></extra>`,
+            hovertemplate: `%{x}<br>${esc(exposureLabel(k, offClsLastFactorLabelByKey))}: %{y:.2%}<extra></extra>`,
           };
           if (isResidualLike(k)) {
             trace.marker = { color: "#90a4ae", opacity: 0.75 };
@@ -4396,18 +5970,19 @@
                 paper_bgcolor: plotTheme.plotBg,
                 plot_bgcolor: plotTheme.plotBg,
                 font: { color: plotTheme.plotFg },
-                title: `${esc(row.code || "-")} ${esc(row.name || "")} · 日度因子占比`,
+                title: `${esc(row.code || "-")} ${esc(row.name || "")} · ${offClsLastIsReplication ? "日度复制权重" : "日度因子占比"}`,
                 legend: { orientation: "h", y: -0.5 },
                 yaxis: {
-                  title: "占比",
+                  title: offClsLastIsReplication ? "权重" : "占比",
                   tickformat: ".0%",
+                  range: [0, 1],
                   gridcolor: plotTheme.plotGrid,
                   linecolor: plotTheme.plotGrid,
                   zerolinecolor: plotTheme.plotGrid,
                 },
                 xaxis: {
                   title: "日期",
-                  type: "category",
+                  type: offClsLastIsReplication ? "category" : "date",
                   gridcolor: plotTheme.plotGrid,
                   linecolor: plotTheme.plotGrid,
                   zerolinecolor: plotTheme.plotGrid,
@@ -4431,7 +6006,7 @@
               (latest && latest.exposures && latest.exposures[k]) || NaN,
             );
             if (!Number.isFinite(v)) return "";
-            return `${esc(_offClsExposureLabel(k, offClsLastFactorLabelByKey))}:${fmtPct(v)}`;
+            return `${esc(exposureLabel(k, offClsLastFactorLabelByKey))}:${fmtPct(v)}`;
           })
           .filter(Boolean)
           .join("，");
@@ -4441,11 +6016,17 @@
             "<tr><th>指标</th><th>值</th></tr>" +
             `<tr><td>样本点数</td><td>${pointsDense.length}</td></tr>` +
             `<tr><td>起止日期</td><td>${esc(dates[0] || "-")} ~ ${esc(dates[dates.length - 1] || "-")}</td></tr>` +
-            `<tr><td>最新一期占比</td><td>${latestTxt || "-"}</td></tr>`;
+            `<tr><td>最新一期${offClsLastIsReplication ? "权重" : "占比"}</td><td>${latestTxt || "-"}</td></tr>`;
         }
       }
-      function renderClsExposurePanel(rows, factorLabelByKey, factorOrder) {
+      function renderClsExposurePanel(
+        rows,
+        factorLabelByKey,
+        factorOrder,
+        isReplication = false,
+      ) {
         offClsLastRows = Array.isArray(rows) ? rows : [];
+        offClsLastIsReplication = !!isReplication;
         offClsLastFactorLabelByKey =
           factorLabelByKey && typeof factorLabelByKey === "object"
             ? factorLabelByKey
@@ -4459,6 +6040,7 @@
         if (!usable.length) {
           offClsExposureSelectedCode = "";
           _clearClsExposurePanel("本次回归无可用日度因子占比序列。");
+          _clearClsReplicationNavPanel("本次回归无可用复制净值序列。");
           _clearClsFundTechPanel("本次回归无可用基金用于绘制净值技术图。");
           return;
         }
@@ -4479,6 +6061,7 @@
             return `<option value="${esc(c)}" ${c === keep ? "selected" : ""}>${esc(c)} ${esc(n)}</option>`;
           })
           .join("");
+        _renderClsReplicationNavChartByCode(keep);
         _renderClsExposureChartByCode(keep);
         _renderClsFundTechChartByCode(keep);
       }
@@ -4514,12 +6097,32 @@
         const rows = Array.isArray(offClsConfigs) ? offClsConfigs : [];
         sel.innerHTML = rows.length
           ? rows
-              .map(
-                (x) =>
-                  `<option value="${esc(x.name || "")}">${esc(x.is_active ? `* ${x.name}` : x.name)}</option>`,
-              )
+              .map((x) => {
+                const tag = x.template_id
+                  ? `[${x.template_id} v${x.template_version || "?"}]`
+                  : x.legacy_dense_template
+                    ? "[legacy dense]"
+                    : "[legacy]";
+                const label = `${x.is_active ? "* " : ""}${x.name || ""} ${tag}`;
+                return `<option value="${esc(x.name || "")}">${esc(label)}</option>`;
+              })
               .join("")
           : `<option value="">(无配置)</option>`;
+      }
+      function loadClsConfigNameLocal() {
+        try {
+          return String(
+            localStorage.getItem(OFF_CLS_CFG_STORAGE_KEY) || "",
+          ).trim();
+        } catch (_) {
+          return "";
+        }
+      }
+      function saveClsConfigNameLocal(name) {
+        try {
+          const nm = String(name || "").trim();
+          if (nm) localStorage.setItem(OFF_CLS_CFG_STORAGE_KEY, nm);
+        } catch (_) {}
       }
       function getClsConfigByName(name) {
         const nm = String(name || "").trim();
@@ -4530,20 +6133,124 @@
           ) || null
         );
       }
+      function getCurrentClsConfig() {
+        const name = String(
+          ($("offClsCfgSelect") && $("offClsCfgSelect").value) || "",
+        ).trim();
+        return (
+          getClsConfigByName(name) ||
+          (offClsSelectedConfig && typeof offClsSelectedConfig === "object"
+            ? offClsSelectedConfig
+            : null)
+        );
+      }
+      function syncClsConfigFromSelect() {
+        const cfg = getCurrentClsConfig();
+        if (cfg) offClsSelectedConfig = cfg;
+        return cfg;
+      }
+      function clsFactorsFromConfig(cfg) {
+        const rows = Array.isArray(cfg && cfg.benchmark_factors)
+          ? cfg.benchmark_factors
+          : [];
+        return rows
+          .map((item) => ({
+            key: String((item && item.key) || "")
+              .trim()
+              .toUpperCase(),
+            label: String((item && item.label) || item.key || "").trim(),
+            aliases: Array.isArray(item && item.aliases)
+              ? item.aliases
+                  .map((alias) => String(alias || "").trim())
+                  .filter(Boolean)
+              : [],
+            reporting_group:
+              item && item.reporting_group
+                ? String(item.reporting_group)
+                : undefined,
+            substitution_group:
+              item && item.substitution_group
+                ? String(item.substitution_group)
+                : undefined,
+            asset_class:
+              item && item.asset_class ? String(item.asset_class) : undefined,
+          }))
+          .filter((item) => item.key && item.aliases.length > 0);
+      }
+      function isClsSystemTemplate(cfg) {
+        return !!(cfg && cfg.template_id);
+      }
+      function parseApiErrorMessage(txt) {
+        const raw = String(txt || "").trim();
+        if (!raw) return "";
+        try {
+          const payload = JSON.parse(raw);
+          const detail = payload && payload.detail;
+          if (typeof detail === "string") {
+            if (
+              detail === "versioned system replication templates are immutable"
+            ) {
+              return "版本化系统复制模板不可删除或覆盖。";
+            }
+            return detail;
+          }
+        } catch (_) {}
+        return raw;
+      }
+      function refreshClsConfigActionState(cfg) {
+        const system = isClsSystemTemplate(cfg);
+        const mode = String(
+          ($("offClsFactorMode") && $("offClsFactorMode").value) || "profile",
+        );
+        const saveBtn = $("offClsCfgSave");
+        const deleteBtn = $("offClsCfgDelete");
+        if (deleteBtn) {
+          deleteBtn.disabled = system;
+          deleteBtn.title = system ? "版本化系统复制模板不可删除" : "";
+        }
+        if (saveBtn) {
+          saveBtn.disabled = system && mode === "profile";
+          saveBtn.title =
+            system && mode === "profile"
+              ? "版本化系统复制模板不可覆盖；如需另存请切换到“自定义因子列表”"
+              : "";
+        }
+      }
+      function clsAvailabilityPayload(factorPayload, cfg) {
+        const factors = clsFactorsFromConfig(cfg);
+        if (factors.length >= 2) {
+          return { benchmark_factors: factors };
+        }
+        return factorPayload;
+      }
       function applyClsConfigToUi(cfg) {
         if (!cfg) return;
+        offClsSelectedConfig = cfg;
+        offClsCustomExplicitlyEdited = false;
+        saveClsConfigNameLocal(cfg.name);
         const factors = Array.isArray(cfg.benchmark_factors)
           ? cfg.benchmark_factors
           : [];
         const profileFactorsText = profileDefaultFactorsText(cfg);
-        const mode = factors.length ? "custom" : "profile";
+        const mode = cfg.template_id
+          ? "profile"
+          : factors.length
+            ? "custom"
+            : "profile";
         $("offClsFactorMode").value = mode;
         $("offClsFactors").value =
           factors.length > 0
             ? factorsTextFromList(factors)
             : profileFactorsText;
         $("offClsCfgName").value = String(cfg.name || "");
+        const notice = $("offClsTemplateNotice");
+        if (notice) {
+          notice.textContent = cfg.is_legacy
+            ? `当前选择为 legacy 分类模板“${cfg.name || "-"}”；可直接检查/运行，但建议优先使用带版本号的复制模板。`
+            : `当前复制模板：${cfg.name || "-"}（${cfg.template_id || "-"} v${cfg.template_version || "?"}）。`;
+        }
         refreshClsFactorInputState();
+        refreshClsConfigActionState(cfg);
       }
       async function loadOffFundPairUniverseFromBackend() {
         const resp = await api("/off-fund/regression/pair-universe", {
@@ -4564,14 +6271,22 @@
         if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
         const rows = txt ? JSON.parse(txt) : [];
         offClsConfigs = Array.isArray(rows) ? rows : [];
+        const prevName = String(
+          ($("offClsCfgSelect") && $("offClsCfgSelect").value) || "",
+        ).trim();
+        const savedName = loadClsConfigNameLocal();
         renderClsConfigSelect();
         const active =
           offClsConfigs.find((x) => x && x.is_active) ||
           offClsConfigs[0] ||
           null;
-        if (active) {
-          $("offClsCfgSelect").value = String(active.name || "");
-          applyClsConfigToUi(active);
+        const selected =
+          getClsConfigByName(prevName) ||
+          getClsConfigByName(savedName) ||
+          active;
+        if (selected) {
+          $("offClsCfgSelect").value = String(selected.name || "");
+          applyClsConfigToUi(selected);
         }
       }
       async function saveClsConfigToBackend() {
@@ -4584,6 +6299,11 @@
           ).trim();
         if (!name) throw new Error("请先输入配置名");
         const factorPayload = currentClsFactorPayload();
+        if (factorPayload.template_id) {
+          throw new Error(
+            "版本化系统模板不可覆盖；如需另存，请切换到“自定义因子列表”。",
+          );
+        }
         const resp = await api("/off-fund/regression/factor-configs", {
           method: "POST",
           body: JSON.stringify({
@@ -4592,6 +6312,12 @@
             benchmark_profile:
               factorPayload.benchmark_profile || "cn_stock_core",
             benchmark_factors: factorPayload.benchmark_factors || null,
+            solver_params:
+              offClsSelectedConfig &&
+              offClsSelectedConfig.solver_params &&
+              typeof offClsSelectedConfig.solver_params === "object"
+                ? offClsSelectedConfig.solver_params
+                : null,
           }),
         });
         const txt = await resp.text();
@@ -4617,21 +6343,31 @@
         await loadClsConfigsFromBackend();
         $("offClsCfgSelect").value = name;
         applyClsConfigToUi(cfg);
-        setMsg(`已载入并激活因子配置：${name}`);
+        setClsActionMsg(
+          cfg.is_legacy
+            ? `已载入 legacy 分类模板：${name}。`
+            : `已载入并激活复制模板：${name}`,
+        );
       }
       async function deleteClsConfigFromSelect() {
         const name = String(
           ($("offClsCfgSelect") && $("offClsCfgSelect").value) || "",
         ).trim();
         if (!name) throw new Error("请选择配置");
+        const cfg = getClsConfigByName(name);
+        if (isClsSystemTemplate(cfg)) {
+          throw new Error(`“${name}”是版本化系统复制模板，不能删除。`);
+        }
         const resp = await api(
           `/off-fund/regression/factor-configs/${encodeURIComponent(name)}`,
           { method: "DELETE" },
         );
         const txt = await resp.text();
-        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+        if (!resp.ok) {
+          throw new Error(parseApiErrorMessage(txt) || `HTTP ${resp.status}`);
+        }
         await loadClsConfigsFromBackend();
-        setMsg(`已删除因子配置：${name}`);
+        setClsActionMsg(`已删除因子配置：${name}`);
       }
       function parseOffClsFactorsText(txt) {
         const out = [];
@@ -4669,13 +6405,67 @@
         const mode = String(
           ($("offClsFactorMode") && $("offClsFactorMode").value) || "profile",
         );
+        const cfg = syncClsConfigFromSelect();
+        const applySolverParams = (payload) => {
+          const params =
+            cfg && cfg.solver_params && typeof cfg.solver_params === "object"
+              ? cfg.solver_params
+              : null;
+          if (!params) return payload;
+          if (Number.isFinite(Number(params.lambda_substitution))) {
+            payload.lambda_substitution = Number(params.lambda_substitution);
+          }
+          if (Number.isFinite(Number(params.lambda_temporal))) {
+            payload.lambda_temporal = Number(params.lambda_temporal);
+          }
+          if (
+            payload.lambda_substitution != null ||
+            payload.lambda_temporal != null
+          ) {
+            payload.advanced_mode = true;
+          }
+          return payload;
+        };
         if (mode === "custom") {
-          const factors = parseOffClsFactorsText(
+          const parsedFactors = parseOffClsFactorsText(
             ($("offClsFactors") && $("offClsFactors").value) || "",
           );
-          return { benchmark_factors: factors };
+          const configuredByKey = Object.fromEntries(
+            (cfg && Array.isArray(cfg.benchmark_factors)
+              ? cfg.benchmark_factors
+              : []
+            ).map((item) => [
+              String((item && item.key) || "").toUpperCase(),
+              item || {},
+            ]),
+          );
+          const factors = parsedFactors.map((item) => {
+            const configured =
+              configuredByKey[String(item.key || "").toUpperCase()] || {};
+            return {
+              ...item,
+              reporting_group:
+                configured.reporting_group || item.label || item.key,
+              substitution_group: configured.substitution_group || item.key,
+              asset_class: configured.asset_class || "unknown",
+            };
+          });
+          return applySolverParams({ benchmark_factors: factors });
         }
-        return { benchmark_profile: "cn_stock_core" };
+        if (cfg && cfg.template_id) {
+          return applySolverParams({
+            template_id: String(cfg.template_id),
+            template_version:
+              cfg.template_version == null
+                ? null
+                : Number(cfg.template_version),
+          });
+        }
+        const configuredFactors = clsFactorsFromConfig(cfg);
+        if (configuredFactors.length >= 2) {
+          return applySolverParams({ benchmark_factors: configuredFactors });
+        }
+        return { template_id: "cn_equity_size", template_version: 2 };
       }
       function renderClsFactorAvailability(out) {
         const rows = Array.isArray(out && out.items) ? out.items : [];
@@ -4706,6 +6496,7 @@
             : `<tr><td colspan="4" class="muted">暂无生效因子信息</td></tr>`);
       }
       async function checkClsFactorAvailability({ quiet = false } = {}) {
+        const cfg = syncClsConfigFromSelect();
         const start = String(($("start").value || "").trim() || "20110210");
         const end = String(($("end").value || "").trim() || todayYmd());
         const rollingWindow = Math.max(
@@ -4719,6 +6510,8 @@
           ),
         );
         const factorPayload = currentClsFactorPayload();
+        const availabilityPayload = clsAvailabilityPayload(factorPayload, cfg);
+        if (!quiet) setClsActionMsg("检查因子历史覆盖中...");
         const resp = await api("/analysis/off-fund/factor-availability", {
           method: "POST",
           body: JSON.stringify({
@@ -4727,7 +6520,7 @@
             benchmark_adjust: "hfq",
             rolling_window: rollingWindow,
             min_samples: minSamples,
-            ...factorPayload,
+            ...availabilityPayload,
           }),
         });
         const txt = await resp.text();
@@ -4742,13 +6535,17 @@
           );
           const total = Number((out.meta && out.meta.factor_count) || 0);
           const req = Number((out.meta && out.meta.required_days) || 0);
-          setMsg(`因子检查完成：充足 ${enough}/${total}，要求日数=${req}。`);
+          setClsActionMsg(
+            `因子检查完成：充足 ${enough}/${total}，要求日数=${req}。`,
+          );
         }
         return out;
       }
       async function runClassification() {
+        syncClsConfigFromSelect();
         const picked = pickedCodesInActiveGroup();
-        if (!picked.length) return setMsg("请先在候选池勾选至少1个基金。");
+        if (!picked.length)
+          return setClsActionMsg("请先在候选池勾选至少1个基金。");
         const start = String(($("start").value || "").trim() || "20110210");
         const end = String(($("end").value || "").trim() || todayYmd());
         const rollingWindow = Math.max(
@@ -4760,10 +6557,6 @@
           Math.floor(
             Number(String($("offClsMinSamples").value || "120").trim()),
           ),
-        );
-        const gap = Math.max(
-          0,
-          Math.min(1, Number(String($("offClsGap").value || "0.08").trim())),
         );
         const adjust = String(($("adjust").value || "hfq").trim() || "hfq");
         const innerMode = String(
@@ -4799,6 +6592,51 @@
             ).trim(),
           ),
         );
+        const investModeRaw = String(
+          (
+            ($("offInvestMode") && $("offInvestMode").value) ||
+            "lump_sum"
+          ).trim(),
+        ).toLowerCase();
+        const dcaEnabled = investModeRaw === "dca";
+        let dcaBaseAmount = Number(
+          (
+            ($("offDcaBaseAmount") && $("offDcaBaseAmount").value) ||
+            "100000"
+          ).trim(),
+        );
+        let dcaPeriodicAmount = Number(
+          (
+            ($("offDcaPeriodicAmount") && $("offDcaPeriodicAmount").value) ||
+            "10000"
+          ).trim(),
+        );
+        let dcaFrequency = String(
+          (
+            ($("offDcaFrequency") && $("offDcaFrequency").value) ||
+            "monthly"
+          ).trim(),
+        ).toLowerCase();
+        let dcaWeeklyWeekday = Number(
+          (
+            ($("offDcaWeeklyWeekday") && $("offDcaWeeklyWeekday").value) ||
+            "1"
+          ).trim(),
+        );
+        let dcaMonthlyDay = Number(
+          (
+            ($("offDcaMonthlyDay") && $("offDcaMonthlyDay").value) ||
+            "1"
+          ).trim(),
+        );
+        const dcaNonTradingShift = "next";
+        if (!dcaEnabled) {
+          dcaBaseAmount = 100000.0;
+          dcaPeriodicAmount = 10000.0;
+          dcaFrequency = "monthly";
+          dcaWeeklyWeekday = 1;
+          dcaMonthlyDay = 1;
+        }
         const currentBacktestSig = _buildOffClsBacktestSignature({
           picked,
           start,
@@ -4810,6 +6648,13 @@
           driftRebalanceEnabled,
           driftAbsThreshold,
           driftRelThreshold,
+          investMode: dcaEnabled ? "dca" : "lump_sum",
+          dcaBaseAmount,
+          dcaPeriodicAmount,
+          dcaFrequency,
+          dcaWeeklyWeekday,
+          dcaMonthlyDay,
+          dcaNonTradingShift,
           assetGroupsText: String(
             ($("assetGroups") && $("assetGroups").value) || "",
           ),
@@ -4869,23 +6714,20 @@
             0,
         );
         if (enoughFactors < 2) {
-          offPairSignalDegradedState = false;
+          offPairSignalDegradedState = true;
           offPairFactorEtfByKey = _extractOffFundFactorEtfMap(
             (factorAvail && factorAvail.items) || [],
           );
           scheduleRenderAllOffFundPairCards(10, {
             snapshot: { start, end },
-            signalDegraded: false,
+            signalDegraded: true,
           });
-          return setMsg(
-            "可用因子不足（<2）。请先调整因子配置或补齐因子历史数据后再运行回归。",
-          );
         }
         const factorPayload = currentClsFactorPayload();
-        setMsg("运行基金分类回归中...");
+        setClsActionMsg("运行可投资复制归因中...");
         let out = {};
         try {
-          const resp = await api("/analysis/off-fund/classify", {
+          const resp = await api("/analysis/off-fund/replicate", {
             method: "POST",
             body: JSON.stringify({
               codes: picked,
@@ -4896,8 +6738,11 @@
               ...factorPayload,
               rolling_window: rollingWindow,
               min_samples: minSamples,
-              dominance_gap: gap,
-              include_exposure_series: true,
+              drop_short_history_factors: !!(
+                $("offClsDropShortHistory") &&
+                $("offClsDropShortHistory").checked
+              ),
+              include_weight_series: true,
               max_series_points: 2000,
               include_portfolio: portfolioEnabled,
               portfolio_code: "__PORTFOLIO__",
@@ -4906,10 +6751,57 @@
             }),
           });
           const txt = await resp.text();
-          if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+          if (!resp.ok) {
+            let errorPayload = null;
+            try {
+              errorPayload = txt ? JSON.parse(txt) : null;
+            } catch (_) {
+              errorPayload = null;
+            }
+            const detail =
+              errorPayload &&
+              errorPayload.detail &&
+              typeof errorPayload.detail === "object"
+                ? errorPayload.detail
+                : errorPayload;
+            if (
+              resp.status === 503 &&
+              detail &&
+              detail.error === "computation_budget_exceeded"
+            ) {
+              const maxTargets = Number(detail.max_targets || 0);
+              const maxFactors = Number(detail.max_factors || 0);
+              if (maxTargets > 0) {
+                throw new Error(
+                  `目标数量超过同步预算（最多 ${maxTargets} 个，含组合净值）。请减少勾选基金或关闭“包含组合净值归因”。`,
+                );
+              }
+              if (maxFactors > 0) {
+                throw new Error(
+                  `因子数量超过同步预算（最多 ${maxFactors} 个）。请换用更精简的复制模板。`,
+                );
+              }
+              throw new Error(
+                "计算量超过同步预算，请缩短日期区间或减少基金/因子数量后重试。",
+              );
+            }
+            throw new Error(txt || `HTTP ${resp.status}`);
+          }
           out = txt ? JSON.parse(txt) : {};
-          if (!out || out.ok !== true)
-            throw new Error((out && out.error) || "分类回归失败");
+          const renderableReplicationErrors = new Set([
+            "coverage_conflict",
+            "partial_failure",
+            "computation_budget_exceeded",
+          ]);
+          if (
+            !out ||
+            (out.ok !== true &&
+              !(
+                renderableReplicationErrors.has(String(out.error || "")) &&
+                Array.isArray(out.items)
+              ))
+          )
+            throw new Error((out && out.error) || "复制归因失败");
         } catch (e) {
           offPairSignalDegradedState = true;
           offPairFactorEtfByKey = {};
@@ -4920,21 +6812,29 @@
           throw e;
         }
         offPairSignalDegradedState = false;
-        renderClsActiveFactors(out.factors || []);
-        offPairFactorEtfByKey = _extractOffFundFactorEtfMap(out.factors || []);
+        const portfolioFactorRow = (
+          Array.isArray(out.items) ? out.items : []
+        ).find((item) => _isOffClsPortfolioRow(item));
+        const displayFactors =
+          portfolioFactorRow &&
+          Array.isArray(portfolioFactorRow.selected_factors)
+            ? portfolioFactorRow.selected_factors
+            : out.factors || [];
+        renderClsActiveFactors(displayFactors);
+        offPairFactorEtfByKey = _extractOffFundFactorEtfMap(displayFactors);
         scheduleRenderAllOffFundPairCards(10, {
           snapshot: { start, end },
           signalDegraded: false,
         });
         const factorLabelByKey = {};
-        for (const f of Array.isArray(out.factors) ? out.factors : []) {
+        for (const f of Array.isArray(displayFactors) ? displayFactors : []) {
           const key = String((f && f.key) || "").trim();
           if (!key) continue;
           factorLabelByKey[key] = String((f && f.label) || key);
         }
         const rows = Array.isArray(out.items) ? out.items : [];
         $("offClsTable").innerHTML =
-          `<tr><th>代码</th><th>名称</th><th>分类标签</th><th>置信度</th><th>平均R²</th><th>最新R²</th><th>主导暴露(全部成分)</th><th>状态/告警</th></tr>` +
+          `<tr><th>代码</th><th>名称</th><th>复制权重（含现金）</th><th>组权重</th><th>OOS年化TE</th><th>年化残差漂移</th><th>有效区间</th><th>状态/告警</th></tr>` +
           (rows.length
             ? rows
                 .map((x) => {
@@ -4945,20 +6845,93 @@
                     x.status === "ok"
                       ? warn || "ok"
                       : `${String(x.status || "-")}${warn ? ` | ${warn}` : ""}`;
-                  return `<tr><td>${esc(x.code || "-")}</td><td>${esc(x.name || "-")}</td><td>${esc(x.label || "-")}</td><td>${esc(x.confidence || "-")}</td><td>${fmtNum(x.avg_r2, 4)}</td><td>${fmtNum(x.latest_r2, 4)}</td><td>${summarizeExposure(x.avg_exposures || {}, factorLabelByKey)}</td><td>${esc(statusTxt)}</td></tr>`;
+                  const metrics = x.oos_metrics || {};
+                  const activeRange =
+                    x.effective_start && x.effective_end
+                      ? `请求 ${start} ~ ${end}；有效 ${x.effective_start} ~ ${x.effective_end}`
+                      : `请求 ${start} ~ ${end}；有效 -`;
+                  return `<tr><td>${esc(x.code || "-")}</td><td>${esc(x.name || "-")}</td><td>${summarizeReplicationWeights(x.asset_weights || {}, x.cash_weight, factorLabelByKey)}</td><td>${summarizeExposure(x.group_weights || {}, {})}</td><td>${fmtPct(metrics.tracking_error_annualized)}</td><td>${fmtPct(metrics.residual_drift_annualized)}</td><td>${esc(activeRange)}</td><td>${esc(statusTxt)}</td></tr>`;
                 })
                 .join("")
             : `<tr><td colspan="8" class="muted">暂无结果</td></tr>`);
+        const diagnosticRow =
+          rows.find(
+            (row) =>
+              _isOffClsPortfolioRow(row) &&
+              row.identifiability &&
+              row.identifiability.group_weight_intervals,
+          ) ||
+          rows.find(
+            (row) =>
+              row.identifiability && row.identifiability.group_weight_intervals,
+          ) ||
+          null;
+        const diagnosticEl = $("offClsDiagnostics");
+        if (diagnosticEl) {
+          if (!diagnosticRow) {
+            diagnosticEl.innerHTML = "";
+          } else {
+            const intervals = Object.entries(
+              diagnosticRow.identifiability.group_weight_intervals || {},
+            )
+              .map(
+                ([group, bounds]) =>
+                  `${esc(group)}:[${fmtPct(bounds.lower)}, ${fmtPct(bounds.upper)}]`,
+              )
+              .join("；");
+            const sensitivity = (
+              Array.isArray(diagnosticRow.factor_sensitivity)
+                ? diagnosticRow.factor_sensitivity
+                : []
+            )
+              .filter(
+                (item) =>
+                  item &&
+                  (item.status === "ok" ||
+                    item.status === "unstable_redundancy"),
+              )
+              .map(
+                (item) =>
+                  `移除${esc(item.removed_factor || item.removed_unit)}:组距离${fmtPct(item.group_weight_distance)}`,
+              )
+              .join("；");
+            diagnosticEl.innerHTML =
+              `最新窗可识别区间（非置信区间）：${intervals || "-"}。` +
+              ` 因子敏感性：${sensitivity || "-"}。`;
+          }
+        }
+        const exposureRows = rows.map((row) => ({
+          ...row,
+          exposure_series: _replicationWeightPointsFromWeightSeries(
+            Array.isArray(row.weight_series) ? row.weight_series : [],
+          ),
+        }));
         renderClsExposurePanel(
-          rows,
+          exposureRows,
           factorLabelByKey,
-          (Array.isArray(out.factors) ? out.factors : [])
-            .map((f) => String((f && f.key) || "").trim())
-            .filter(Boolean),
+          [
+            ...(Array.isArray(out.factors) ? out.factors : [])
+              .map((f) => String((f && f.key) || "").trim())
+              .filter(Boolean),
+            "cash",
+          ],
+          true,
         );
         const okN = rows.filter((x) => String(x.status || "") === "ok").length;
-        setMsg(
-          `分类回归完成：请求${picked.length}只${portfolioEnabled ? " + 组合净值" : ""}，成功${okN}只，失败/未分类${rows.length - okN}只。` +
+        const conflictN = rows.filter(
+          (x) => String(x.status || "") === "coverage_conflict",
+        ).length;
+        const budgetN = rows.filter(
+          (x) => String(x.status || "") === "computation_budget_exceeded",
+        ).length;
+        setClsActionMsg(
+          `复制归因完成：请求${picked.length}只${portfolioEnabled ? " + 组合净值" : ""}，成功${okN}只，失败${rows.length - okN}只。` +
+            (conflictN
+              ? ` 其中${conflictN}项存在历史覆盖冲突，可勾选“允许剔除导致历史缩短的因子”后重试。`
+              : "") +
+            (budgetN
+              ? ` 其中${budgetN}项超过滚动窗口预算，请缩短日期区间或增大滚动窗口。`
+              : "") +
             (includePortfolio && !portfolioEnabled
               ? `（组合净值未启用：${
                   portfolioCtxReady
@@ -5003,6 +6976,83 @@
             ).trim(),
           ),
         );
+        const investModeRaw = String(
+          (
+            ($("offInvestMode") && $("offInvestMode").value) ||
+            "lump_sum"
+          ).trim(),
+        ).toLowerCase();
+        const dcaEnabled = investModeRaw === "dca";
+        let dcaBaseAmount = Number(
+          (
+            ($("offDcaBaseAmount") && $("offDcaBaseAmount").value) ||
+            "100000"
+          ).trim(),
+        );
+        let dcaPeriodicAmount = Number(
+          (
+            ($("offDcaPeriodicAmount") && $("offDcaPeriodicAmount").value) ||
+            "10000"
+          ).trim(),
+        );
+        let dcaFrequency = String(
+          (
+            ($("offDcaFrequency") && $("offDcaFrequency").value) ||
+            "monthly"
+          ).trim(),
+        ).toLowerCase();
+        let dcaWeeklyWeekday = Number(
+          (
+            ($("offDcaWeeklyWeekday") && $("offDcaWeeklyWeekday").value) ||
+            "1"
+          ).trim(),
+        );
+        let dcaMonthlyDay = Number(
+          (
+            ($("offDcaMonthlyDay") && $("offDcaMonthlyDay").value) ||
+            "1"
+          ).trim(),
+        );
+        const dcaNonTradingShift = "next";
+        if (!dcaEnabled) {
+          dcaBaseAmount = 100000.0;
+          dcaPeriodicAmount = 10000.0;
+          dcaFrequency = "monthly";
+          dcaWeeklyWeekday = 1;
+          dcaMonthlyDay = 1;
+        } else {
+          if (!(Number.isFinite(dcaBaseAmount) && dcaBaseAmount >= 0))
+            return setMsg("定投底仓金额必须是大于等于0的数字。");
+          if (!(Number.isFinite(dcaPeriodicAmount) && dcaPeriodicAmount >= 0))
+            return setMsg("定投每期金额必须是大于等于0的数字。");
+          if (
+            dcaBaseAmount === 0 &&
+            (dcaPeriodicAmount === 0 || dcaFrequency === "none")
+          )
+            return setMsg("底仓为0时，每期金额必须大于0且频率不能为无追加。");
+          if (!["none", "daily", "weekly", "monthly"].includes(dcaFrequency))
+            return setMsg("定投频率仅支持 none/daily/weekly/monthly");
+          if (
+            dcaFrequency === "weekly" &&
+            !(
+              Number.isFinite(dcaWeeklyWeekday) &&
+              Math.floor(dcaWeeklyWeekday) === dcaWeeklyWeekday &&
+              dcaWeeklyWeekday >= 1 &&
+              dcaWeeklyWeekday <= 5
+            )
+          )
+            return setMsg("周投日期仅支持周一到周五（1~5）。");
+          if (
+            dcaFrequency === "monthly" &&
+            !(
+              Number.isFinite(dcaMonthlyDay) &&
+              Math.floor(dcaMonthlyDay) === dcaMonthlyDay &&
+              dcaMonthlyDay >= 1 &&
+              dcaMonthlyDay <= 28
+            )
+          )
+            return setMsg("月投日期仅支持 1~28。");
+        }
         const rpWindow = Math.max(
           20,
           Math.floor(Number(String($("rpWindow").value || "60").trim())),
@@ -5018,6 +7068,13 @@
           driftRebalanceEnabled,
           driftAbsThreshold,
           driftRelThreshold,
+          investMode: dcaEnabled ? "dca" : "lump_sum",
+          dcaBaseAmount,
+          dcaPeriodicAmount,
+          dcaFrequency,
+          dcaWeeklyWeekday,
+          dcaMonthlyDay,
+          dcaNonTradingShift,
           assetGroupsText: String(
             ($("assetGroups") && $("assetGroups").value) || "",
           ),
@@ -5178,13 +7235,26 @@
         const rsPort = rebalanceRes.returns;
         const m = metricsFromReturns(rsPort, Number.isFinite(rf) ? rf : 0.025);
         if (!m) return setMsg("回测失败：收益序列无效。");
+        const dcaPack = _computeOffDcaFromNav({
+          dates: datesRet,
+          nav: m.nav,
+          enabled: dcaEnabled,
+          baseAmount: dcaBaseAmount,
+          periodicAmount: dcaPeriodicAmount,
+          frequency: dcaFrequency,
+          weeklyWeekday: dcaWeeklyWeekday,
+          monthlyDay: dcaMonthlyDay,
+          nonTradingShift: dcaNonTradingShift,
+        });
         lastCtx = {
           picked: picked.slice(),
           retByCode,
           rsPort: rsPort.slice(),
           datesRet: datesRet.slice(),
           nav: m.nav.slice(),
+          dca: dcaPack,
           navByCode,
+          rebalanceCycle,
           backtestSig,
         };
 
@@ -5216,8 +7286,8 @@
           window.__offRegimeBound = true;
         }
         $("metricsTable").innerHTML =
-          `<tr><th>样本日</th><th>累计收益</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>最大回撤修复时长(日)</th><th>夏普</th><th>索提诺</th><th>卡玛</th><th>溃疡指标</th><th>溃疡绩效</th></tr>` +
-          `<tr><td>${m.sample_days}</td><td>${fmtPct(m.cumulative_return)}</td><td>${fmtPct(m.annualized_return)}</td><td>${fmtPct(m.annualized_volatility)}</td><td>${fmtPct(m.max_drawdown)}</td><td>${m.max_drawdown_recovery_days == null ? "未修复" : m.max_drawdown_recovery_days}</td><td>${fmtNum(m.sharpe_ratio, 3)}</td><td>${fmtNum(m.sortino_ratio, 3)}</td><td>${fmtNum(m.calmar_ratio, 3)}</td><td>${fmtNum(m.ulcer_index, 3)}</td><td>${fmtNum(m.ulcer_performance_index, 3)}</td></tr>`;
+          `<tr><th>样本日</th><th>累计收益</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>最大回撤修复时长(日)</th><th>夏普</th><th>索提诺</th><th>卡玛</th><th>溃疡指标</th><th>溃疡绩效</th><th>定投总投入</th><th>定投期末市值</th><th>定投累计收益</th><th>定投资金加权收益</th><th>定投资金加权年化</th><th>定投时间加权收益</th></tr>` +
+          `<tr><td>${m.sample_days}</td><td>${fmtPct(m.cumulative_return)}</td><td>${fmtPct(m.annualized_return)}</td><td>${fmtPct(m.annualized_volatility)}</td><td>${fmtPct(m.max_drawdown)}</td><td>${m.max_drawdown_recovery_days == null ? "未修复" : m.max_drawdown_recovery_days}</td><td>${fmtNum(m.sharpe_ratio, 3)}</td><td>${fmtNum(m.sortino_ratio, 3)}</td><td>${fmtNum(m.calmar_ratio, 3)}</td><td>${fmtNum(m.ulcer_index, 3)}</td><td>${fmtNum(m.ulcer_performance_index, 3)}</td><td>${dcaEnabled ? fmtNum(dcaPack.metrics.dca_total_invested, 2) : "-"}</td><td>${dcaEnabled ? fmtNum(dcaPack.metrics.dca_final_value, 2) : "-"}</td><td>${dcaEnabled ? fmtPct(dcaPack.metrics.dca_cumulative_return) : "-"}</td><td>${dcaEnabled ? fmtPct(dcaPack.metrics.dca_money_weighted_return) : "-"}</td><td>${dcaEnabled ? fmtPct(dcaPack.metrics.dca_money_weighted_annualized_return) : "-"}</td><td>${dcaEnabled ? fmtPct(dcaPack.metrics.dca_time_weighted_return) : "-"}</td></tr>`;
 
         const fwRows = Object.keys(finalW)
           .sort()
@@ -5329,9 +7399,107 @@
         const driftLabel = driftRebalanceEnabled
           ? `开启[min(${fmtPct(driftAbsThreshold)}, 目标×${fmtPct(driftRelThreshold)})]`
           : "关闭";
+        const investLabel = dcaEnabled
+          ? `定投(${dcaFrequency}, 底仓=${fmtNum(dcaBaseAmount, 2)}, 每期=${fmtNum(dcaPeriodicAmount, 2)})`
+          : "一次性买入";
         setMsg(
-          `完成：标的数=${picked.length}，共同样本=${datesRet.length}，组间权重=${gwTxt}，组内方法=${innerModeLabel}，周期再平衡=${rebalanceCycleLabel}（${rebalanceRes.periodic_rebalance_count}次），偏离再平衡=${driftLabel}（${rebalanceRes.drift_rebalance_count}次）。`,
+          `完成：标的数=${picked.length}，共同样本=${datesRet.length}，组间权重=${gwTxt}，组内方法=${innerModeLabel}，投入方式=${investLabel}，周期再平衡=${rebalanceCycleLabel}（${rebalanceRes.periodic_rebalance_count}次），偏离再平衡=${driftLabel}（${rebalanceRes.drift_rebalance_count}次）。`,
         );
+      }
+
+      async function runOffMc() {
+        if (
+          !lastCtx ||
+          !Array.isArray(lastCtx.datesRet) ||
+          !Array.isArray(lastCtx.nav) ||
+          lastCtx.datesRet.length !== lastCtx.nav.length ||
+          lastCtx.datesRet.length < 2
+        ) {
+          return setMsg("请先运行一次场外基金持有策略回测，再运行蒙特卡洛。");
+        }
+        const n_sims = Number(
+          (($("offMcN") && $("offMcN").value) || "2000").trim(),
+        );
+        const block_size = Number(
+          (($("offMcBlock") && $("offMcBlock").value) || "20").trim(),
+        );
+        const winRaw = String(
+          ($("offMcWindow") && $("offMcWindow").value) || "",
+        ).trim();
+        const sample_window_days = winRaw === "" ? null : Number(winRaw);
+        if (sample_window_days != null && !Number.isFinite(sample_window_days))
+          return setMsg("滚动窗口必须是整数交易日，例如 2520");
+        if (!Number.isFinite(n_sims) || n_sims < 50 || n_sims > 50000)
+          return setMsg("模拟次数需在[50,50000]区间");
+        if (!Number.isFinite(block_size) || block_size < 1 || block_size > 252)
+          return setMsg("区块长度需在[1,252]区间");
+        const seedRaw = String(
+          ($("offMcSeed") && $("offMcSeed").value) || "",
+        ).trim();
+        const seed = seedRaw === "" ? null : Number(seedRaw);
+        if (seed != null && !Number.isFinite(seed))
+          return setMsg("随机种子需为数字，或留空");
+        const fitRaw = String(
+          ($("offMcFitCandidates") && $("offMcFitCandidates").value) || "",
+        ).trim();
+        const fit_candidates = fitRaw
+          ? fitRaw
+              .split(",")
+              .map((x) => String(x || "").trim())
+              .filter((x) => !!x)
+          : ["normal", "t", "skew_t", "ged", "lognorm"];
+        const portfolio_nav_series = [];
+        for (let i = 0; i < lastCtx.datesRet.length; i += 1) {
+          const d = String(lastCtx.datesRet[i] || "").trim();
+          const nav = Number(lastCtx.nav[i]);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+          if (!Number.isFinite(nav) || nav <= 0) continue;
+          portfolio_nav_series.push({ trade_date: d, nav });
+        }
+        if (portfolio_nav_series.length < 2) {
+          return setMsg("组合净值样本不足，无法运行蒙特卡洛。");
+        }
+        await ensurePlotlyLoaded();
+        setMsg("场外基金蒙特卡洛计算中...");
+        const rebalance_cycle = String(
+          lastCtx.rebalanceCycle ||
+            ($("rebalanceCycle") && $("rebalanceCycle").value) ||
+            "daily",
+        ).trim();
+        const resp = await api("/analysis/off-fund/montecarlo", {
+          method: "POST",
+          body: JSON.stringify({
+            portfolio_nav_series,
+            rebalance_cycle,
+            n_sims,
+            block_size,
+            seed,
+            sample_window_days,
+            fit_candidates,
+            fit_rule: "bic_ks",
+            fit_ks_alpha: 0.05,
+          }),
+        });
+        const txt = await resp.text();
+        if (!resp.ok) return setMsg(txt || `HTTP ${resp.status}`);
+        const out = txt ? JSON.parse(txt) : {};
+        lastOffMc = out && out.mc ? out.mc : null;
+        renderOffMcTable(lastOffMc);
+        const metric = String(
+          (
+            ($("offMcMetric") && $("offMcMetric").value) ||
+            "annualized_return"
+          ).trim(),
+        );
+        plotOffMcHist(lastOffMc, metric);
+        renderOffMcFit(lastOffMc, metric);
+        const reportEl = $("offMcReport");
+        if (reportEl) {
+          reportEl.innerHTML = _offMcReportLines(lastOffMc)
+            .map((x) => `<div>${esc(x)}</div>`)
+            .join("");
+        }
+        setMsg("场外基金蒙特卡洛完成。");
       }
 
       document.addEventListener("click", (e) => {
@@ -5481,6 +7649,16 @@
         "driftRebalanceEnabled",
         "driftAbsThreshold",
         "driftRelThreshold",
+        "offInvestMode",
+        "offDcaBaseAmount",
+        "offDcaFrequency",
+        "offDcaWeeklyWeekday",
+        "offDcaMonthlyDay",
+        "offDcaPeriodicAmount",
+        "offClsWindow",
+        "offClsMinSamples",
+        "offClsIncludePortfolio",
+        "offClsDropShortHistory",
       ]) {
         const el = $(id);
         if (!el) continue;
@@ -5607,6 +7785,7 @@
       refreshClsFactorInputState();
       $("offClsCfgSelect").addEventListener("change", () => {
         const name = String($("offClsCfgSelect").value || "").trim();
+        saveClsConfigNameLocal(name);
         const cfg = getClsConfigByName(name);
         $("offClsCfgName").value = name;
         if (cfg) applyClsConfigToUi(cfg);
@@ -5623,12 +7802,34 @@
       );
       $("offClsCfgDelete").addEventListener("click", () =>
         deleteClsConfigFromSelect().catch((e) =>
-          setMsg(String((e && e.message) || e)),
+          setClsActionMsg(String((e && e.message) || e)),
         ),
       );
       $("offClsFactorMode").addEventListener("change", () => {
+        offClsCustomExplicitlyEdited = true;
         refreshClsFactorInputState();
+        refreshClsConfigActionState(getCurrentClsConfig());
       });
+      $("offClsFactors").addEventListener("input", () => {
+        offClsCustomExplicitlyEdited = true;
+      });
+      if ($("offClsPairBenchmarkMarket")) {
+        $("offClsPairBenchmarkMarket").addEventListener("change", () => {
+          applyOffFundPairBenchmarkMarket(
+            $("offClsPairBenchmarkMarket").value,
+            { saveLocal: true },
+          );
+          scheduleSaveOffParamState(120);
+          scheduleRenderAllOffFundPairCards(20);
+        });
+      }
+      if ($("offClsPairGlobalBase")) {
+        $("offClsPairGlobalBase").addEventListener("change", () => {
+          applyOffFundPairGlobalBaseToAll($("offClsPairGlobalBase").value, {
+            saveLocal: true,
+          });
+        });
+      }
       $("offClsUseDefault").addEventListener("click", () => {
         const selectedName = String(
           ($("offClsCfgSelect") && $("offClsCfgSelect").value) || "",
@@ -5649,18 +7850,44 @@
       });
       $("offClsCheckFactors").addEventListener("click", () =>
         checkClsFactorAvailability().catch((e) =>
-          setMsg(String((e && e.message) || e)),
+          setClsActionMsg(String((e && e.message) || e)),
         ),
       );
       $("run").addEventListener("click", () =>
         runBacktest().catch((e) => setMsg(String((e && e.message) || e))),
       );
+      if ($("offInvestMode"))
+        $("offInvestMode").addEventListener("change", () => {
+          updateOffDcaUi();
+          scheduleSaveOffParamState(120);
+        });
+      if ($("offDcaFrequency"))
+        $("offDcaFrequency").addEventListener("change", () => {
+          updateOffDcaUi();
+          scheduleSaveOffParamState(120);
+        });
+      if ($("runOffMc"))
+        $("runOffMc").addEventListener("click", () =>
+          runOffMc().catch((e) => setMsg(String((e && e.message) || e))),
+        );
       $("runCls").addEventListener("click", () =>
-        runClassification().catch((e) => setMsg(String((e && e.message) || e))),
+        runClassification().catch((e) =>
+          setClsActionMsg(String((e && e.message) || e)),
+        ),
       );
+      if ($("offMcMetric"))
+        $("offMcMetric").addEventListener("change", () => {
+          if (!lastOffMc) return;
+          const metric = String(
+            (($("offMcMetric") && $("offMcMetric").value) || "").trim(),
+          );
+          plotOffMcHist(lastOffMc, metric);
+          renderOffMcFit(lastOffMc, metric);
+        });
       $("offClsExposureCode").addEventListener("change", () => {
         const code = String(($("offClsExposureCode").value || "").trim() || "");
         offClsExposureSelectedCode = code;
+        _renderClsReplicationNavChartByCode(code);
         _renderClsExposureChartByCode(code);
         _renderClsFundTechChartByCode(code);
       });
@@ -5668,17 +7895,20 @@
         offClsExposureRangeKey = String(
           ($("offClsExposureRange").value || "all").trim() || "all",
         ).toLowerCase();
+        _renderClsReplicationNavChartByCode(offClsExposureSelectedCode);
         _renderClsExposureChartByCode(offClsExposureSelectedCode);
         _renderClsFundTechChartByCode(offClsExposureSelectedCode);
       });
       offClsExposureRangeKey = String(
         ($("offClsExposureRange").value || "all").trim() || "all",
       ).toLowerCase();
-      _clearClsExposurePanel("请先运行基金分类回归。");
-      _clearClsFundTechPanel("请先运行基金分类回归。");
+      _clearClsExposurePanel("请先运行基金复制归因。");
+      _clearClsReplicationNavPanel("请先运行基金复制归因。");
+      _clearClsFundTechPanel("请先运行基金复制归因。");
       window.addEventListener("momentum-theme-change", () => {
         scheduleRenderAllOffFundPairCards(30);
         if (offClsExposureSelectedCode) {
+          _renderClsReplicationNavChartByCode(offClsExposureSelectedCode);
           _renderClsExposureChartByCode(offClsExposureSelectedCode);
           _renderClsFundTechChartByCode(offClsExposureSelectedCode);
         }
@@ -5699,7 +7929,14 @@
           });
         }
       });
-      offPairPrefsByCard = loadOffFundPairPrefsLocal();
+      {
+        const localPairState = loadOffFundPairPrefsLocal();
+        offPairPrefsByCard = localPairState.pairPrefs;
+        offPairGlobalBase = localPairState.globalBase;
+        applyOffFundPairBenchmarkMarket(localPairState.benchmarkMarket, {
+          saveLocal: false,
+        });
+      }
       renderOffFundPairCardShell();
       loadOffFundPairUniverseFromBackend()
         .then(() => {
@@ -5714,6 +7951,7 @@
       wireOffPeriodControls("monthly");
       wireOffPeriodControls("quarterly");
       wireOffPeriodControls("yearly");
+      updateOffDcaUi();
       hydrateStateFromStorage();
       loadOffParamStateFromBackend().catch((e) =>
         setMsg(`参数状态加载失败：${String((e && e.message) || e)}`),

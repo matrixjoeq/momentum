@@ -46,7 +46,7 @@ def test_api_baseline_montecarlo_smoke(api_client):
             "sample_window_days": 2,
         },
     )
-    assert data["meta"]["type"] == "baseline"
+    assert data["meta"]["type"] == "holding_strategy"
     assert "mc" in data and "metrics" in data["mc"]
     assert "annualized_return" in data["mc"]["metrics"]
 

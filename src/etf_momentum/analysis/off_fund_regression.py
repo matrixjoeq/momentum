@@ -17,54 +17,54 @@ class RegressionFactorSpec:
 
 DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
     RegressionFactorSpec(
+        key="CSI_A500",
+        label="中证A500",
+        aliases=("022459", "563360", "000510"),
+    ),
+    RegressionFactorSpec(
         key="CSI300",
         label="沪深300",
-        aliases=("000300", "510300"),
+        aliases=("110020", "510300", "000300"),
     ),
     RegressionFactorSpec(
         key="CSI500",
         label="中证500",
-        aliases=("000905", "510500"),
+        aliases=("160119", "510500", "000905"),
+    ),
+    RegressionFactorSpec(
+        key="CSI800",
+        label="中证800",
+        aliases=("001588", "515800", "000906"),
     ),
     RegressionFactorSpec(
         key="CSI1000",
         label="中证1000",
-        aliases=("000852", "512100"),
+        aliases=("011860", "512100", "000852"),
     ),
     RegressionFactorSpec(
         key="CSI2000",
         label="中证2000",
-        aliases=("932000", "563300"),
+        aliases=("019870", "563300", "932000"),
     ),
     RegressionFactorSpec(
         key="CNI2000",
         label="国证2000",
-        aliases=("399303", "159907"),
+        aliases=("270026", "159907"),
     ),
     RegressionFactorSpec(
         key="CYB",
         label="创业板指",
-        aliases=("399006", "159915"),
+        aliases=("110026", "159915"),
     ),
     RegressionFactorSpec(
         key="KCP50",
         label="科创50",
-        aliases=("000688", "588000"),
+        aliases=("011612", "588000"),
     ),
     RegressionFactorSpec(
         key="KCE50",
         label="科创创业50",
-        aliases=("931643", "159781"),
-    ),
-    RegressionFactorSpec(
-        key="CSIFCF",
-        label="中证全指自由现金流",
-        aliases=("932365", "159232"),
-    ),
-    RegressionFactorSpec(
-        key="CNI_FCF",
-        label="国证自由现金流",
-        aliases=("980092", "159201"),
+        aliases=("013304", "159781"),
     ),
     RegressionFactorSpec(
         key="SHHL",
@@ -74,17 +74,27 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
     RegressionFactorSpec(
         key="CSIHL",
         label="中证红利",
-        aliases=("000922", "515180"),
+        aliases=("009051", "515180"),
     ),
     RegressionFactorSpec(
         key="CSIHL_LOW_VOLATILITY",
         label="中证红利低波动",
-        aliases=("h30269", "512890"),
+        aliases=("005561", "512890"),
     ),
     RegressionFactorSpec(
-        key="CSIHL_QUALITY",
-        label="红利质量",
-        aliases=("931468", "159758"),
+        key="CSI_ALL_HL_QUALITY",
+        label="中证全指红利质量",
+        aliases=("932315", "159209"),
+    ),
+    RegressionFactorSpec(
+        key="CSIFCF",
+        label="中证全指自由现金流",
+        aliases=("932365", "159232"),
+    ),
+    RegressionFactorSpec(
+        key="CNI_FCF",
+        label="国证自由现金流",
+        aliases=("023917", "159201"),
     ),
     RegressionFactorSpec(
         key="CSI_300_GROWTH_INNOVATION",
@@ -109,12 +119,12 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
     RegressionFactorSpec(
         key="CNI_GROWTH_100",
         label="国证成长100",
-        aliases=("980080", "159259"),
+        aliases=("027858", "159259"),
     ),
     RegressionFactorSpec(
         key="CNI_VALUE_100",
         label="国证价值100",
-        aliases=("980081", "159263"),
+        aliases=("025497", "159263"),
     ),
     RegressionFactorSpec(
         key="CSI_ALL_ENERGY",
@@ -132,9 +142,9 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("000992", "159940"),
     ),
     RegressionFactorSpec(
-        key="CSI_ALL_ELECTRICITY",
-        label="中证全指电力公用事业",
-        aliases=("h30199", "159611"),
+        key="CSI_ALL_UTILITY",
+        label="中证全指公用事业",
+        aliases=("000995", "159301"),
     ),
     RegressionFactorSpec(
         key="CSI_ALL_CONSUMER",
@@ -162,69 +172,134 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("931160", "515880"),
     ),
     RegressionFactorSpec(
-        key="CSI_ALL_DEFENSE",
-        label="中证军工指数",
-        aliases=("399967", "512660"),
+        key="CSI_BANK",
+        label="中证银行",
+        aliases=("399986", "512800"),
     ),
     RegressionFactorSpec(
-        key="CSI_ALL_CONSTRUCTION_MACHINERY",
-        label="中证工程机械主题指数",
-        aliases=("931752", "560280"),
+        key="SSH_GOLD",
+        label="SSH黄金股",
+        aliases=("931238", "517520"),
+    ),
+    RegressionFactorSpec(
+        key="CS_BATTERY",
+        label="CS电池",
+        aliases=("931719", "159755"),
+    ),
+    RegressionFactorSpec(
+        key="CS_POWER_EQUIPMENT",
+        label="电网设备",
+        aliases=("931994", "159326"),
+    ),
+    RegressionFactorSpec(
+        key="CS_POWER",
+        label="电力",
+        aliases=("h30199", "159611"),
+    ),
+    RegressionFactorSpec(
+        key="CS_COAL",
+        label="中证煤炭",
+        aliases=("399998", "515220"),
+    ),
+    RegressionFactorSpec(
+        key="CS_SPECIALIZED_CHEMICAL",
+        label="细分化工",
+        aliases=("000813", "159870"),
+    ),
+    RegressionFactorSpec(
+        key="CS_LIVESTOCK",
+        label="中证畜牧",
+        aliases=("930707", "159865"),
+    ),
+    RegressionFactorSpec(
+        key="CS_WINE",
+        label="中证酒",
+        aliases=("399987", "512690"),
+    ),
+    RegressionFactorSpec(
+        key="KCP_SEMICONDUCTOR",
+        label="科创半导体",
+        aliases=("950125", "588170"),
+    ),
+    RegressionFactorSpec(
+        key="CS_ROBOT",
+        label="机器人",
+        aliases=("h30590", "562500"),
+    ),
+    RegressionFactorSpec(
+        key="CS_SATELLITE_COMMUNICATION",
+        label="卫星通信",
+        aliases=("980018", "159206"),
+    ),
+    RegressionFactorSpec(
+        key="CS_SOFTWARE",
+        label="软件指数",
+        aliases=("h30202", "159852"),
+    ),
+    RegressionFactorSpec(
+        key="CS_ANIME_GAME",
+        label="动漫游戏",
+        aliases=("930901", "159869"),
     ),
     RegressionFactorSpec(
         key="HSI",
         label="恒生指数",
-        aliases=("HSI", "159920"),
+        aliases=("000071", "159920"),
     ),
     RegressionFactorSpec(
         key="HSI_TECH",
-        label="港股科技",
-        aliases=("HSI_TECH", "513980"),
+        label="恒生科技",
+        aliases=("013127", "513130"),
     ),
     RegressionFactorSpec(
         key="HSI_DIVIDEND",
         label="港股红利",
-        aliases=("HSI_DIVIDEND", "513690"),
+        aliases=("018387", "513530"),
+    ),
+    RegressionFactorSpec(
+        key="HSI_SECURITIES",
+        label="香港证券",
+        aliases=("HSI_SECURITIES", "513090"),
+    ),
+    RegressionFactorSpec(
+        key="HSI_IT",
+        label="港股通信息技术",
+        aliases=("HSI_IT", "159131"),
+    ),
+    RegressionFactorSpec(
+        key="HSI_INNOVATIVE_PHARMA",
+        label="港股通创新药",
+        aliases=("HSI_INNOVATIVE_PHARMA", "513120"),
     ),
     RegressionFactorSpec(
         key="GOLD_SPOT",
         label="黄金现货",
-        aliases=("XAU", "518880"),
-    ),
-    RegressionFactorSpec(
-        key="SILVER_FUTURES",
-        label="白银期货",
-        aliases=("SI", "161226"),
+        aliases=("000216", "518880"),
     ),
     RegressionFactorSpec(
         key="METALS_FUTURES",
         label="有色金属期货",
-        aliases=("HG", "159980"),
-    ),
-    RegressionFactorSpec(
-        key="OIL_FUTURES",
-        label="原油期货",
-        aliases=("CL", "501018"),
+        aliases=("007910", "159980"),
     ),
     RegressionFactorSpec(
         key="ENERGY_CHEMICAL_FUTURES",
         label="能源化工期货",
-        aliases=("TA", "159981"),
+        aliases=("008827", "159981"),
     ),
     RegressionFactorSpec(
         key="SOYBEAN_MEAL_FUTURES",
         label="豆粕期货",
-        aliases=("M", "159985"),
+        aliases=("007937", "159985"),
     ),
     RegressionFactorSpec(
         key="SP500",
         label="标普500",
-        aliases=("SPY", "513500"),
+        aliases=("050025", "513500"),
     ),
     RegressionFactorSpec(
         key="NASDAQ100",
         label="纳斯达克100",
-        aliases=("QQQ", "513100"),
+        aliases=("160213", "513100"),
     ),
     RegressionFactorSpec(
         key="DOW_JONES_INDUSTRIAL_INDEX",
@@ -232,24 +307,49 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("DJI", "513400"),
     ),
     RegressionFactorSpec(
+        key="SP_OIL_GAS",
+        label="标普油气",
+        aliases=("SP_OIL_GAS", "159518"),
+    ),
+    RegressionFactorSpec(
+        key="SP_CONSUMER",
+        label="标普消费",
+        aliases=("SP_CONSUMER", "159529"),
+    ),
+    RegressionFactorSpec(
+        key="SP_BIOTECH",
+        label="标普生物科技",
+        aliases=("SP_BIOTECH", "159502"),
+    ),
+    RegressionFactorSpec(
+        key="NASDAQ_BIOTECH",
+        label="纳指生物科技",
+        aliases=("NASDAQ_BIOTECH", "513290"),
+    ),
+    RegressionFactorSpec(
+        key="CHINA_INTERNET",
+        label="中概互联",
+        aliases=("CHINA_INTERNET", "513050"),
+    ),
+    RegressionFactorSpec(
         key="DAX",
         label="德国DAX指数",
-        aliases=("DAX", "513030"),
+        aliases=("000614", "513030"),
     ),
     RegressionFactorSpec(
         key="CAC40",
         label="法国CAC40指数",
-        aliases=("CAC40", "513080"),
+        aliases=("021539", "513080"),
     ),
     RegressionFactorSpec(
         key="NIKKEI225",
         label="日经225指数",
-        aliases=("N225", "513520"),
+        aliases=("020712", "513520"),
     ),
     RegressionFactorSpec(
         key="TOPIX",
         label="日本东证指数",
-        aliases=("TOPIX", "513800"),
+        aliases=("007280", "513800"),
     ),
     RegressionFactorSpec(
         key="CSI_CONVERTIBLE_BOND",
@@ -257,9 +357,14 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("931078", "511380"),
     ),
     RegressionFactorSpec(
+        key="SH_CONVERTIBLE_BOND",
+        label="上证可转债",
+        aliases=("950041", "511180"),
+    ),
+    RegressionFactorSpec(
         key="0-3Y_GOV_BOND",
         label="0-3年期国债/政金债",
-        aliases=("0-3Y_GOV_BOND", "511580"),
+        aliases=("007364", "511580"),
     ),
     RegressionFactorSpec(
         key="7Y_GOV_BOND",
@@ -267,14 +372,19 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("7Y_GOV_BOND", "511520"),
     ),
     RegressionFactorSpec(
+        key="3Y_GOV_BOND",
+        label="3年国债",
+        aliases=("007169", "511160"),
+    ),
+    RegressionFactorSpec(
         key="5Y_GOV_BOND",
         label="5年国债",
-        aliases=("5Y_GOV_BOND", "511010"),
+        aliases=("007171", "511010"),
     ),
     RegressionFactorSpec(
         key="10Y_GOV_BOND",
         label="10年国债",
-        aliases=("10Y_GOV_BOND", "511260"),
+        aliases=("003376", "511260"),
     ),
     RegressionFactorSpec(
         key="30Y_GOV_BOND",
@@ -284,32 +394,32 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
     RegressionFactorSpec(
         key="4Y_LOCAL_DEBT",
         label="4年地方债",
-        aliases=("4Y_LOCAL_DEBT", "159816"),
+        aliases=("931161", "159816"),
     ),
     RegressionFactorSpec(
         key="5Y_LOCAL_DEBT",
         label="5年地方债",
-        aliases=("5Y_LOCAL_DEBT", "511060"),
+        aliases=("930865", "511060"),
     ),
     RegressionFactorSpec(
         key="10Y_LOCAL_DEBT",
         label="10年地方债",
-        aliases=("10Y_LOCAL_DEBT", "511270"),
+        aliases=("950109", "511270"),
     ),
     RegressionFactorSpec(
         key="CITY_DEBT",
         label="城投债",
-        aliases=("CITY_DEBT", "511220"),
+        aliases=("h11098", "511220"),
     ),
     RegressionFactorSpec(
         key="SH_COMPANY_BOND",
         label="上证公司债",
-        aliases=("SH_COMPANY_BOND", "511110"),
+        aliases=("950245", "511110"),
     ),
     RegressionFactorSpec(
         key="SZ_COMPANY_BOND",
         label="深证公司债",
-        aliases=("SZ_COMPANY_BOND", "159396"),
+        aliases=("921128", "159397"),
     ),
     RegressionFactorSpec(
         key="BOND_SPREAD",
@@ -317,19 +427,29 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("BOND_SPREAD", "511030"),
     ),
     RegressionFactorSpec(
+        key="CSI_SCIENCE_INNOVATION_BOND",
+        label="中证科创债",
+        aliases=("932160", "159600"),
+    ),
+    RegressionFactorSpec(
+        key="SH_SCIENCE_INNOVATION_BOND",
+        label="上证科创债",
+        aliases=("950167", "511120"),
+    ),
+    RegressionFactorSpec(
+        key="SZ_SCIENCE_INNOVATION_BOND",
+        label="深证科创债",
+        aliases=("921130", "159400"),
+    ),
+    RegressionFactorSpec(
         key="SHORT_BOND",
         label="短融",
-        aliases=("SHORT_BOND", "511360"),
+        aliases=("h11014", "511360"),
     ),
     RegressionFactorSpec(
         key="MONEY_MARKET_FUND",
         label="货币基金",
         aliases=("MONEY_MARKET_FUND", "511880"),
-    ),
-    RegressionFactorSpec(
-        key="USD_BOND",
-        label="美元债",
-        aliases=("USD_BOND", "501300"),
     ),
 )
 
@@ -417,9 +537,9 @@ def choose_factor_series(
     def _common_days(keys: list[str]) -> int:
         if not keys:
             return 0
-        idx = fac_ret[keys[0]].index
+        idx = fac_ret[keys[0]].dropna().index
         for key in keys[1:]:
-            idx = idx.intersection(fac_ret[key].index)
+            idx = idx.intersection(fac_ret[key].dropna().index)
         return int(idx.shape[0])
 
     current_common = _common_days(active_keys)
@@ -571,9 +691,9 @@ def classify_fund_by_regression(
     )
     ret_fund = nav_to_returns(fund_nav_clean)
     fac_ret = factor_close_df.apply(nav_to_returns)
-    common = ret_fund.index
+    common = ret_fund.dropna().index
     for c in fac_ret.columns:
-        common = common.intersection(fac_ret[c].index)
+        common = common.intersection(fac_ret[c].dropna().index)
     common = common.sort_values()
     factor_keys = [str(c) for c in fac_ret.columns]
     required_days = max(int(min_samples), int(max(20, int(rolling_window)) // 2))

@@ -235,9 +235,52 @@
             <option value="daily">日投</option>
             <option value="weekly">周投</option>
             <option value="monthly" selected>月投</option>
-            <option value="quarterly">季投</option>
-            <option value="yearly">年投</option>
             <option value="none">仅底仓</option>
+          </select>
+          <select
+            id="baselineDcaWeeklyWeekday"
+            style="max-width: 150px; display: none"
+            title="周投日期（非交易日顺延下一交易日）"
+          >
+            <option value="1" selected>周一（默认）</option>
+            <option value="2">周二</option>
+            <option value="3">周三</option>
+            <option value="4">周四</option>
+            <option value="5">周五</option>
+          </select>
+          <select
+            id="baselineDcaMonthlyDay"
+            style="max-width: 170px; display: none"
+            title="月投日期（非交易日顺延下一交易日）"
+          >
+            <option value="1" selected>每月 1 日（默认）</option>
+            <option value="2">每月 2 日</option>
+            <option value="3">每月 3 日</option>
+            <option value="4">每月 4 日</option>
+            <option value="5">每月 5 日</option>
+            <option value="6">每月 6 日</option>
+            <option value="7">每月 7 日</option>
+            <option value="8">每月 8 日</option>
+            <option value="9">每月 9 日</option>
+            <option value="10">每月 10 日</option>
+            <option value="11">每月 11 日</option>
+            <option value="12">每月 12 日</option>
+            <option value="13">每月 13 日</option>
+            <option value="14">每月 14 日</option>
+            <option value="15">每月 15 日</option>
+            <option value="16">每月 16 日</option>
+            <option value="17">每月 17 日</option>
+            <option value="18">每月 18 日</option>
+            <option value="19">每月 19 日</option>
+            <option value="20">每月 20 日</option>
+            <option value="21">每月 21 日</option>
+            <option value="22">每月 22 日</option>
+            <option value="23">每月 23 日</option>
+            <option value="24">每月 24 日</option>
+            <option value="25">每月 25 日</option>
+            <option value="26">每月 26 日</option>
+            <option value="27">每月 27 日</option>
+            <option value="28">每月 28 日</option>
           </select>
           <input
             id="baselineDcaPeriodicAmount"
@@ -245,11 +288,26 @@
             placeholder="每期定投金额"
             style="max-width: 160px"
           />
+          <span id="baselineDcaScheduleHint" class="muted"
+            >周/月定投若遇非交易日，顺延至下一交易日</span
+          >
         </div>
       </div>
       <div>
         <label>ERC / 波动率倒数 估计窗口（交易日）</label>
         <input id="baselineRpWin" value="60" />
+      </div>
+      <div>
+        <label>CVaR窗口(&gt;=20)</label>
+        <input id="baselineCvarWindow" value="60" />
+      </div>
+      <div>
+        <label>CVaR预算%(0.1~10)</label>
+        <input id="baselineCvarBudgetPct" value="2" />
+      </div>
+      <div class="muted" style="max-width: 520px">
+        历史模拟 CVaR(95%)
+        按当前持仓权重回放资产日收益；超预算时仅建议降杠杆（shrink-only），收盘后提示下一交易日执行。短窗口尾部点很少，噪声更大。原策略净值不变，对照线为缩放后模拟。
       </div>
       <div
         id="baselineCustomWeightsWrap"
@@ -264,7 +322,7 @@
         <div class="muted">若总和不足 100%，剩余自动计为现金仓位。</div>
       </div>
       <div>
-        <label>基准标的（用于信息比率）</label>
+        <label>基准标的（用于信息比率，全候选池）</label>
         <select id="benchmark"></select>
       </div>
       <button id="run">运行分析</button>
@@ -452,6 +510,8 @@
         <div>
           <h3>持有策略指标</h3>
           <table id="metrics"></table>
+          <h3 style="margin-top: 14px">CVaR对照绩效</h3>
+          <table id="baselineCvarOverlayMetrics"></table>
           <div id="baselineReport" class="reportCard"></div>
         </div>
 
@@ -535,6 +595,20 @@
             </div>
           </div>
         </div>
+      </div>
+      <div style="margin-top: 12px">
+        <h3 style="margin-top: 0">当前持仓标的列表</h3>
+        <div
+          id="baselineCurrentHoldingsAsOf"
+          class="muted"
+          style="margin-bottom: 6px"
+        ></div>
+        <table id="baselineCurrentHoldingsTable" style="width: 100%"></table>
+        <div
+          id="baselineCvarPrompt"
+          class="muted"
+          style="margin-top: 8px; line-height: 1.6"
+        ></div>
       </div>
     </div>
 
@@ -1013,6 +1087,48 @@
           <h4 style="display: inline; margin: 0">各周期日历效应研究</h4>
         </summary>
         <div class="muted" style="margin-top: 10px">
+          周内极值出现概率（单标的，按自然周聚合）
+        </div>
+        <div class="muted" style="margin-top: 6px">
+          对每个交易周（周一至周五）分别统计：最高价、最低价、最高开盘价、最低开盘价、最高收盘价、最低收盘价落在周内某一天（周一～周五）的概率。若同一周内发生并列极值，会按并列天数等权分摊（例如两天并列最高价，各计
+          0.5）。
+        </div>
+        <div class="row no-print" style="margin-top: 8px; align-items: end">
+          <div>
+            <label>滚动窗口（周）</label>
+            <input
+              id="distWeekExtremaRollWeeks"
+              value="52"
+              style="min-width: 140px"
+            />
+          </div>
+          <div>
+            <label>滚动曲线指标</label>
+            <select id="distWeekExtremaMetric" style="min-width: 240px">
+              <option value="high_max" selected>周内最高价出现概率</option>
+              <option value="low_min">周内最低价出现概率</option>
+              <option value="open_max">周内最高开盘价出现概率</option>
+              <option value="open_min">周内最低开盘价出现概率</option>
+              <option value="close_max">周内最高收盘价出现概率</option>
+              <option value="close_min">周内最低收盘价出现概率</option>
+            </select>
+          </div>
+        </div>
+        <div
+          id="distWeekExtremaHint"
+          class="muted"
+          style="margin-top: 6px"
+        ></div>
+        <table id="distWeekExtremaTable" style="margin-top: 8px"></table>
+        <div
+          id="distWeekExtremaHeatmap"
+          style="width: 100%; height: 300px; margin-top: 8px"
+        ></div>
+        <div
+          id="distWeekExtremaRolling"
+          style="width: 100%; height: 320px; margin-top: 8px"
+        ></div>
+        <div class="muted" style="margin-top: 10px">
           周内日历效应（按交易日星期，日度收盘价收益率）
         </div>
         <div class="muted" style="margin-top: 6px">
@@ -1323,6 +1439,16 @@
       ></div>
       <table id="distGarchTable" style="margin-top: 8px"></table>
       <div class="muted" style="margin-top: 10px">
+        六模型横向对比（APARCH/EGARCH/GJR-GARCH × t/skew-t）
+      </div>
+      <label
+        style="display: flex; align-items: center; gap: 6px; margin: 6px 0 0"
+      >
+        <input id="distGarchModelCompareOn" type="checkbox" />
+        <span>计算并比对六个波动率模型（较慢，默认关闭）</span>
+      </label>
+      <table id="distGarchModelCompare" style="margin-top: 8px"></table>
+      <div class="muted" style="margin-top: 10px">
         GARCH 条件波动率分布（年化）与当前值分位
       </div>
       <div
@@ -1455,7 +1581,7 @@
     </div>
 
     <div class="panel">
-      <h3>蒙特卡洛模拟（等权组合）</h3>
+      <h3>蒙特卡洛模拟（持有策略）</h3>
       <div class="row">
         <div>
           <label>模拟次数</label>
@@ -1473,8 +1599,8 @@
           <label>随机种子(可空)</label>
           <input id="mcEwSeed" placeholder="如 42" />
         </div>
-        <button id="mcEwResetDefaults">恢复默认（等权MC）</button>
-        <button id="runMcEw">运行蒙特卡洛（等权）</button>
+        <button id="mcEwResetDefaults">恢复默认（持有MC）</button>
+        <button id="runMcEw">运行蒙特卡洛（持有）</button>
         <span id="runMcEwHint" class="muted"></span>
       </div>
       <table id="mcEwTable"></table>
@@ -5019,6 +5145,21 @@
           <label>风险预算最大杠杆倍数(1~10)</label>
           <input id="trendRiskBudgetMaxLeverage" value="2.0" />
         </div>
+        <div>
+          <label>CVaR风控</label>
+          <select id="trendCvarRiskMgmtEnable" style="min-width: 120px">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>CVaR窗口(&gt;=20)</label>
+          <input id="trendCvarWindow" value="60" />
+        </div>
+        <div>
+          <label>CVaR预算%(0.1~10)</label>
+          <input id="trendCvarBudgetPct" value="2" />
+        </div>
       </div>
       <div class="row" style="margin-top: 8px; align-items: end">
         <div>
@@ -5687,12 +5828,93 @@
       </details>
       <div id="trendStrategyDesc" class="muted" style="margin-top: 8px"></div>
       <div id="trendParamDesc" class="muted" style="margin-top: 6px"></div>
+      <div class="panel" style="margin-top: 10px">
+        <h3>蒙特卡洛模拟（趋势策略，独立触发）</h3>
+        <div class="row" style="align-items: end">
+          <div>
+            <label>模拟次数</label>
+            <input id="mcTrendN" value="2000" />
+          </div>
+          <div>
+            <label>区块长度(交易日)</label>
+            <input id="mcTrendBlock" value="20" />
+          </div>
+          <div>
+            <label>滚动窗口(交易日，可空)</label>
+            <input id="mcTrendWindow" placeholder="如 2520 表示近10年" />
+          </div>
+          <div>
+            <label>随机种子(可空)</label>
+            <input id="mcTrendSeed" placeholder="如 42" />
+          </div>
+          <div>
+            <label>候选分布(逗号分隔)</label>
+            <input
+              id="mcTrendFitCandidates"
+              value="normal,t,skew_t,ged,lognorm"
+            />
+          </div>
+          <button id="mcTrendResetDefaults">恢复默认（趋势MC）</button>
+          <button id="runMcTrend">运行蒙特卡洛（趋势）</button>
+          <span id="runMcTrendHint" class="muted"></span>
+        </div>
+        <div class="muted" style="margin-top: 6px">
+          说明：本区域仅触发蒙特卡洛模拟；策略参数（仓位、信号、风控、止盈止损等）沿用趋势策略原始设置。
+        </div>
+        <table id="mcTrendTable" style="margin-top: 8px"></table>
+        <div class="row" style="margin-top: 8px">
+          <label>直方图指标</label>
+          <select id="mcTrendMetric" style="min-width: 280px">
+            <option value="annualized_return" selected>年化收益率</option>
+            <option value="annualized_volatility">年化波动率</option>
+            <option value="max_drawdown">最大回撤</option>
+            <option value="sharpe_ratio">夏普比率</option>
+            <option value="calmar_ratio">卡玛比率</option>
+            <option value="sortino_ratio">索提诺比率</option>
+            <option value="ulcer_index">溃疡指标</option>
+            <option value="ulcer_performance">溃疡绩效</option>
+            <option value="rolling_recent_100_sqn_median">
+              滚动近100次SQN中位数
+            </option>
+          </select>
+        </div>
+        <div id="mcTrendHist" style="width: 100%; height: 420px"></div>
+        <div
+          class="two"
+          style="grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px"
+        >
+          <div>
+            <div class="muted">分布拟合结果（先KS通过，再按BIC排序）</div>
+            <table id="mcTrendFitTable"></table>
+          </div>
+          <div>
+            <div class="row" style="gap: 8px">
+              <label>Q-Q 分布</label>
+              <select id="mcTrendDist" style="min-width: 180px"></select>
+            </div>
+            <div id="mcTrendQQ" style="width: 100%; height: 420px"></div>
+          </div>
+        </div>
+        <div id="mcTrendReport" class="reportCard"></div>
+      </div>
       <div
         id="trendCapacityPanel"
         class="panel"
         style="margin-top: 10px; padding: 10px"
       >
         <div class="muted">策略容量估算将显示在这里。</div>
+      </div>
+      <div class="panel" style="margin-top: 10px">
+        <h3 style="margin: 0">组内EWMA相关性矩阵（60日，衰减因子=0.94）</h3>
+        <div
+          id="trendEwmaCorrLegend"
+          class="muted"
+          style="margin-top: 6px"
+        ></div>
+        <div
+          id="trendEwmaCorrHeatmap"
+          style="width: 100%; height: 520px; margin-top: 8px"
+        ></div>
       </div>
       <div
         class="panel two"
@@ -6398,9 +6620,18 @@
           <select id="calTimingSingleCode" style="min-width: 180px"></select>
         </div>
         <div>
-          <label>调仓日（决策日，自然日）</label>
+          <label>调仓日模式</label>
+          <select id="calTimingDecisionMode" style="min-width: 130px">
+            <option value="monthly" selected>按月</option>
+            <option value="weekly">按周</option>
+          </select>
+        </div>
+        <div>
+          <label>调仓日（决策日）</label>
           <input id="calTimingDecisionDay" value="1" />
-          <div class="muted">范围 [-28,28] 且不为0；负数表示倒数自然日。</div>
+          <div id="calTimingDecisionDayHint" class="muted">
+            按月：范围 [-28,28] 且不为0；负数表示倒数自然日。
+          </div>
         </div>
         <div>
           <label>持仓时长（交易日）</label>
@@ -6495,7 +6726,78 @@
         ></textarea>
       </details>
       <div class="muted" id="calTimingParamNote" style="margin-top: 8px">
-        说明：调仓日是“决策日”；仅生成下一交易日执行计划。持仓时长从执行日开始计数（与开盘/收盘成交口径无关）。
+        说明：调仓日是“决策日”；按月模式使用自然日锚点，按周模式使用周内交易日序锚点。仅生成下一交易日执行计划。持仓时长从执行日开始计数（与开盘/收盘成交口径无关）。
+      </div>
+      <div class="panel">
+        <h3>蒙特卡洛模拟（日历择时）</h3>
+        <div class="row">
+          <div>
+            <label>模拟次数</label>
+            <input id="mcCalN" value="2000" />
+          </div>
+          <div>
+            <label>区块长度(交易日)</label>
+            <input id="mcCalBlock" value="20" />
+          </div>
+          <div>
+            <label>滚动窗口(交易日，可空)</label>
+            <input id="mcCalWindow" placeholder="如 2520 表示近10年" />
+          </div>
+          <div>
+            <label>随机种子(可空)</label>
+            <input id="mcCalSeed" placeholder="如 42" />
+          </div>
+          <div>
+            <label>拟合候选(逗号分隔)</label>
+            <input
+              id="mcCalFitCandidates"
+              value="normal,t,skew_t,ged,lognorm"
+            />
+          </div>
+          <button id="mcCalResetDefaults">恢复默认（日历MC）</button>
+          <button id="runMcCal">运行蒙特卡洛（日历）</button>
+          <span id="runMcCalHint" class="muted"></span>
+        </div>
+        <table id="mcCalTable" style="margin-top: 8px"></table>
+        <div class="row" style="margin-top: 8px">
+          <label>直方图指标</label>
+          <select id="mcCalMetric" style="min-width: 280px">
+            <option value="cumulative_return">累积收益</option>
+            <option value="annualized_return">年化收益</option>
+            <option value="annualized_volatility">年化波动</option>
+            <option value="max_drawdown">最大回撤</option>
+            <option value="sharpe_ratio">夏普</option>
+            <option value="calmar_ratio">卡玛</option>
+            <option value="sortino_ratio">索提诺</option>
+            <option value="ulcer_index">溃疡指标</option>
+            <option value="ulcer_performance">溃疡绩效</option>
+            <option value="rolling_recent_100_sqn_median">
+              滚动近100次SQN中位数
+            </option>
+          </select>
+        </div>
+        <div id="mcCalHist" style="width: 100%; height: 420px"></div>
+        <div
+          class="two"
+          style="
+            grid-template-columns: 1fr 1fr;
+            align-items: start;
+            margin-top: 8px;
+          "
+        >
+          <div>
+            <div class="muted">分布拟合结果（按 BIC 排序）</div>
+            <table id="mcCalFitTable"></table>
+          </div>
+          <div>
+            <div class="row" style="gap: 8px">
+              <label>Q-Q 分布</label>
+              <select id="mcCalDist" style="min-width: 180px"></select>
+            </div>
+            <div id="mcCalQQ" style="width: 100%; height: 420px"></div>
+          </div>
+        </div>
+        <div id="mcCalReport" class="reportCard"></div>
       </div>
       <div
         class="panel two"
@@ -8188,8 +8490,12 @@
             "baselineInvestMode",
             "baselineDcaBaseAmount",
             "baselineDcaFrequency",
+            "baselineDcaWeeklyWeekday",
+            "baselineDcaMonthlyDay",
             "baselineDcaPeriodicAmount",
             "baselineRpWin",
+            "baselineCvarWindow",
+            "baselineCvarBudgetPct",
             "baselineCustomWeights",
             "benchmark",
             "baselineGroupPreset",
@@ -8245,8 +8551,12 @@
             "baselineInvestMode",
             "baselineDcaBaseAmount",
             "baselineDcaFrequency",
+            "baselineDcaWeeklyWeekday",
+            "baselineDcaMonthlyDay",
             "baselineDcaPeriodicAmount",
             "baselineRpWin",
+            "baselineCvarWindow",
+            "baselineCvarBudgetPct",
             "baselineCustomWeights",
             "benchmark",
             "baselineGroupPreset",
@@ -8312,7 +8622,9 @@
         trend: `${SETTINGS_NS}.trend`,
         calTiming: `${SETTINGS_NS}.calendar_timing`,
         mcEw: `${SETTINGS_NS}.mc_ew`,
+        mcCal: `${SETTINGS_NS}.mc_cal`,
         mcRot: `${SETTINGS_NS}.mc_rot`,
+        mcTrend: `${SETTINGS_NS}.mc_trend`,
         sim: `${SETTINGS_NS}.sim_gbm`,
       };
       const SETTINGS_FIELD_IDS = {
@@ -8325,8 +8637,12 @@
           "baselineInvestMode",
           "baselineDcaBaseAmount",
           "baselineDcaFrequency",
+          "baselineDcaWeeklyWeekday",
+          "baselineDcaMonthlyDay",
           "baselineDcaPeriodicAmount",
           "baselineRpWin",
+          "baselineCvarWindow",
+          "baselineCvarBudgetPct",
           "baselineCustomWeights",
           "benchmark",
           "baselineGroupPreset",
@@ -8353,6 +8669,7 @@
           "distEnd",
           "distFutureN",
           "distFutureFitOn",
+          "distGarchModelCompareOn",
           "distCalDay",
           "distCalMode",
           "distCalHoldN",
@@ -8361,6 +8678,8 @@
           "distCalShift",
           "distCalMetric",
           "distWkdaySelect",
+          "distWeekExtremaRollWeeks",
+          "distWeekExtremaMetric",
           "distMonthDomSelect",
           "distYearWeekSelect",
           "distYearMonthSelect",
@@ -8458,6 +8777,9 @@
           "trendFixedMaxHoldings",
           "trendRiskBudgetAtrWin",
           "trendRiskBudgetPct",
+          "trendCvarRiskMgmtEnable",
+          "trendCvarWindow",
+          "trendCvarBudgetPct",
           "trendRiskBudgetOvercapPolicy",
           "trendRiskBudgetRebalanceMode",
           "trendRiskBudgetMaxLeverage",
@@ -8564,6 +8886,7 @@
         calTiming: [
           "calTimingMode",
           "calTimingSingleCode",
+          "calTimingDecisionMode",
           "calTimingDecisionDay",
           "calTimingHoldDays",
           "calTimingPositionMode",
@@ -8577,7 +8900,21 @@
           "calTimingDailyRetMode",
         ],
         mcEw: ["mcEwN", "mcEwBlock", "mcEwWindow", "mcEwSeed"],
+        mcCal: [
+          "mcCalN",
+          "mcCalBlock",
+          "mcCalWindow",
+          "mcCalSeed",
+          "mcCalFitCandidates",
+        ],
         mcRot: ["mcRotN", "mcRotBlock", "mcRotWindow", "mcRotSeed"],
+        mcTrend: [
+          "mcTrendN",
+          "mcTrendBlock",
+          "mcTrendWindow",
+          "mcTrendSeed",
+          "mcTrendFitCandidates",
+        ],
         sim: [
           "simStart",
           "simEnd",
@@ -9067,8 +9404,16 @@
         );
         _settingsSave(SETTINGS_KEYS.mcEw, _readFields(SETTINGS_FIELD_IDS.mcEw));
         _settingsSave(
+          SETTINGS_KEYS.mcCal,
+          _readFields(SETTINGS_FIELD_IDS.mcCal),
+        );
+        _settingsSave(
           SETTINGS_KEYS.mcRot,
           _readFields(SETTINGS_FIELD_IDS.mcRot),
+        );
+        _settingsSave(
+          SETTINGS_KEYS.mcTrend,
+          _readFields(SETTINGS_FIELD_IDS.mcTrend),
         );
         _settingsSave(SETTINGS_KEYS.sim, _readFields(SETTINGS_FIELD_IDS.sim));
         _saveSelectedCodes();
@@ -9251,14 +9596,24 @@
           _resetModuleDefaults("mcEw");
           _saveResearchSettingsNow();
         };
+        const resetMcCal = () => {
+          _resetModuleDefaults("mcCal");
+          _saveResearchSettingsNow();
+        };
         const resetMcRot = () => {
           _resetModuleDefaults("mcRot");
           _saveResearchSettingsNow();
         };
+        const resetMcTrend = () => {
+          _resetModuleDefaults("mcTrend");
+          _saveResearchSettingsNow();
+        };
         bind("resetMcEwDefaults", resetMcEw);
         bind("mcEwResetDefaults", resetMcEw);
+        bind("mcCalResetDefaults", resetMcCal);
         bind("resetMcRotDefaults", resetMcRot);
         bind("mcRotResetDefaults", resetMcRot);
+        bind("mcTrendResetDefaults", resetMcTrend);
         bind("resetSimDefaults", () => {
           _resetModuleDefaults("sim");
           _saveResearchSettingsNow();
@@ -9281,7 +9636,7 @@
       const metricHelp = {
         benchmark_code: {
           title: "基准标的（benchmark_code）",
-          sub: "用于信息比率（IR）的对比基准。",
+          sub: "用于信息比率（IR）的对比基准；可从全候选池选择，不必在当前持有组合内。",
           body: `
             <div><b>含义</b>：把“等权组合”的日收益与基准标的的日收益相减，得到主动收益（active return）。</div>
             <div style="margin-top:8px"><b>口径</b>：当前页面所有收益与指标均使用 <b>${ADJUST_USED}</b>（后复权）价格序列。</div>
@@ -9315,7 +9670,9 @@
           title: "定投频率（dca_frequency）",
           sub: "定投追加投入的频率。",
           body: `
-            <div><b>支持</b>：daily / weekly / monthly / quarterly / yearly / none。</div>
+            <div><b>支持</b>：daily / weekly / monthly / none。</div>
+            <div style="margin-top:8px"><b>weekly</b>：可选周一~周五（默认周一）；若遇非交易日，顺延至下一交易日。</div>
+            <div style="margin-top:8px"><b>monthly</b>：可选每月1~28日（默认1日）；若遇非交易日，顺延至下一交易日。</div>
             <div style="margin-top:8px"><b>none</b>：只投入首日底仓，不做后续追加。</div>
           `,
         },
@@ -9998,6 +10355,11 @@
           "annualized_volatility",
           "max_drawdown",
           "sharpe_ratio",
+          "calmar_ratio",
+          "sortino_ratio",
+          "ulcer_index",
+          "ulcer_performance",
+          "rolling_recent_100_sqn_median",
         ];
         const rows = order
           .filter((k) => mc.metrics[k])
@@ -10008,6 +10370,11 @@
           annualized_volatility: "年化波动",
           max_drawdown: "最大回撤",
           sharpe_ratio: "夏普",
+          calmar_ratio: "卡玛",
+          sortino_ratio: "索提诺",
+          ulcer_index: "溃疡指标",
+          ulcer_performance: "溃疡绩效",
+          rolling_recent_100_sqn_median: "滚动近100次SQN中位数",
         };
         const fmt = (k, x) => {
           if (x == null || Number.isNaN(x)) return "-";
@@ -10218,7 +10585,10 @@
             r.d + (r.d === fit.best_by_bic ? "（BIC 最优）" : "");
           distSel.appendChild(opt);
         }
-        if (fit.best_by_bic) distSel.value = fit.best_by_bic;
+        const bestDist =
+          String(fit.best_by_rule || "").trim() ||
+          String(fit.best_by_bic || "").trim();
+        if (bestDist) distSel.value = bestDist;
 
         const plotQQ = () => {
           const d = distSel.value;
@@ -10267,8 +10637,10 @@
       }
 
       let lastMcEw = null;
+      let lastMcCal = null;
       let lastMcRot = null;
       let lastMcExcess = null;
+      let lastMcTrend = null;
 
       let lastBaseline = null; // latest baseline analysis payload (for client-side correlation re-slicing)
       let corrRangeKey = "all";
@@ -11105,12 +11477,21 @@
         }
       }
 
+      function _allPoolCodes() {
+        return _validCodes(
+          (pool || []).map((x) => String((x && x.code) || "").trim()),
+        );
+      }
       function renderBenchmarkSelect(codesOverride = null) {
         const sel = $("benchmark");
-        const prev = String((sel && sel.value) || "");
+        if (!sel) return;
+        const prev = String(sel.value || "");
         const codes = Array.isArray(codesOverride)
           ? _validCodes(codesOverride)
-          : _codesForStrategy("baseline");
+          : _allPoolCodes();
+        codes.sort((a, b) =>
+          codeLabel(a).localeCompare(codeLabel(b), "zh-Hans-CN"),
+        );
         sel.innerHTML = "";
         for (const c of codes) {
           const opt = document.createElement("option");
@@ -11520,6 +11901,9 @@
         const rbOvercapEl = $("trendRiskBudgetOvercapPolicy");
         const rbRebalanceModeEl = $("trendRiskBudgetRebalanceMode");
         const rbMaxLevEl = $("trendRiskBudgetMaxLeverage");
+        const cvarOnEl = $("trendCvarRiskMgmtEnable");
+        const cvarWindowEl = $("trendCvarWindow");
+        const cvarBudgetEl = $("trendCvarBudgetPct");
         const volMgmtOnEl = $("trendVolRegimeRiskMgmtEnable");
         const periodicVolMgmtOnEl = $("trendVolPeriodicRiskMgmtEnable");
         const periodicVolThresholdEl = $(
@@ -11584,6 +11968,22 @@
           const enableMaxLev = !!isRiskBudget && overcap === "leverage_entry";
           rbMaxLevEl.disabled = !enableMaxLev;
           rbMaxLevEl.style.opacity = enableMaxLev ? "1" : "0.55";
+        }
+        if (cvarOnEl) {
+          cvarOnEl.disabled = !isRiskBudget;
+          cvarOnEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+        const cvarOn =
+          isRiskBudget &&
+          cvarOnEl &&
+          String(cvarOnEl.value || "false") === "true";
+        if (cvarWindowEl) {
+          cvarWindowEl.disabled = !cvarOn;
+          cvarWindowEl.style.opacity = cvarOn ? "1" : "0.55";
+        }
+        if (cvarBudgetEl) {
+          cvarBudgetEl.disabled = !cvarOn;
+          cvarBudgetEl.style.opacity = cvarOn ? "1" : "0.55";
         }
         if (volMgmtOnEl) {
           volMgmtOnEl.disabled = !isRiskBudget;
@@ -11764,6 +12164,9 @@
           "trendVolRatioContractThreshold",
           "trendVolRatioNormalThreshold",
           "trendVolRatioExtremeThreshold",
+          "trendCvarRiskMgmtEnable",
+          "trendCvarWindow",
+          "trendCvarBudgetPct",
           "trendRiskOfRuinMaxrisk",
           "trendMonthlyRiskBudgetEnable",
           "trendMonthlyRiskBudgetPct",
@@ -12077,6 +12480,11 @@
             "风险预算仓位重算模式：保守=超限降仓后不主动放大；标准=仅在标的调入/调出事件日按当日ATR统一重算，若不超限可放大，若超限则等比缩放。",
           trendRiskBudgetMaxLeverage:
             "最大杠杆倍数：仅杠杆开仓生效，超过该值后回退为按上限倍数等比例缩放（1.0~10.0）。",
+          trendCvarRiskMgmtEnable:
+            "CVaR风控：基于历史模拟法CVaR95做仓位缩放，仅收缩不放大。",
+          trendCvarWindow: "CVaR窗口：历史样本窗口（交易日），至少20，默认60。",
+          trendCvarBudgetPct:
+            "CVaR预算阈值：预算/CVaR95 得到缩放系数，支持输入百分数（如2表示2%）。",
           trendMonthlyRiskBudgetEnable:
             "月度风险预算：按自然月限制账户最大可承受亏损，触发后阻止新开仓。",
           trendMonthlyRiskBudgetPct:
@@ -12195,7 +12603,6 @@
         setMsg(`候选池已加载：${pool.length} 个标的`);
         renderBenchmarkSelect();
         // Re-apply persisted benchmark after options are mounted.
-        // (Benchmark select options depend on selected codes and are rebuilt in renderBenchmarkSelect)
         try {
           const bm =
             _savedGlobalSettings && _savedGlobalSettings.benchmark != null
@@ -16317,6 +16724,40 @@
           window.__lastBaselineResult = s.result;
           window.__lastBaselinePayload = s.payload;
           lastBaseline = s.result;
+          try {
+            updateBaselineHoldingUi();
+          } catch {
+            /* ignore */
+          }
+          if (s.result && s.result.nav) {
+            const mode = (
+              ($("baselineMode") && $("baselineMode").value) ||
+              "EW"
+            ).toUpperCase();
+            const by = s.result.metrics_by_portfolio || {};
+            const metrics = by[mode] || s.result.metrics;
+            const attribution =
+              (s.result.attribution_by_portfolio || {})[mode] ||
+              s.result.attribution;
+            try {
+              syncBaselineChartTitles(mode);
+            } catch {
+              /* ignore */
+            }
+            plotBaselineAlignedCharts(s.result, mode);
+            if (metrics) renderMetrics(metrics);
+            _renderBaselineCurrentHoldings(s.result, mode);
+            try {
+              renderBaselineDailyReturnDist(s.result, mode);
+            } catch {
+              /* ignore */
+            }
+            try {
+              renderContributionTables("ew", attribution);
+            } catch {
+              /* ignore */
+            }
+          }
         } else if (s.type === "rotation") {
           window.__lastRotationResult = s.result;
           window.__lastRotationPayload = s.payload;
@@ -17386,6 +17827,21 @@
             name: benchKey,
             hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>",
           });
+        const ovPack =
+          (((data || {}).cvar_overlay || {}).by_portfolio || {})[mode] || {};
+        const ovSim = ovPack.sim || {};
+        const ovNav = Array.isArray(ovSim.nav) ? ovSim.nav : [];
+        const ovDates = Array.isArray(ovSim.dates) ? ovSim.dates : dates;
+        if (ovNav.length && ovDates.length === ovNav.length) {
+          navTraces.push({
+            x: ovDates,
+            y: ovNav,
+            mode: "lines",
+            name: `${mode} CVaR对照`,
+            line: { dash: "dash", width: 1.6 },
+            hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>",
+          });
+        }
         for (const w of rsiWins) {
           navTraces.push({
             x: dates,
@@ -18104,6 +18560,8 @@
         const garchHintEl = $("distGarchHint");
         const garchChartEl = $("distGarchChart");
         const garchTableEl = $("distGarchTable");
+        const garchModelCompareEl = $("distGarchModelCompare");
+        const garchModelCompareOn = $("distGarchModelCompareOn");
         const garchVolHistEl = $("distGarchVolHistogram");
         const garchVolQuantilesEl = $("distGarchVolQuantiles");
         const futNInput = $("distFutureN");
@@ -18418,6 +18876,7 @@
           if (garchChartEl)
             garchChartEl.innerHTML = `<div class='muted'>${esc(String(msg || "无数据"))}</div>`;
           if (garchTableEl) garchTableEl.innerHTML = "";
+          if (garchModelCompareEl) garchModelCompareEl.innerHTML = "";
           if (garchVolHistEl)
             garchVolHistEl.innerHTML = `<div class='muted'>${esc(String(msg || "无数据"))}</div>`;
           if (garchVolQuantilesEl) garchVolQuantilesEl.innerHTML = "";
@@ -18428,8 +18887,11 @@
           return window.__distGarchByKey;
         };
 
-        const _distGarchKey = ({ code, adjust, start, end }) =>
-          `${String(adjust || "hfq").toLowerCase()}|${String(code || "").trim()}|${String(start || "").trim()}|${String(end || "").trim()}`;
+        const _distGarchCompareOn = () =>
+          !!(garchModelCompareOn && garchModelCompareOn.checked);
+
+        const _distGarchKey = ({ code, adjust, start, end, compare }) =>
+          `${String(adjust || "hfq").toLowerCase()}|${String(code || "").trim()}|${String(start || "").trim()}|${String(end || "").trim()}|cmp=${compare ? "1" : "0"}`;
 
         const _renderDistGarchResult = (
           payload,
@@ -18600,6 +19062,76 @@
             diag.arch_lm_post && typeof diag.arch_lm_post === "object"
               ? diag.arch_lm_post
               : {};
+          const jb =
+            diag.normality_jb && typeof diag.normality_jb === "object"
+              ? diag.normality_jb
+              : {};
+          const jbPre =
+            diag.normality_jb_pre && typeof diag.normality_jb_pre === "object"
+              ? diag.normality_jb_pre
+              : {};
+          const tGof =
+            diag.t_dist_gof && typeof diag.t_dist_gof === "object"
+              ? diag.t_dist_gof
+              : {};
+          const tGofPre =
+            diag.t_dist_gof_pre && typeof diag.t_dist_gof_pre === "object"
+              ? diag.t_dist_gof_pre
+              : {};
+          const gedGof =
+            diag.ged_dist_gof && typeof diag.ged_dist_gof === "object"
+              ? diag.ged_dist_gof
+              : {};
+          const gedGofPre =
+            diag.ged_dist_gof_pre && typeof diag.ged_dist_gof_pre === "object"
+              ? diag.ged_dist_gof_pre
+              : {};
+          const skewTGof =
+            diag.skew_t_dist_gof && typeof diag.skew_t_dist_gof === "object"
+              ? diag.skew_t_dist_gof
+              : {};
+          const skewTGofPre =
+            diag.skew_t_dist_gof_pre &&
+            typeof diag.skew_t_dist_gof_pre === "object"
+              ? diag.skew_t_dist_gof_pre
+              : {};
+          const adfPre =
+            diag.stationarity_adf_pre &&
+            typeof diag.stationarity_adf_pre === "object"
+              ? diag.stationarity_adf_pre
+              : {};
+          const adfPost =
+            diag.stationarity_adf_post &&
+            typeof diag.stationarity_adf_post === "object"
+              ? diag.stationarity_adf_post
+              : {};
+          const acfPre =
+            diag.autocorr_acf_ljung_pre &&
+            typeof diag.autocorr_acf_ljung_pre === "object"
+              ? diag.autocorr_acf_ljung_pre
+              : {};
+          const acfPost =
+            diag.autocorr_acf_ljung_post &&
+            typeof diag.autocorr_acf_ljung_post === "object"
+              ? diag.autocorr_acf_ljung_post
+              : {};
+          const var95 =
+            diag.var_backtest_95 && typeof diag.var_backtest_95 === "object"
+              ? diag.var_backtest_95
+              : {};
+          const var99 =
+            diag.var_backtest_99 && typeof diag.var_backtest_99 === "object"
+              ? diag.var_backtest_99
+              : {};
+          const meanSel =
+            diag.mean_model_selection &&
+            typeof diag.mean_model_selection === "object"
+              ? diag.mean_model_selection
+              : {};
+          const modelCmp =
+            diag.model_comparison && typeof diag.model_comparison === "object"
+              ? diag.model_comparison
+              : {};
           const score = Number(interp.value_score);
           const modelValue = String(interp.model_value || "-").toLowerCase();
           const scoreTxt = Number.isFinite(score) ? score.toFixed(3) : "-";
@@ -18615,7 +19147,8 @@
             const nObs = Number(diag.n_obs_returns);
             const nTxt = Number.isFinite(nObs) ? String(Math.round(nObs)) : "-";
             const cTxt = fromCache ? "（缓存）" : "";
-            garchHintEl.textContent = `模型价值=${levelTxt}（score=${scoreTxt}）· 收益样本=${nTxt} · adjust=${adjust} ${cTxt}`;
+            const meanTxt = String(meanSel.selected || meta.mean_model || "-");
+            garchHintEl.textContent = `模型价值=${levelTxt}（score=${scoreTxt}）· 收益样本=${nTxt} · 均值模型=${meanTxt} · adjust=${adjust} ${cTxt}`;
           }
           const rows = [
             ["模型价值", `${levelTxt}（score=${scoreTxt}）`],
@@ -18629,6 +19162,10 @@
             [
               "参数",
               `mu=${fmtNum(params.mu)}，omega=${fmtNum(params.omega)}，alpha=${fmtNum(params.alpha1)}，gamma=${fmtNum(params.gamma1)}，beta=${fmtNum(params.beta1)}，nu=${fmtNum(params.nu)}`,
+            ],
+            [
+              "均值过滤模型",
+              `${String(meanSel.selected || meta.mean_model || "-")}（AIC=${fmtNum(meanSel.selected_aic)}，BIC=${fmtNum(meanSel.selected_bic)}，残差ACF p=${fmtNum(meanSel.selected_resid_acf_pvalue)}，残差ARCH p=${fmtNum(meanSel.selected_resid_arch_pvalue)}）`,
             ],
             ["持久性", fmtNum(params.persistence)],
             [
@@ -18648,21 +19185,107 @@
               "AIC/BIC",
               `${Number.isFinite(Number(diag.aic)) ? Number(diag.aic).toFixed(3) : "-"} / ${Number.isFinite(Number(diag.bic)) ? Number(diag.bic).toFixed(3) : "-"}`,
             ],
+            ["——建模前（原始收益率）——", ""],
             [
-              "标准化残差（均值/标准差/偏度/峰度）",
-              `${fmtNum(diag.std_resid_mean)} / ${fmtNum(diag.std_resid_std)} / ${fmtNum(diag.std_resid_skew)} / ${fmtNum(diag.std_resid_kurtosis_excess)}`,
+              "收益率正态性检验（Jarque-Bera）",
+              jbPre.ok
+                ? `stat=${fmtNum(jbPre.stat)}，p=${fmtNum(jbPre.pvalue)}，${jbPre.significant ? "显著" : "不显著"}；${String(jbPre.conclusion || "") || "-"}`
+                : String(jbPre.conclusion || "样本不足或不可用"),
+            ],
+            [
+              "收益率 t 分布检验（拟合后 KS）",
+              tGofPre.ok
+                ? `KS=${fmtNum(tGofPre.stat)}，p=${fmtNum(tGofPre.pvalue)}，df=${fmtNum(tGofPre.df)}，loc=${fmtNum(tGofPre.loc)}，scale=${fmtNum(tGofPre.scale)}，${tGofPre.significant ? "显著" : "不显著"}；${String(tGofPre.conclusion || "") || "-"}${tGofPre.note ? `（${String(tGofPre.note)}）` : ""}`
+                : `${String(tGofPre.conclusion || "样本不足或不可用")}${tGofPre.note ? `（${String(tGofPre.note)}）` : ""}`,
+            ],
+            [
+              "收益率 GED 分布检验（拟合后 KS）",
+              gedGofPre.ok
+                ? `KS=${fmtNum(gedGofPre.stat)}，p=${fmtNum(gedGofPre.pvalue)}，beta=${fmtNum(gedGofPre.beta)}，loc=${fmtNum(gedGofPre.loc)}，scale=${fmtNum(gedGofPre.scale)}，${gedGofPre.significant ? "显著" : "不显著"}；${String(gedGofPre.conclusion || "") || "-"}${gedGofPre.note ? `（${String(gedGofPre.note)}）` : ""}`
+                : `${String(gedGofPre.conclusion || "样本不足或不可用")}${gedGofPre.note ? `（${String(gedGofPre.note)}）` : ""}`,
+            ],
+            [
+              "收益率 skew-t 分布检验（拟合后 KS）",
+              skewTGofPre.ok
+                ? `KS=${fmtNum(skewTGofPre.stat)}，p=${fmtNum(skewTGofPre.pvalue)}，a=${fmtNum(skewTGofPre.a)}，b=${fmtNum(skewTGofPre.b)}，loc=${fmtNum(skewTGofPre.loc)}，scale=${fmtNum(skewTGofPre.scale)}，${skewTGofPre.significant ? "显著" : "不显著"}；${String(skewTGofPre.conclusion || "") || "-"}${skewTGofPre.note ? `（${String(skewTGofPre.note)}）` : ""}`
+                : `${String(skewTGofPre.conclusion || "样本不足或不可用")}${skewTGofPre.note ? `（${String(skewTGofPre.note)}）` : ""}`,
+            ],
+            [
+              "收益率平稳性检验（ADF）",
+              adfPre.ok
+                ? `stat=${fmtNum(adfPre.stat)}，p=${fmtNum(adfPre.pvalue)}，${adfPre.significant ? "显著" : "不显著"}；${String(adfPre.conclusion || "") || "-"}`
+                : String(adfPre.conclusion || "样本不足或不可用"),
+            ],
+            [
+              "收益率自相关检验（ACF/Ljung-Box）",
+              acfPre.ok
+                ? `Q=${fmtNum(acfPre.stat)}，p=${fmtNum(acfPre.pvalue)}，lags=${acfPre.lags ?? "-"}，max|acf|=${fmtNum(acfPre.max_abs_acf)}，${acfPre.significant ? "显著" : "不显著"}；${String(acfPre.conclusion || "") || "-"}`
+                : String(acfPre.conclusion || "样本不足或不可用"),
             ],
             [
               "ARCH-LM（拟合前）",
               pre.ok
-                ? `stat=${fmtNum(pre.stat)}，p=${fmtNum(pre.pvalue)}，${pre.significant ? "显著" : "不显著"}`
+                ? `stat=${fmtNum(pre.stat)}，p=${fmtNum(pre.pvalue)}，${pre.significant ? "显著" : "不显著"}；${String(pre.conclusion || "") || "-"}`
                 : "样本不足",
+            ],
+            ["——建模后（标准化残差）——", ""],
+            [
+              "标准化残差正态性检验（Jarque-Bera）",
+              jb.ok
+                ? `stat=${fmtNum(jb.stat)}，p=${fmtNum(jb.pvalue)}，${jb.significant ? "显著" : "不显著"}；${String(jb.conclusion || "") || "-"}`
+                : String(jb.conclusion || "样本不足或不可用"),
+            ],
+            [
+              "标准化残差 t 分布检验（拟合后 KS）",
+              tGof.ok
+                ? `KS=${fmtNum(tGof.stat)}，p=${fmtNum(tGof.pvalue)}，df=${fmtNum(tGof.df)}，loc=${fmtNum(tGof.loc)}，scale=${fmtNum(tGof.scale)}，${tGof.significant ? "显著" : "不显著"}；${String(tGof.conclusion || "") || "-"}${tGof.note ? `（${String(tGof.note)}）` : ""}`
+                : `${String(tGof.conclusion || "样本不足或不可用")}${tGof.note ? `（${String(tGof.note)}）` : ""}`,
+            ],
+            [
+              "标准化残差 GED 分布检验（拟合后 KS）",
+              gedGof.ok
+                ? `KS=${fmtNum(gedGof.stat)}，p=${fmtNum(gedGof.pvalue)}，beta=${fmtNum(gedGof.beta)}，loc=${fmtNum(gedGof.loc)}，scale=${fmtNum(gedGof.scale)}，${gedGof.significant ? "显著" : "不显著"}；${String(gedGof.conclusion || "") || "-"}${gedGof.note ? `（${String(gedGof.note)}）` : ""}`
+                : `${String(gedGof.conclusion || "样本不足或不可用")}${gedGof.note ? `（${String(gedGof.note)}）` : ""}`,
+            ],
+            [
+              "标准化残差 skew-t 分布检验（拟合后 KS）",
+              skewTGof.ok
+                ? `KS=${fmtNum(skewTGof.stat)}，p=${fmtNum(skewTGof.pvalue)}，a=${fmtNum(skewTGof.a)}，b=${fmtNum(skewTGof.b)}，loc=${fmtNum(skewTGof.loc)}，scale=${fmtNum(skewTGof.scale)}，${skewTGof.significant ? "显著" : "不显著"}；${String(skewTGof.conclusion || "") || "-"}${skewTGof.note ? `（${String(skewTGof.note)}）` : ""}`
+                : `${String(skewTGof.conclusion || "样本不足或不可用")}${skewTGof.note ? `（${String(skewTGof.note)}）` : ""}`,
+            ],
+            [
+              "标准化残差平稳性检验（ADF）",
+              adfPost.ok
+                ? `stat=${fmtNum(adfPost.stat)}，p=${fmtNum(adfPost.pvalue)}，${adfPost.significant ? "显著" : "不显著"}；${String(adfPost.conclusion || "") || "-"}`
+                : String(adfPost.conclusion || "样本不足或不可用"),
+            ],
+            [
+              "标准化残差自相关检验（ACF/Ljung-Box）",
+              acfPost.ok
+                ? `Q=${fmtNum(acfPost.stat)}，p=${fmtNum(acfPost.pvalue)}，lags=${acfPost.lags ?? "-"}，max|acf|=${fmtNum(acfPost.max_abs_acf)}，${acfPost.significant ? "显著" : "不显著"}；${String(acfPost.conclusion || "") || "-"}`
+                : String(acfPost.conclusion || "样本不足或不可用"),
             ],
             [
               "ARCH-LM（拟合后）",
               post.ok
-                ? `stat=${fmtNum(post.stat)}，p=${fmtNum(post.pvalue)}，${post.significant ? "显著" : "不显著"}`
+                ? `stat=${fmtNum(post.stat)}，p=${fmtNum(post.pvalue)}，${post.significant ? "显著" : "不显著"}；${String(post.conclusion || "") || "-"}`
                 : "样本不足",
+            ],
+            [
+              "VaR 命中率回测（95%）",
+              var95.ok
+                ? `样本=${var95.n_obs ?? "-"}，命中=${var95.hit_count ?? "-"}，实际命中率=${fmtPct(var95.hit_rate)}，理论命中率=${fmtPct(var95.expected_hit_rate)}，Kupiec p=${fmtNum(var95.kupiec_pvalue)}，独立性 p=${fmtNum(var95.christoffersen_pvalue)}；${String(var95.conclusion || "-")}`
+                : String(var95.conclusion || "样本不足或不可用"),
+            ],
+            [
+              "VaR 命中率回测（99%）",
+              var99.ok
+                ? `样本=${var99.n_obs ?? "-"}，命中=${var99.hit_count ?? "-"}，实际命中率=${fmtPct(var99.hit_rate)}，理论命中率=${fmtPct(var99.expected_hit_rate)}，Kupiec p=${fmtNum(var99.kupiec_pvalue)}，独立性 p=${fmtNum(var99.christoffersen_pvalue)}；${String(var99.conclusion || "-")}`
+                : String(var99.conclusion || "样本不足或不可用"),
+            ],
+            [
+              "标准化残差统计",
+              `${fmtNum(diag.std_resid_mean)} / ${fmtNum(diag.std_resid_std)} / ${fmtNum(diag.std_resid_skew)} / ${fmtNum(diag.std_resid_kurtosis_excess)}`,
             ],
           ];
           garchTableEl.innerHTML =
@@ -18670,6 +19293,62 @@
             rows
               .map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`)
               .join("");
+
+          if (garchModelCompareEl) {
+            const models = Array.isArray(modelCmp.models)
+              ? modelCmp.models
+              : [];
+            const enabled =
+              modelCmp.enabled === undefined
+                ? models.length > 0
+                : !!modelCmp.enabled;
+            const bestByPriority = String(
+              modelCmp.best_by_priority || "",
+            ).trim();
+            const bestByBic = String(modelCmp.best_by_bic || "").trim();
+            if (!enabled) {
+              garchModelCompareEl.innerHTML =
+                "<tr><th>说明</th></tr><tr><td>未勾选六模型对比，已跳过计算。勾选后重新拟合才会比对 APARCH/EGARCH/GJR-GARCH × t/skew-t。</td></tr>";
+            } else if (!models.length) {
+              garchModelCompareEl.innerHTML =
+                "<tr><th>说明</th></tr><tr><td>暂无横向对比数据</td></tr>";
+            } else {
+              const rowsCmp = models.map((m) => {
+                const id = String((m && m.model_id) || "");
+                const isBest = bestByPriority && id === bestByPriority;
+                const isBicBest = bestByBic && id === bestByBic;
+                const label = `${String((m && m.label) || id || "-")}${isBest ? "（综合最优）" : ""}${isBicBest && !isBest ? "（BIC最优）" : ""}`;
+                const converged = m && m.converged ? "是" : "否";
+                const acfP = fmtNum(m && m.resid_acf_pvalue);
+                const archP = fmtNum(m && m.resid_arch_pvalue);
+                const var95Pass =
+                  m && m.var95_pass === true
+                    ? "通过"
+                    : m && m.var95_pass === false
+                      ? "未通过"
+                      : "-";
+                const var99Pass =
+                  m && m.var99_pass === true
+                    ? "通过"
+                    : m && m.var99_pass === false
+                      ? "未通过"
+                      : "-";
+                return `<tr>
+                  <td>${esc(label)}</td>
+                  <td>${esc(converged)}</td>
+                  <td>${esc(fmtNum(m && m.aic))}</td>
+                  <td>${esc(fmtNum(m && m.bic))}</td>
+                  <td>${esc(acfP)}</td>
+                  <td>${esc(archP)}</td>
+                  <td>${esc(var95Pass)}</td>
+                  <td>${esc(var99Pass)}</td>
+                </tr>`;
+              });
+              garchModelCompareEl.innerHTML =
+                "<tr><th>模型</th><th>收敛</th><th>AIC</th><th>BIC</th><th>残差ACF p</th><th>残差ARCH p</th><th>VaR95</th><th>VaR99</th></tr>" +
+                rowsCmp.join("");
+            }
+          }
 
           if (garchVolHistEl && garchVolQuantilesEl) {
             if (volSamples.length < 5) {
@@ -18861,9 +19540,22 @@
           }
         };
 
-        const _distFetchGarch = async ({ code, adjust, start, end }) => {
+        const _distFetchGarch = async ({
+          code,
+          adjust,
+          start,
+          end,
+          compare,
+        }) => {
+          const includeCompare = !!compare;
           const cache = _distGarchCache();
-          const key = _distGarchKey({ code, adjust, start, end });
+          const key = _distGarchKey({
+            code,
+            adjust,
+            start,
+            end,
+            compare: includeCompare,
+          });
           if (cache[key])
             return { data: cache[key], fromCache: true, stale: false };
 
@@ -18894,6 +19586,7 @@
             arch_lags: 10,
             ann_factor: 252,
             return_scale: 100.0,
+            include_model_comparison: includeCompare,
           };
           const resp = await api("/analysis/baseline/garch-volatility", {
             method: "POST",
@@ -18925,22 +19618,34 @@
             .toLowerCase();
           const start = String((rangeStart && rangeStart.value) || "").trim();
           const end = String((rangeEnd && rangeEnd.value) || "").trim();
+          const compare = _distGarchCompareOn();
           if (!code || !start || !end) {
             if (garchHintEl) garchHintEl.textContent = "";
             _renderDistGarchPlaceholder("请选择标的并设置区间后查看 GARCH");
             return;
           }
-          const key = _distGarchKey({ code, adjust, start, end });
+          const key = _distGarchKey({ code, adjust, start, end, compare });
           const cache = _distGarchCache();
           if (cache[key]) {
             _renderDistGarchResult(cache[key], { fromCache: true });
             return;
           }
 
-          if (garchHintEl) garchHintEl.textContent = "GARCH 拟合中...";
-          _renderDistGarchPlaceholder("GARCH 拟合中...");
+          if (garchHintEl)
+            garchHintEl.textContent = compare
+              ? "GARCH 拟合中（含六模型对比）..."
+              : "GARCH 拟合中...";
+          _renderDistGarchPlaceholder(
+            compare ? "GARCH 拟合中（含六模型对比）..." : "GARCH 拟合中...",
+          );
           try {
-            const out = await _distFetchGarch({ code, adjust, start, end });
+            const out = await _distFetchGarch({
+              code,
+              adjust,
+              start,
+              end,
+              compare,
+            });
             if (out.stale || !out.data) return;
             _renderDistGarchResult(out.data, { fromCache: !!out.fromCache });
           } catch (eGarch) {
@@ -22584,6 +23289,336 @@
               .join("");
         };
 
+        const _renderWeekExtremaWeekdayProb = (codeMaybe) => {
+          const hintEl = $("distWeekExtremaHint");
+          const tblEl = $("distWeekExtremaTable");
+          const heatEl = $("distWeekExtremaHeatmap");
+          const rollEl = $("distWeekExtremaRolling");
+          const rollWeeksInput = $("distWeekExtremaRollWeeks");
+          const metricSel = $("distWeekExtremaMetric");
+          if (!tblEl || !heatEl || !rollEl) return;
+          const _setEmpty = (msg) => {
+            const txt = String(msg || "无数据");
+            if (hintEl) hintEl.textContent = txt;
+            tblEl.innerHTML = "";
+            heatEl.innerHTML = `<div class='muted'>${esc(txt)}</div>`;
+            rollEl.innerHTML = `<div class='muted'>${esc(txt)}</div>`;
+          };
+          const code = String(codeMaybe || "").trim();
+          if (!code) {
+            _setEmpty("请选择标的");
+            return;
+          }
+          const s = (window.__distOpenByCode || {})[code];
+          if (
+            !s ||
+            !Array.isArray(s.dates) ||
+            !Array.isArray(s.open) ||
+            !Array.isArray(s.high) ||
+            !Array.isArray(s.low) ||
+            !Array.isArray(s.close) ||
+            s.dates.length < 5 ||
+            s.dates.length !== s.open.length ||
+            s.dates.length !== s.high.length ||
+            s.dates.length !== s.low.length ||
+            s.dates.length !== s.close.length
+          ) {
+            _setEmpty("无可用OHLC序列，请等待数据加载或调整区间。");
+            return;
+          }
+          const _parseYmd = (v) => {
+            const t = String(v || "").trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const m = Number(t.slice(5, 7)) - 1;
+              const d = Number(t.slice(8, 10));
+              return new Date(y, m, d);
+            }
+            if (/^\d{8}$/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const m = Number(t.slice(4, 6)) - 1;
+              const d = Number(t.slice(6, 8));
+              return new Date(y, m, d);
+            }
+            return null;
+          };
+          const _toYmd = (dt) => {
+            if (!dt || !Number.isFinite(dt.getTime())) return "";
+            const y = dt.getFullYear();
+            const m = String(dt.getMonth() + 1).padStart(2, "0");
+            const d = String(dt.getDate()).padStart(2, "0");
+            return `${y}-${m}-${d}`;
+          };
+          const _weekdayMon1 = (dt) => {
+            if (!dt || !Number.isFinite(dt.getTime())) return -1;
+            const wd = dt.getDay(); // 0 Sun .. 6 Sat
+            if (wd === 0 || wd === 6) return -1;
+            return wd; // Mon=1 .. Fri=5
+          };
+          const _weekKeyMonday = (dt) => {
+            const wd = _weekdayMon1(dt);
+            if (wd < 1) return "";
+            const m = new Date(dt);
+            m.setDate(m.getDate() - (wd - 1));
+            return _toYmd(m);
+          };
+          const weekMap = new Map();
+          for (let i = 0; i < s.dates.length; i++) {
+            const dt = _parseYmd(s.dates[i]);
+            const wd = _weekdayMon1(dt);
+            if (wd < 1 || wd > 5) continue;
+            const o = Number(s.open[i]);
+            const h = Number(s.high[i]);
+            const l = Number(s.low[i]);
+            const c = Number(s.close[i]);
+            if (
+              !Number.isFinite(o) ||
+              !Number.isFinite(h) ||
+              !Number.isFinite(l) ||
+              !Number.isFinite(c) ||
+              o <= 0 ||
+              h <= 0 ||
+              l <= 0 ||
+              c <= 0
+            )
+              continue;
+            const wk = _weekKeyMonday(dt);
+            if (!wk) continue;
+            if (!weekMap.has(wk)) weekMap.set(wk, []);
+            weekMap.get(wk).push({
+              date: String(s.dates[i] || ""),
+              weekday: wd,
+              open: o,
+              high: h,
+              low: l,
+              close: c,
+            });
+          }
+          const weekKeys = Array.from(weekMap.keys()).sort();
+          if (!weekKeys.length) {
+            _setEmpty("当前区间无有效周样本。");
+            return;
+          }
+          const metricDefs = [
+            {
+              key: "high_max",
+              label: "周内最高价出现概率",
+              field: "high",
+              dir: "max",
+            },
+            {
+              key: "low_min",
+              label: "周内最低价出现概率",
+              field: "low",
+              dir: "min",
+            },
+            {
+              key: "open_max",
+              label: "周内最高开盘价出现概率",
+              field: "open",
+              dir: "max",
+            },
+            {
+              key: "open_min",
+              label: "周内最低开盘价出现概率",
+              field: "open",
+              dir: "min",
+            },
+            {
+              key: "close_max",
+              label: "周内最高收盘价出现概率",
+              field: "close",
+              dir: "max",
+            },
+            {
+              key: "close_min",
+              label: "周内最低收盘价出现概率",
+              field: "close",
+              dir: "min",
+            },
+          ];
+          const weekdayLabels = ["周一", "周二", "周三", "周四", "周五"];
+          const metricAgg = {};
+          for (const def of metricDefs) {
+            metricAgg[def.key] = {
+              weekCount: 0,
+              dayWeightSums: [0, 0, 0, 0, 0],
+              weekRows: [],
+            };
+          }
+          for (const wk of weekKeys) {
+            const rows = (weekMap.get(wk) || []).slice();
+            rows.sort((a, b) => {
+              const ta = _parseYmd(a && a.date ? a.date : "");
+              const tb = _parseYmd(b && b.date ? b.date : "");
+              const va =
+                ta && Number.isFinite(ta.getTime()) ? ta.getTime() : Infinity;
+              const vb =
+                tb && Number.isFinite(tb.getTime()) ? tb.getTime() : Infinity;
+              if (va !== vb) return va - vb;
+              return String(a && a.date ? a.date : "").localeCompare(
+                String(b && b.date ? b.date : ""),
+              );
+            });
+            if (!rows.length) continue;
+            const weekEnd = String(rows[rows.length - 1].date || wk);
+            for (const def of metricDefs) {
+              const vals = rows
+                .map((r) => Number(r[def.field]))
+                .filter((v) => Number.isFinite(v));
+              if (!vals.length) continue;
+              const extreme =
+                def.dir === "max" ? Math.max(...vals) : Math.min(...vals);
+              if (!Number.isFinite(extreme)) continue;
+              const eps = Math.max(1e-12, Math.abs(extreme) * 1e-10);
+              const tieRows = rows.filter((r) => {
+                const v = Number(r[def.field]);
+                return Number.isFinite(v) && Math.abs(v - extreme) <= eps;
+              });
+              if (!tieRows.length) continue;
+              const one = 1.0 / tieRows.length;
+              const dist = [0, 0, 0, 0, 0];
+              for (const r of tieRows) {
+                const wdIdx = Number(r.weekday) - 1;
+                if (wdIdx >= 0 && wdIdx < 5) {
+                  dist[wdIdx] += one;
+                  metricAgg[def.key].dayWeightSums[wdIdx] += one;
+                }
+              }
+              metricAgg[def.key].weekCount += 1;
+              metricAgg[def.key].weekRows.push({ weekEnd, dist });
+            }
+          }
+          const rollWeeks = Math.max(
+            8,
+            Math.min(
+              260,
+              Math.floor(
+                Number(
+                  rollWeeksInput && rollWeeksInput.value
+                    ? rollWeeksInput.value
+                    : 52,
+                ),
+              ) || 52,
+            ),
+          );
+          if (rollWeeksInput) rollWeeksInput.value = String(rollWeeks);
+          const selectedMetric = String(
+            (metricSel && metricSel.value) || "high_max",
+          ).trim();
+          const fmtProb = (v) => (Number.isFinite(v) ? fmtPct(v) : "-");
+          const head = `<tr><th>指标</th><th>样本周数</th>${weekdayLabels.map((x) => `<th>${x}</th>`).join("")}</tr>`;
+          const body = metricDefs
+            .map((def) => {
+              const agg = metricAgg[def.key];
+              const wc = Number(agg && agg.weekCount);
+              const probs =
+                wc > 0
+                  ? agg.dayWeightSums.map((x) => (Number(x) || 0) / wc)
+                  : [NaN, NaN, NaN, NaN, NaN];
+              return `<tr><td>${esc(def.label)}</td><td>${Number.isFinite(wc) ? Math.round(wc) : 0}</td>${probs.map((p) => `<td>${fmtProb(p)}</td>`).join("")}</tr>`;
+            })
+            .join("");
+          tblEl.innerHTML = head + body;
+          const z = metricDefs.map((def) => {
+            const agg = metricAgg[def.key];
+            const wc = Number(agg && agg.weekCount);
+            if (!(wc > 0)) return [null, null, null, null, null];
+            return agg.dayWeightSums.map((x) => {
+              const p = (Number(x) || 0) / wc;
+              return Number.isFinite(p) ? p : null;
+            });
+          });
+          if (typeof Plotly === "undefined") {
+            heatEl.innerHTML = "<div class='muted'>Plotly 未加载</div>";
+            rollEl.innerHTML = "<div class='muted'>Plotly 未加载</div>";
+            return;
+          }
+          Plotly.newPlot(
+            heatEl.id,
+            [
+              {
+                type: "heatmap",
+                x: weekdayLabels,
+                y: metricDefs.map((d) => d.label),
+                z,
+                // Keep probability intensity unambiguous: low=light, high=dark.
+                colorscale: [
+                  [0.0, "#fff7ec"],
+                  [0.25, "#fee8c8"],
+                  [0.5, "#fdbb84"],
+                  [0.75, "#e34a33"],
+                  [1.0, "#7f0000"],
+                ],
+                reversescale: false,
+                zmin: 0,
+                zmax: 1,
+                hovertemplate:
+                  "指标=%{y}<br>周内日=%{x}<br>概率=%{z:.2%}<extra></extra>",
+              },
+            ],
+            {
+              margin: { t: 20, l: 160, r: 24, b: 40 },
+              xaxis: { title: "周内交易日" },
+              yaxis: { title: "" },
+            },
+            { responsive: true, displayModeBar: false },
+          );
+          const metricDef =
+            metricDefs.find((d) => d.key === selectedMetric) || metricDefs[0];
+          const metricRows =
+            (metricAgg[metricDef.key] && metricAgg[metricDef.key].weekRows) ||
+            [];
+          if (metricRows.length < rollWeeks) {
+            rollEl.innerHTML = `<div class='muted'>滚动窗口=${rollWeeks} 周，当前有效样本=${metricRows.length} 周，无法绘制滚动一年概率变化。</div>`;
+          } else {
+            const traces = [];
+            for (let d = 0; d < 5; d++) {
+              const xs = [];
+              const ys = [];
+              for (let i = rollWeeks - 1; i < metricRows.length; i++) {
+                const slice = metricRows.slice(i - rollWeeks + 1, i + 1);
+                const v =
+                  slice.reduce((acc, it) => acc + Number(it.dist[d] || 0), 0) /
+                  rollWeeks;
+                xs.push(String(metricRows[i].weekEnd || ""));
+                ys.push(v);
+              }
+              traces.push({
+                x: xs,
+                y: ys,
+                type: "scatter",
+                mode: "lines",
+                name: weekdayLabels[d],
+                hovertemplate:
+                  "%{x}<br>滚动概率=%{y:.2%}<extra>" +
+                  esc(weekdayLabels[d]) +
+                  "</extra>",
+              });
+            }
+            Plotly.newPlot(
+              rollEl.id,
+              traces,
+              {
+                margin: { t: 36, l: 56, r: 20, b: 45 },
+                title: {
+                  text: `${metricDef.label} · 滚动${rollWeeks}周概率变化`,
+                  font: { size: 13 },
+                },
+                xaxis: { title: "周末交易日" },
+                yaxis: { title: "概率", tickformat: ".0%", range: [0, 1] },
+                legend: { orientation: "h" },
+              },
+              { responsive: true, displayModeBar: false },
+            );
+          }
+          const firstW = weekKeys[0];
+          const lastW = weekKeys[weekKeys.length - 1];
+          if (hintEl) {
+            hintEl.textContent = `${codeLabel(code)} · 周样本 ${weekKeys.length}（${firstW} ~ ${lastW}） · 并列极值按等权分摊`;
+          }
+        };
+
         const _renderWeekdayDowEffect = (codeMaybe) => {
           const curveEl = $("distWkdayCurve");
           const histEl = $("distWkdayHist");
@@ -24002,6 +25037,11 @@
               /* ignore */
             }
             try {
+              _renderWeekExtremaWeekdayProb(code);
+            } catch (_ewx) {
+              /* ignore */
+            }
+            try {
               _renderMonthDomEffect(code);
             } catch (_ewm) {
               /* ignore */
@@ -24078,6 +25118,11 @@
             try {
               _renderWeekdayDowEffect(code);
             } catch (_ew2) {
+              /* ignore */
+            }
+            try {
+              _renderWeekExtremaWeekdayProb(code);
+            } catch (_ewx2) {
               /* ignore */
             }
             try {
@@ -24378,6 +25423,11 @@
             /* ignore */
           }
           try {
+            _renderWeekExtremaWeekdayProb(code);
+          } catch (_ewkx) {
+            /* ignore */
+          }
+          try {
             _renderMonthDomEffect(code);
           } catch (_ewkm) {
             /* ignore */
@@ -24479,6 +25529,11 @@
                   /* ignore */
                 }
                 try {
+                  _renderWeekExtremaWeekdayProb("");
+                } catch (_ex) {
+                  /* ignore */
+                }
+                try {
                   _renderMonthDomEffect("");
                 } catch (_em) {
                   /* ignore */
@@ -24536,6 +25591,11 @@
               try {
                 _renderWeekdayDowEffect("");
               } catch (_e) {
+                /* ignore */
+              }
+              try {
+                _renderWeekExtremaWeekdayProb("");
+              } catch (_ex2) {
                 /* ignore */
               }
               try {
@@ -24650,6 +25710,8 @@
           });
           periodSelect.addEventListener("change", updateDisplay);
           if (futFitOn) futFitOn.addEventListener("change", updateDisplay);
+          if (garchModelCompareOn)
+            garchModelCompareOn.addEventListener("change", updateDisplay);
           if (futNInput) {
             futNInput.addEventListener("change", updateDisplay);
             futNInput.addEventListener("input", () => {
@@ -24786,6 +25848,20 @@
           const wkSel = $("distWkdaySelect");
           if (wkSel) {
             wkSel.addEventListener("change", updateDisplay);
+          }
+          const weekExtMetricSel = $("distWeekExtremaMetric");
+          if (weekExtMetricSel) {
+            weekExtMetricSel.addEventListener("change", updateDisplay);
+          }
+          const weekExtRollWeeksInput = $("distWeekExtremaRollWeeks");
+          if (weekExtRollWeeksInput) {
+            weekExtRollWeeksInput.addEventListener("change", updateDisplay);
+            weekExtRollWeeksInput.addEventListener("input", () => {
+              const v = Number(
+                String(weekExtRollWeeksInput.value || "").trim(),
+              );
+              if (Number.isFinite(v) && v >= 8) updateDisplay();
+            });
           }
           const domSel = $("distMonthDomSelect");
           if (domSel) {
@@ -33510,6 +34586,22 @@
               : "1"
             ).trim(),
           ),
+          cvar_risk_mgmt_enabled:
+            $("trendCvarRiskMgmtEnable") && $("trendCvarRiskMgmtEnable").value
+              ? String($("trendCvarRiskMgmtEnable").value) === "true"
+              : false,
+          cvar_window: Number(
+            ($("trendCvarWindow") && $("trendCvarWindow").value
+              ? $("trendCvarWindow").value
+              : "60"
+            ).trim(),
+          ),
+          cvar_budget_pct: Number(
+            ($("trendCvarBudgetPct") && $("trendCvarBudgetPct").value
+              ? $("trendCvarBudgetPct").value
+              : "2"
+            ).trim(),
+          ),
           risk_budget_overcap_policy:
             $("trendRiskBudgetOvercapPolicy") &&
             $("trendRiskBudgetOvercapPolicy").value
@@ -33666,6 +34758,106 @@
         const payload = _collectTrendResearchParamsForExport();
         ta.value = JSON.stringify(payload, null, 2);
         if (wrap) wrap.open = true;
+      }
+
+      function renderTrendEwmaCorrMatrix(data, mode) {
+        const legendEl = $("trendEwmaCorrLegend");
+        const heatmapEl = $("trendEwmaCorrHeatmap");
+        if (!legendEl || !heatmapEl) return;
+        if (String(mode || "").toLowerCase() !== "portfolio") {
+          legendEl.textContent = "仅组合模式展示组内相关性矩阵。";
+          heatmapEl.innerHTML = "<div class='muted'>单标的模式无组内矩阵</div>";
+          return;
+        }
+        const pack =
+          data && data.ewma_corr_60 && typeof data.ewma_corr_60 === "object"
+            ? data.ewma_corr_60
+            : {};
+        if (!pack.ok) {
+          legendEl.textContent = "样本不足60个交易日，不展示相关性矩阵";
+          heatmapEl.innerHTML =
+            "<div class='muted'>样本不足60个交易日，不展示相关性矩阵</div>";
+          return;
+        }
+        const codes = Array.isArray(pack.codes) ? pack.codes : [];
+        const matrix = Array.isArray(pack.matrix) ? pack.matrix : [];
+        const n = Math.min(codes.length, matrix.length);
+        if (n <= 1) {
+          legendEl.textContent = "标的数量不足，无法构建组内相关性矩阵。";
+          heatmapEl.innerHTML = "<div class='muted'>标的数量不足</div>";
+          return;
+        }
+        const labels = Array.from({ length: n }, (_, i) => String(i + 1));
+        const z = [];
+        const text = [];
+        for (let i = 0; i < n; i++) {
+          const rowRaw = Array.isArray(matrix[i]) ? matrix[i] : [];
+          const row = [];
+          const rowText = [];
+          for (let j = 0; j < n; j++) {
+            const v = Number(rowRaw[j]);
+            if (Number.isFinite(v)) {
+              const clipped = Math.max(-1, Math.min(1, v));
+              row.push(clipped);
+              rowText.push(clipped.toFixed(2));
+            } else {
+              row.push(null);
+              rowText.push("");
+            }
+          }
+          z.push(row);
+          text.push(rowText);
+        }
+        const mappingHtml = codes
+          .slice(0, n)
+          .map((c, i) => {
+            const code = String(c || "").trim();
+            const nm = codeName(code);
+            return `<span style="margin-right:12px"><b>${i + 1}</b>=${esc(code)}${nm ? `(${esc(nm)})` : ""}</span>`;
+          })
+          .join("");
+        const win = Number(pack.window);
+        const decay = Number(pack.decay);
+        const dateRange =
+          pack.start_date && pack.end_date
+            ? `${String(pack.start_date)} ~ ${String(pack.end_date)}`
+            : "-";
+        legendEl.innerHTML = `窗口=${Number.isFinite(win) ? Math.trunc(win) : 60}，衰减因子=${Number.isFinite(decay) ? decay.toFixed(2) : "0.94"}，样本区间=${esc(dateRange)}<br>${mappingHtml}`;
+        if (typeof Plotly === "undefined") {
+          heatmapEl.innerHTML =
+            "<div class='muted'>Plotly 未加载，无法绘图</div>";
+          return;
+        }
+        Plotly.newPlot(
+          "trendEwmaCorrHeatmap",
+          [
+            {
+              type: "heatmap",
+              x: labels,
+              y: labels,
+              z,
+              zmin: -1,
+              zmax: 1,
+              colorscale: [
+                [0.0, "rgb(26,152,80)"],
+                [0.5, "rgb(247,247,247)"],
+                [1.0, "rgb(215,48,39)"],
+              ],
+              text,
+              texttemplate: "%{text}",
+              textfont: { size: 12, color: "#111" },
+              hovertemplate: "行=%{y} 列=%{x}<br>corr=%{z:.2f}<extra></extra>",
+              xgap: 1,
+              ygap: 1,
+            },
+          ],
+          {
+            margin: { t: 20, r: 20, b: 40, l: 40 },
+            xaxis: { title: "标的编号", side: "top" },
+            yaxis: { title: "标的编号", autorange: "reversed" },
+          },
+          { responsive: true, displayModeBar: false },
+        );
       }
 
       async function runTrendResearch() {
@@ -33990,6 +35182,22 @@
             ($("trendRiskBudgetPct") && $("trendRiskBudgetPct").value
               ? $("trendRiskBudgetPct").value
               : "1"
+            ).trim(),
+          ),
+          cvar_risk_mgmt_enabled:
+            $("trendCvarRiskMgmtEnable") && $("trendCvarRiskMgmtEnable").value
+              ? String($("trendCvarRiskMgmtEnable").value) === "true"
+              : false,
+          cvar_window: Number(
+            ($("trendCvarWindow") && $("trendCvarWindow").value
+              ? $("trendCvarWindow").value
+              : "60"
+            ).trim(),
+          ),
+          cvar_budget_pct: Number(
+            ($("trendCvarBudgetPct") && $("trendCvarBudgetPct").value
+              ? $("trendCvarBudgetPct").value
+              : "2"
             ).trim(),
           ),
           risk_budget_overcap_policy:
@@ -34400,6 +35608,33 @@
         if (common.risk_budget_pct < 0.001 || common.risk_budget_pct > 0.03) {
           return setMsg("风险预算%需在0.1%~3%之间");
         }
+        if (common.cvar_risk_mgmt_enabled) {
+          if (!Number.isFinite(common.cvar_window)) {
+            return setMsg("CVaR窗口需为数字");
+          }
+          common.cvar_window = Math.floor(common.cvar_window);
+          if (common.cvar_window < 20) {
+            return setMsg("CVaR窗口需>=20");
+          }
+          if (!Number.isFinite(common.cvar_budget_pct)) {
+            return setMsg("CVaR预算%需为数字");
+          }
+          common.cvar_budget_pct =
+            common.cvar_budget_pct >= 0.1
+              ? common.cvar_budget_pct / 100.0
+              : common.cvar_budget_pct;
+          if (common.cvar_budget_pct < 0.001 || common.cvar_budget_pct > 0.1) {
+            return setMsg("CVaR预算%需在0.1%~10%之间");
+          }
+        } else {
+          common.cvar_window = Number.isFinite(common.cvar_window)
+            ? Math.max(20, Math.floor(common.cvar_window))
+            : 60;
+          let cb = Number(common.cvar_budget_pct);
+          if (!Number.isFinite(cb)) cb = 0.02;
+          else if (cb >= 0.1) cb = cb / 100.0;
+          common.cvar_budget_pct = Math.min(0.1, Math.max(0.001, cb));
+        }
         if (!Number.isFinite(common.risk_of_ruin_maxrisk)) {
           return setMsg("毁灭阈值maxrisk需为数字");
         }
@@ -34752,6 +35987,11 @@
           /* ignore */
         }
         renderTrendDailyReturnDist(data);
+        try {
+          renderTrendEwmaCorrMatrix(data, mode);
+        } catch (_) {
+          /* ignore */
+        }
         _renderTrendReturnDecomposition(
           data && data.return_decomposition ? data.return_decomposition : null,
         );
@@ -34776,6 +36016,8 @@
           "annualized_return",
           "annualized_volatility",
           "max_drawdown",
+          "var_95",
+          "cvar_95",
           "avg_daily_turnover",
           "avg_daily_turnover_rate",
           "avg_annual_turnover",
@@ -37131,6 +38373,39 @@
           $("calTimingMode") && $("calTimingMode").value
             ? String($("calTimingMode").value)
             : "portfolio";
+        const decisionMode =
+          $("calTimingDecisionMode") && $("calTimingDecisionMode").value
+            ? String($("calTimingDecisionMode").value).toLowerCase()
+            : "monthly";
+        const decisionDayInput = $("calTimingDecisionDay");
+        const decisionDayHint = $("calTimingDecisionDayHint");
+        if (decisionDayHint) {
+          decisionDayHint.textContent =
+            decisionMode === "weekly"
+              ? "按周：范围 [-5,5] 且不为0；负数表示倒数交易日（-1=周内最后一个交易日，通常为周五）。"
+              : "按月：范围 [-28,28] 且不为0；负数表示倒数自然日。";
+        }
+        if (decisionDayInput) {
+          const raw = Number(String(decisionDayInput.value || "").trim());
+          const validMonthly =
+            Number.isFinite(raw) &&
+            Math.floor(raw) === raw &&
+            raw >= -28 &&
+            raw <= 28 &&
+            raw !== 0;
+          const validWeekly =
+            Number.isFinite(raw) &&
+            Math.floor(raw) === raw &&
+            raw >= -5 &&
+            raw <= 5 &&
+            raw !== 0;
+          if (
+            (decisionMode === "monthly" && !validMonthly) ||
+            (decisionMode === "weekly" && !validWeekly)
+          ) {
+            decisionDayInput.value = "1";
+          }
+        }
         const singleSel = $("calTimingSingleCode");
         if (singleSel) {
           singleSel.disabled = mode !== "single";
@@ -37206,6 +38481,117 @@
         renderCtPeriodTable("monthly");
         renderCtPeriodTable("quarterly");
         renderCtPeriodTable("yearly");
+      }
+
+      function _baselineCvarOverlay(data, mode) {
+        const m = String(mode || "EW").toUpperCase();
+        const by =
+          data && data.cvar_overlay && data.cvar_overlay.by_portfolio
+            ? data.cvar_overlay.by_portfolio
+            : {};
+        return by[m] || null;
+      }
+
+      function _cvarStatusLabel(st) {
+        const k = String(st || "");
+        if (k === "ok") return "ok";
+        if (k === "insufficient_samples")
+          return "insufficient_samples（样本不足）";
+        if (k === "non_positive_cvar")
+          return "non_positive_cvar（CVaR非正，不缩放）";
+        if (k === "invalid_cvar") return "invalid_cvar";
+        return k || "-";
+      }
+
+      function _renderBaselineCvarOverlayMetrics(data, mode) {
+        const el = $("baselineCvarOverlayMetrics");
+        if (!el) return;
+        const pack = _baselineCvarOverlay(data, mode);
+        const m =
+          pack && pack.sim && pack.sim.metrics ? pack.sim.metrics : null;
+        if (!m) {
+          el.innerHTML = `<tr><td class="muted">请先完成一次持有策略回测</td></tr>`;
+          return;
+        }
+        el.innerHTML =
+          `<tr><th>指标</th><th>CVaR对照</th></tr>` +
+          `<tr><td>累计收益</td><td>${fmtPct(m.cumulative_return)}</td></tr>` +
+          `<tr><td>年化收益</td><td>${fmtPct(m.annualized_return)}</td></tr>` +
+          `<tr><td>年化波动</td><td>${fmtPct(m.annualized_volatility)}</td></tr>` +
+          `<tr><td>最大回撤</td><td>${fmtPct(m.max_drawdown)}</td></tr>` +
+          `<tr><td>平均日换手</td><td>${fmtPct(m.avg_daily_turnover)}</td></tr>`;
+      }
+
+      function _renderBaselineCurrentHoldings(data, mode) {
+        const el = $("baselineCurrentHoldingsTable");
+        const asOfEl = $("baselineCurrentHoldingsAsOf");
+        const promptEl = $("baselineCvarPrompt");
+        if (!el) return;
+        const m = String(mode || "EW").toUpperCase();
+        const by =
+          data && data.current_holdings_by_portfolio
+            ? data.current_holdings_by_portfolio
+            : {};
+        const rows = Array.isArray(by[m])
+          ? by[m]
+          : Array.isArray(data && data.current_holdings)
+            ? data.current_holdings
+            : [];
+        const pack = _baselineCvarOverlay(data, mode);
+        const prompt = pack && pack.prompt ? pack.prompt : null;
+        const sugMap = {};
+        if (prompt && Array.isArray(prompt.suggested_weights)) {
+          for (const w of prompt.suggested_weights) {
+            if (!w) continue;
+            sugMap[String(w.code || "")] = w.weight;
+          }
+        }
+        const asof = prompt && prompt.asof ? String(prompt.asof) : "";
+        if (asOfEl)
+          asOfEl.textContent = asof
+            ? `截至 ${asof}（权重最后一根交易日）`
+            : data && data.date_range && data.date_range.end
+              ? `截至 ${data.date_range.end}（回测结束日）`
+              : "请先完成一次持有策略回测";
+        el.innerHTML =
+          `<tr><th>标的代码</th><th>仓位比例</th><th>建议仓位</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持有收益</th></tr>` +
+          (rows.length
+            ? rows
+                .map((x) => {
+                  const code = String((x && x.code) || "");
+                  const sug = Object.prototype.hasOwnProperty.call(sugMap, code)
+                    ? sugMap[code]
+                    : null;
+                  return `<tr><td>${esc(codeLabel(code))}</td><td>${fmtPct(x.weight)}</td><td>${sug == null ? "-" : fmtPct(sug)}</td><td>${esc(x.entry_date || "-")}</td><td>${x.holding_days ?? "-"}</td><td>${x.holding_return == null ? "-" : fmtPct(x.holding_return)}</td></tr>`;
+                })
+                .join("")
+            : `<tr><td colspan="6" class="muted">当前无持仓</td></tr>`);
+        if (promptEl) {
+          if (!prompt) {
+            promptEl.textContent = "";
+          } else {
+            const scale = Number(prompt.scale);
+            const status = String(prompt.status || "");
+            let hint = "CVaR估计无效，对照暂维持原策略敞口";
+            if (status === "insufficient_samples") {
+              hint = "有效样本不足，对照暂维持原策略敞口";
+            } else if (status === "non_positive_cvar") {
+              hint = "CVaR非正，对照维持原策略敞口";
+            } else if (status === "ok") {
+              hint =
+                Number.isFinite(scale) && scale < 1
+                  ? "风险预算占用 / 建议降杠杆"
+                  : "CVaR在预算内，对照维持原策略敞口";
+            }
+            promptEl.innerHTML =
+              `CVaR提示：截至 ${esc(prompt.asof || "-")}，适用于${esc(prompt.applies_to || "下一交易日")}。` +
+              ` CVaR95=${prompt.cvar_95 == null ? "-" : fmtPct(prompt.cvar_95)}，预算=${pack && pack.budget_pct != null ? fmtPct(pack.budget_pct) : "-"}。` +
+              ` 状态=${esc(_cvarStatusLabel(prompt.status))}。` +
+              ` 建议风险总仓位=${fmtPct(prompt.suggested_risk_weight)}，现金=${fmtPct(prompt.suggested_cash)}。` +
+              ` ${esc(hint)}。`;
+          }
+        }
+        _renderBaselineCvarOverlayMetrics(data, mode);
       }
 
       function _renderRotationCurrentHoldings(rows) {
@@ -38026,6 +39412,10 @@
         const codes = mode === "portfolio" ? baseCodes : [];
         const start = String(($("start") && $("start").value) || "").trim();
         const end = String(($("end") && $("end").value) || "").trim();
+        const decision_mode =
+          $("calTimingDecisionMode") && $("calTimingDecisionMode").value
+            ? String($("calTimingDecisionMode").value).trim().toLowerCase()
+            : "monthly";
         const decision_day = Number(
           String(
             ($("calTimingDecisionDay") && $("calTimingDecisionDay").value) ||
@@ -38093,13 +39483,19 @@
               : mode === "portfolio" && (!codes || codes.length === 0)
                 ? "组合模式请先在候选池勾选标的"
                 : null,
+          decision_mode: !["monthly", "weekly"].includes(decision_mode)
+            ? "调仓日模式仅支持 monthly/weekly"
+            : null,
           decision_day:
             !Number.isFinite(decision_day) ||
             Math.floor(decision_day) !== decision_day ||
-            decision_day < -28 ||
-            decision_day > 28 ||
+            (decision_mode === "weekly"
+              ? decision_day < -5 || decision_day > 5
+              : decision_day < -28 || decision_day > 28) ||
             decision_day === 0
-              ? "调仓日（决策日）必须是 [-28,28] 的整数且不能为0"
+              ? decision_mode === "weekly"
+                ? "按周模式下，调仓日（决策日）必须是 [-5,5] 的整数且不能为0"
+                : "按月模式下，调仓日（决策日）必须是 [-28,28] 的整数且不能为0"
               : null,
           hold_days:
             !Number.isFinite(hold_days) ||
@@ -38142,6 +39538,7 @@
           start,
           end,
           adjust: "none",
+          decision_mode,
           decision_day: Number.isFinite(decision_day)
             ? Math.floor(decision_day)
             : null,
@@ -38204,6 +39601,10 @@
           $("start") && $("start").value ? $("start").value : ""
         ).trim();
         const end = ($("end") && $("end").value ? $("end").value : "").trim();
+        const decision_mode =
+          $("calTimingDecisionMode") && $("calTimingDecisionMode").value
+            ? String($("calTimingDecisionMode").value).trim().toLowerCase()
+            : "monthly";
         const decision_day = Number(
           ($("calTimingDecisionDay").value || "").trim(),
         );
@@ -38234,14 +39635,22 @@
             ? String($("calTimingShift").value)
             : "prev";
         const dynamic_universe = isDynamicUniverseOn();
+        if (!["monthly", "weekly"].includes(decision_mode)) {
+          return setMsg("调仓日模式仅支持 monthly/weekly");
+        }
         if (
           !Number.isFinite(decision_day) ||
           Math.floor(decision_day) !== decision_day ||
-          decision_day < -28 ||
-          decision_day > 28 ||
+          (decision_mode === "weekly"
+            ? decision_day < -5 || decision_day > 5
+            : decision_day < -28 || decision_day > 28) ||
           decision_day === 0
         ) {
-          return setMsg("调仓日（决策日）必须是 [-28,28] 的整数且不能为0");
+          return setMsg(
+            decision_mode === "weekly"
+              ? "按周模式下，调仓日（决策日）必须是 [-5,5] 的整数且不能为0"
+              : "按月模式下，调仓日（决策日）必须是 [-28,28] 的整数且不能为0",
+          );
         }
         if (
           !Number.isFinite(hold_days) ||
@@ -38292,6 +39701,7 @@
           start,
           end,
           adjust: "none",
+          decision_mode,
           decision_day: Math.floor(decision_day),
           hold_days: Math.floor(hold_days),
           position_mode,
@@ -38411,7 +39821,7 @@
           [
             ..._perfReportLines(`日历效应择时(${modeLabel})`, sm),
             `超额：年化 ${fmtPct(em.annualized_return)}，最大回撤 ${fmtPct(em.max_drawdown)}，信息比率 ${fmtNum(em.information_ratio)}。`,
-            `参数：调仓日（决策日）=${meta.decision_day ?? "-"}，持仓时长=${meta.hold_days ?? "-"}天，仓位模式=${meta.position_mode || "-"}，成交口径=${meta.exec_price || "-"}。`,
+            `参数：调仓日模式=${meta.decision_mode || "monthly"}，调仓日（决策日）=${meta.decision_day ?? "-"}，持仓时长=${meta.hold_days ?? "-"}天，仓位模式=${meta.position_mode || "-"}，成交口径=${meta.exec_price || "-"}。`,
             String(meta.position_mode || "").toLowerCase() === "risk_budget"
               ? `风险预算仓位：ATR周期=${Math.floor(Number(meta.risk_budget_atr_window || 20))}，预算=${fmtPct(Number(meta.risk_budget_pct || 0.01))}/标的/ATR；若组合总仓位>100%，按比例缩放。`
               : "风险预算仓位：未启用。",
@@ -38517,6 +39927,27 @@
           return setMsg(
             "ERC / 波动率倒数 估计窗口必须是 >=2 的整数交易日，例如 60",
           );
+        const cvar_window = Math.floor(
+          Number(
+            (
+              ($("baselineCvarWindow") && $("baselineCvarWindow").value) ||
+              "60"
+            ).trim(),
+          ),
+        );
+        if (!Number.isFinite(cvar_window) || cvar_window < 20)
+          return setMsg("CVaR窗口需为 >=20 的整数交易日，例如 60");
+        let cvar_budget_pct = Number(
+          (
+            ($("baselineCvarBudgetPct") && $("baselineCvarBudgetPct").value) ||
+            "2"
+          ).trim(),
+        );
+        if (!Number.isFinite(cvar_budget_pct))
+          return setMsg("CVaR预算%需为数字");
+        if (cvar_budget_pct >= 0.1) cvar_budget_pct = cvar_budget_pct / 100.0;
+        if (cvar_budget_pct < 0.001 || cvar_budget_pct > 0.1)
+          return setMsg("CVaR预算%需在0.1%~10%之间");
         const dynamic_universe = isDynamicUniverseOn();
         const corr_min_obs = 20;
         const exec_price =
@@ -38547,31 +39978,62 @@
           $("baselineDcaFrequency") && $("baselineDcaFrequency").value
             ? String($("baselineDcaFrequency").value).trim().toLowerCase()
             : "monthly";
+        let dca_weekly_weekday = Number(
+          (
+            ($("baselineDcaWeeklyWeekday") &&
+              $("baselineDcaWeeklyWeekday").value) ||
+            "1"
+          ).trim(),
+        );
+        let dca_monthly_day = Number(
+          (
+            ($("baselineDcaMonthlyDay") && $("baselineDcaMonthlyDay").value) ||
+            "1"
+          ).trim(),
+        );
         if (!dca_enabled) {
           dca_base_amount = 100000.0;
           dca_periodic_amount = 10000.0;
           dca_frequency = "monthly";
+          dca_weekly_weekday = 1;
+          dca_monthly_day = 1;
         }
         if (dca_enabled) {
-          if (!(Number.isFinite(dca_base_amount) && dca_base_amount > 0))
-            return setMsg("定投底仓金额必须是大于0的数字。");
+          if (!(Number.isFinite(dca_base_amount) && dca_base_amount >= 0))
+            return setMsg("定投底仓金额必须是大于等于0的数字。");
           if (!(
             Number.isFinite(dca_periodic_amount) && dca_periodic_amount >= 0
           ))
             return setMsg("定投每期金额必须是大于等于0的数字。");
           if (
-            ![
-              "none",
-              "daily",
-              "weekly",
-              "monthly",
-              "quarterly",
-              "yearly",
-            ].includes(dca_frequency)
+            dca_base_amount === 0 &&
+            (dca_periodic_amount === 0 || dca_frequency === "none")
+          )
+            return setMsg("底仓为0时，每期金额必须大于0且频率不能为无追加。");
+          if (!["none", "daily", "weekly", "monthly"].includes(dca_frequency)) {
+            return setMsg("定投频率仅支持 none/daily/weekly/monthly");
+          }
+          if (
+            dca_frequency === "weekly" &&
+            !(
+              Number.isFinite(dca_weekly_weekday) &&
+              Math.floor(dca_weekly_weekday) === dca_weekly_weekday &&
+              dca_weekly_weekday >= 1 &&
+              dca_weekly_weekday <= 5
+            )
           ) {
-            return setMsg(
-              "定投频率仅支持 none/daily/weekly/monthly/quarterly/yearly",
-            );
+            return setMsg("周投日期仅支持周一到周五（1~5）。");
+          }
+          if (
+            dca_frequency === "monthly" &&
+            !(
+              Number.isFinite(dca_monthly_day) &&
+              Math.floor(dca_monthly_day) === dca_monthly_day &&
+              dca_monthly_day >= 1 &&
+              dca_monthly_day <= 28
+            )
+          ) {
+            return setMsg("月投日期仅支持每月1~28日。");
           }
         }
         $("status").textContent = "计算中...";
@@ -38590,6 +40052,8 @@
             fft_roll,
             fft_roll_step,
             rp_window_days,
+            cvar_window,
+            cvar_budget_pct,
             holding_mode: baseline_mode,
             custom_weights,
             dynamic_universe,
@@ -38598,6 +40062,9 @@
             dca_base_amount,
             dca_periodic_amount,
             dca_frequency,
+            dca_weekly_weekday: Math.floor(dca_weekly_weekday || 1),
+            dca_monthly_day: Math.floor(dca_monthly_day || 1),
+            dca_non_trading_shift: "next",
           }),
         });
         const text = await resp.text();
@@ -38618,6 +40085,8 @@
           fft_roll,
           fft_roll_step,
           rp_window_days,
+          cvar_window,
+          cvar_budget_pct,
           holding_mode: baseline_mode,
           custom_weights,
           dynamic_universe,
@@ -38626,6 +40095,9 @@
           dca_base_amount,
           dca_periodic_amount,
           dca_frequency,
+          dca_weekly_weekday: Math.floor(dca_weekly_weekday || 1),
+          dca_monthly_day: Math.floor(dca_monthly_day || 1),
+          dca_non_trading_shift: "next",
         };
         // Save last baseline payload for distribution re-fetch (with different adjust).
         window.__distBaselinePayload = {
@@ -38640,10 +40112,15 @@
           fft_roll_step,
           dynamic_universe,
           corr_min_obs,
+          cvar_window,
+          cvar_budget_pct,
           dca_enabled,
           dca_base_amount,
           dca_periodic_amount,
           dca_frequency,
+          dca_weekly_weekday: Math.floor(dca_weekly_weekday || 1),
+          dca_monthly_day: Math.floor(dca_monthly_day || 1),
+          dca_non_trading_shift: "next",
         };
         window.__distBaselineCache = window.__distBaselineCache || {};
         window.__distBaselineCache[ADJUST_USED] = data;
@@ -38667,6 +40144,7 @@
         syncBaselineChartTitles(picked.mode);
         plotBaselineAlignedCharts(data, picked.mode);
         renderMetrics(picked.metrics);
+        _renderBaselineCurrentHoldings(data, picked.mode);
         renderBaselineDailyReturnDist(data, picked.mode);
         renderContributionTables("ew", picked.attribution);
         periodState.weekly.data = data.period_returns.weekly || [];
@@ -38740,6 +40218,11 @@
             : "lump_sum"
         ).toLowerCase();
         const dcaOn = investMode === "dca";
+        const dcaFreq = (
+          $("baselineDcaFrequency") && $("baselineDcaFrequency").value
+            ? String($("baselineDcaFrequency").value)
+            : "monthly"
+        ).toLowerCase();
         if ($("baselineRpWin"))
           $("baselineRpWin").disabled = mode !== "RP" && mode !== "IVOL";
         if ($("baselineCustomWeightsWrap"))
@@ -38750,9 +40233,25 @@
         for (const id of [
           "baselineDcaBaseAmount",
           "baselineDcaFrequency",
+          "baselineDcaWeeklyWeekday",
+          "baselineDcaMonthlyDay",
           "baselineDcaPeriodicAmount",
         ]) {
           if ($(id)) $(id).disabled = !dcaOn;
+        }
+        if ($("baselineDcaWeeklyWeekday")) {
+          $("baselineDcaWeeklyWeekday").style.display =
+            dcaOn && dcaFreq === "weekly" ? "" : "none";
+          $("baselineDcaWeeklyWeekday").disabled = !(
+            dcaOn && dcaFreq === "weekly"
+          );
+        }
+        if ($("baselineDcaMonthlyDay")) {
+          $("baselineDcaMonthlyDay").style.display =
+            dcaOn && dcaFreq === "monthly" ? "" : "none";
+          $("baselineDcaMonthlyDay").disabled = !(
+            dcaOn && dcaFreq === "monthly"
+          );
         }
       }
       if ($("baselineMode"))
@@ -38768,11 +40267,16 @@
             lastBaseline.attribution;
           plotBaselineAlignedCharts(lastBaseline, mode);
           renderMetrics(metrics);
+          _renderBaselineCurrentHoldings(lastBaseline, mode);
           renderBaselineDailyReturnDist(lastBaseline, mode);
           renderContributionTables("ew", attribution);
         });
       if ($("baselineInvestMode"))
         $("baselineInvestMode").addEventListener("change", () => {
+          updateBaselineHoldingUi();
+        });
+      if ($("baselineDcaFrequency"))
+        $("baselineDcaFrequency").addEventListener("change", () => {
           updateBaselineHoldingUi();
         });
       if ($("baselineDailyRetSeries"))
@@ -40882,6 +42386,10 @@
           _enforceTrendVolRiskMutualExclusion("trendVolPeriodicRiskMgmtEnable");
           updateTrendSizingUi();
         });
+      $("trendCvarRiskMgmtEnable").addEventListener("change", () => {
+        updateTrendSizingUi();
+        _saveResearchSettingsDebounced();
+      });
       if ($("trendMonthlyRiskBudgetEnable"))
         $("trendMonthlyRiskBudgetEnable").addEventListener(
           "change",
@@ -41085,7 +42593,9 @@
             trend: _readFields(SETTINGS_FIELD_IDS.trend),
             calTiming: _readFields(SETTINGS_FIELD_IDS.calTiming),
             mcEw: _readFields(SETTINGS_FIELD_IDS.mcEw),
+            mcCal: _readFields(SETTINGS_FIELD_IDS.mcCal),
             mcRot: _readFields(SETTINGS_FIELD_IDS.mcRot),
+            mcTrend: _readFields(SETTINGS_FIELD_IDS.mcTrend),
             sim: _readFields(SETTINGS_FIELD_IDS.sim),
           };
         }
@@ -41116,7 +42626,9 @@
         const calTimingSaved = _settingsLoad(SETTINGS_KEYS.calTiming);
         const mcLegacy = _settingsLoad(`${SETTINGS_NS}.mc`);
         const mcEwSaved = _settingsLoad(SETTINGS_KEYS.mcEw) || mcLegacy;
+        const mcCalSaved = _settingsLoad(SETTINGS_KEYS.mcCal) || {};
         const mcRotSaved = _settingsLoad(SETTINGS_KEYS.mcRot) || mcLegacy;
+        const mcTrendSaved = _settingsLoad(SETTINGS_KEYS.mcTrend) || {};
         const simSaved = _settingsLoad(SETTINGS_KEYS.sim);
         const selSaved = _settingsLoad(SETTINGS_KEYS.selectedCodes);
         const groupSaved = _settingsLoad(SETTINGS_KEYS.candidateGroups);
@@ -41160,7 +42672,9 @@
         _applyFields(SETTINGS_FIELD_IDS.trend, trendSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.calTiming, calTimingSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.mcEw, mcEwSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.mcCal, mcCalSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.mcRot, mcRotSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.mcTrend, mcTrendSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.sim, simSaved || {});
         if (!(rotationSaved && typeof rotationSaved === "object")) {
           try {
@@ -41339,6 +42853,11 @@
           "change",
           _syncCalTimingModeUi,
         );
+      if ($("calTimingDecisionMode"))
+        $("calTimingDecisionMode").addEventListener(
+          "change",
+          _syncCalTimingModeUi,
+        );
       if ($("calTimingDailyRetMode"))
         $("calTimingDailyRetMode").addEventListener("change", () => {
           try {
@@ -41381,20 +42900,36 @@
       async function runMcEw() {
         const btn = $("runMcEw");
         const runHint = $("runMcEwHint");
-        const codes = _codesForStrategy("baseline");
-        if (codes.length === 0) return setMsg("未选择任何标的。");
-        const start = $("start").value.trim();
-        const end = $("end").value.trim();
-        const benchmark_code = $("benchmark").value || null;
-        const rebalance = $("rebalance").value || "weekly";
+        const baselinePayload =
+          window.__lastBaselinePayload &&
+          typeof window.__lastBaselinePayload === "object"
+            ? { ...window.__lastBaselinePayload }
+            : null;
+        if (!baselinePayload) {
+          return setMsg(
+            "请先运行一次持有策略回测，再运行持有策略蒙特卡洛（复用已验证参数）。",
+          );
+        }
+        if (
+          !Array.isArray(baselinePayload.codes) ||
+          baselinePayload.codes.length <= 0
+        ) {
+          return setMsg("持有策略蒙特卡洛需要至少1个标的。");
+        }
         const n_sims = Number(($("mcEwN").value || "10000").trim());
         const block_size = Number(($("mcEwBlock").value || "5").trim());
         const winRaw = ($("mcEwWindow").value || "").trim();
         const sample_window_days = winRaw === "" ? null : Number(winRaw);
         if (sample_window_days != null && !Number.isFinite(sample_window_days))
           return setMsg("滚动窗口必须是整数交易日，例如 2520");
+        if (!Number.isFinite(n_sims) || n_sims < 50 || n_sims > 50000)
+          return setMsg("模拟次数需在[50,50000]区间");
+        if (!Number.isFinite(block_size) || block_size < 1 || block_size > 252)
+          return setMsg("区块长度需在[1,252]区间");
         const seedRaw = ($("mcEwSeed").value || "").trim();
         const seed = seedRaw === "" ? null : Number(seedRaw);
+        if (seed != null && !Number.isFinite(seed))
+          return setMsg("随机种子需为数字，或留空");
         const oldTxt = btn.textContent;
         btn.disabled = true;
         btn.textContent = "计算中...";
@@ -41402,20 +42937,16 @@
         $("status").textContent = "计算中...";
         setMsg("");
         try {
+          const payload = {
+            ...baselinePayload,
+            n_sims,
+            block_size,
+            seed,
+            sample_window_days,
+          };
           const resp = await api("/analysis/baseline/montecarlo", {
             method: "POST",
-            body: JSON.stringify({
-              codes,
-              start,
-              end,
-              benchmark_code,
-              adjust: ADJUST_USED,
-              rebalance,
-              n_sims,
-              block_size,
-              seed,
-              sample_window_days,
-            }),
+            body: JSON.stringify(payload),
           });
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);
@@ -41424,15 +42955,218 @@
           renderMcTable("mcEwTable", data.mc);
           plotMcHist("mcEwHist", data.mc, $("mcEwMetric").value);
           renderFit("Ew", data.mc, $("mcEwMetric").value);
-          const bullets = _mcReportLines("等权组合", data.mc);
+          const mode = String(
+            (data && data.meta && data.meta.holding_mode) ||
+              baselinePayload.holding_mode ||
+              "EW",
+          ).toUpperCase();
+          const modeLabelMap = {
+            EW: "等权",
+            RP: "风险平价",
+            IVOL: "逆波动",
+            CUSTOM: "自定义权重",
+          };
+          const modeLabel = modeLabelMap[mode] || mode;
+          const bullets = _mcReportLines(`持有策略(${modeLabel})`, data.mc);
           setReport(
-            "等权蒙特卡洛解读",
+            "持有策略蒙特卡洛解读",
             bullets,
             "说明：蒙特卡洛结果反映历史收益片段重采样分布，不等于未来必然路径。",
           );
           setReportTo(
             "mcEwReport",
-            "等权蒙特卡洛解读",
+            "持有策略蒙特卡洛解读",
+            bullets,
+            "说明：蒙特卡洛结果反映历史收益片段重采样分布，不等于未来必然路径。",
+          );
+        } finally {
+          if (runHint) runHint.textContent = "";
+          $("status").textContent = "";
+          btn.disabled = false;
+          btn.textContent = oldTxt;
+        }
+      }
+
+      async function runMcCal() {
+        const btn = $("runMcCal");
+        const runHint = $("runMcCalHint");
+        const calPayload =
+          window.__lastCalTimingPayload &&
+          typeof window.__lastCalTimingPayload === "object"
+            ? { ...window.__lastCalTimingPayload }
+            : null;
+        if (!calPayload) {
+          return setMsg(
+            "请先运行一次日历择时回测，再运行日历蒙特卡洛（复用已验证参数）。",
+          );
+        }
+        const mode = String(calPayload.mode || "portfolio").toLowerCase();
+        if (mode === "portfolio") {
+          if (!Array.isArray(calPayload.codes) || calPayload.codes.length <= 0)
+            return setMsg("日历蒙特卡洛（组合模式）需要至少1个标的。");
+        } else if (mode === "single") {
+          if (!String(calPayload.code || "").trim())
+            return setMsg("日历蒙特卡洛（单标的模式）需要有效代码。");
+        }
+        const n_sims = Number(($("mcCalN").value || "2000").trim());
+        const block_size = Number(($("mcCalBlock").value || "20").trim());
+        const winRaw = ($("mcCalWindow").value || "").trim();
+        const sample_window_days = winRaw === "" ? null : Number(winRaw);
+        if (sample_window_days != null && !Number.isFinite(sample_window_days))
+          return setMsg("滚动窗口必须是整数交易日，例如 2520");
+        if (!Number.isFinite(n_sims) || n_sims < 50 || n_sims > 50000)
+          return setMsg("模拟次数需在[50,50000]区间");
+        if (!Number.isFinite(block_size) || block_size < 1 || block_size > 252)
+          return setMsg("区块长度需在[1,252]区间");
+        const seedRaw = ($("mcCalSeed").value || "").trim();
+        const seed = seedRaw === "" ? null : Number(seedRaw);
+        if (seed != null && !Number.isFinite(seed))
+          return setMsg("随机种子需为数字，或留空");
+        const fitRaw = ($("mcCalFitCandidates").value || "").trim();
+        const fit_candidates = fitRaw
+          ? fitRaw
+              .split(",")
+              .map((x) => String(x || "").trim())
+              .filter((x) => !!x)
+          : ["normal", "t", "skew_t", "ged", "lognorm"];
+        const oldTxt = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "计算中...";
+        if (runHint) runHint.textContent = "计算中...";
+        $("status").textContent = "计算中...";
+        setMsg("");
+        try {
+          const payload = {
+            ...calPayload,
+            n_sims,
+            block_size,
+            seed,
+            sample_window_days,
+            fit_candidates,
+            fit_rule: "bic_ks",
+            fit_ks_alpha: 0.05,
+            sqn_window: 100,
+          };
+          const resp = await api("/analysis/calendar-timing/montecarlo", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          const text = await resp.text();
+          if (!resp.ok) return setMsg(text);
+          const data = JSON.parse(text);
+          lastMcCal = data.mc;
+          renderMcTable("mcCalTable", data.mc);
+          plotMcHist("mcCalHist", data.mc, $("mcCalMetric").value);
+          renderFit("Cal", data.mc, $("mcCalMetric").value);
+          const modeLabel =
+            String(calPayload.mode || "").toLowerCase() === "single"
+              ? "单标的"
+              : "组合";
+          const bullets = _mcReportLines(`日历择时(${modeLabel})`, data.mc);
+          setReportTo(
+            "mcCalReport",
+            "日历择时蒙特卡洛解读",
+            bullets,
+            "说明：蒙特卡洛结果反映历史收益片段重采样分布，不等于未来必然路径。",
+          );
+        } finally {
+          if (runHint) runHint.textContent = "";
+          $("status").textContent = "";
+          btn.disabled = false;
+          btn.textContent = oldTxt;
+        }
+      }
+
+      async function runMcTrend() {
+        const btn = $("runMcTrend");
+        const runHint = $("runMcTrendHint");
+        const lastPayload =
+          window.__lastTrendPayload &&
+          typeof window.__lastTrendPayload === "object"
+            ? { ...window.__lastTrendPayload }
+            : null;
+        const exportPack = _collectTrendResearchParamsForExport();
+        const mode = String(
+          (lastPayload && lastPayload.mode) ||
+            (exportPack && exportPack.mode) ||
+            "",
+        ).toLowerCase();
+        if (mode !== "portfolio") {
+          return setMsg("趋势蒙特卡洛当前仅支持趋势组合模式。请切到组合模式。");
+        }
+        const trendPayload = lastPayload
+          ? { ...lastPayload }
+          : exportPack &&
+              exportPack.api_payload &&
+              typeof exportPack.api_payload === "object"
+            ? { ...exportPack.api_payload }
+            : null;
+        if (!trendPayload) {
+          return setMsg(
+            "请先运行一次趋势回测，再运行趋势蒙特卡洛（复用已验证的趋势参数）。",
+          );
+        }
+        if (
+          !Array.isArray(trendPayload.codes) ||
+          trendPayload.codes.length <= 0
+        ) {
+          return setMsg("趋势蒙特卡洛需要至少1个组合标的。");
+        }
+        const n_sims = Number(($("mcTrendN").value || "2000").trim());
+        const block_size = Number(($("mcTrendBlock").value || "20").trim());
+        const winRaw = ($("mcTrendWindow").value || "").trim();
+        const sample_window_days = winRaw === "" ? null : Number(winRaw);
+        if (sample_window_days != null && !Number.isFinite(sample_window_days))
+          return setMsg("滚动窗口必须是整数交易日，例如 2520");
+        if (!Number.isFinite(n_sims) || n_sims < 50 || n_sims > 50000)
+          return setMsg("模拟次数需在[50,50000]区间");
+        if (!Number.isFinite(block_size) || block_size < 1 || block_size > 252)
+          return setMsg("区块长度需在[1,252]区间");
+        const seedRaw = ($("mcTrendSeed").value || "").trim();
+        const seed = seedRaw === "" ? null : Number(seedRaw);
+        if (seed != null && !Number.isFinite(seed))
+          return setMsg("随机种子需为数字，或留空");
+        const fitRaw = ($("mcTrendFitCandidates").value || "").trim();
+        const fit_candidates = fitRaw
+          ? fitRaw
+              .split(",")
+              .map((x) => String(x || "").trim())
+              .filter((x) => !!x)
+          : ["normal", "t", "skew_t", "ged", "lognorm"];
+        const oldTxt = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "计算中...";
+        if (runHint) runHint.textContent = "计算中...";
+        $("status").textContent = "计算中...";
+        setMsg("");
+        try {
+          const { mode: _ignoredMode, ...trendPayloadForApi } = trendPayload;
+          const payload = {
+            ...trendPayloadForApi,
+            n_sims,
+            block_size,
+            seed,
+            sample_window_days,
+            fit_candidates,
+            fit_rule: "bic_ks",
+            fit_ks_alpha: 0.05,
+            sqn_window: 100,
+          };
+          const resp = await api("/analysis/trend/portfolio/montecarlo", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          const text = await resp.text();
+          if (!resp.ok) return setMsg(text);
+          const data = JSON.parse(text);
+          lastMcTrend = data.mc;
+          renderMcTable("mcTrendTable", data.mc);
+          plotMcHist("mcTrendHist", data.mc, $("mcTrendMetric").value);
+          renderFit("Trend", data.mc, $("mcTrendMetric").value);
+          const bullets = _mcReportLines("趋势策略", data.mc);
+          setReportTo(
+            "mcTrendReport",
+            "趋势蒙特卡洛解读",
             bullets,
             "说明：蒙特卡洛结果反映历史收益片段重采样分布，不等于未来必然路径。",
           );
@@ -42321,7 +44055,10 @@
       }
 
       $("runMcEw").addEventListener("click", runMcEw);
+      if ($("runMcCal")) $("runMcCal").addEventListener("click", runMcCal);
       $("runMcRot").addEventListener("click", runMcRot);
+      if ($("runMcTrend"))
+        $("runMcTrend").addEventListener("click", runMcTrend);
       if ($("runRotOosBootstrap"))
         $("runRotOosBootstrap").addEventListener(
           "click",
@@ -42374,6 +44111,12 @@
         plotMcHist("mcEwHist", lastMcEw, $("mcEwMetric").value);
         renderFit("Ew", lastMcEw, $("mcEwMetric").value);
       });
+      if ($("mcCalMetric"))
+        $("mcCalMetric").addEventListener("change", () => {
+          if (!lastMcCal) return;
+          plotMcHist("mcCalHist", lastMcCal, $("mcCalMetric").value);
+          renderFit("Cal", lastMcCal, $("mcCalMetric").value);
+        });
       $("mcRotMetric").addEventListener("change", () => {
         if (!lastMcRot) return;
         plotMcHist("mcRotHist", lastMcRot, $("mcRotMetric").value);
@@ -42384,6 +44127,12 @@
         plotMcHist("mcExcessHist", lastMcExcess, $("mcExcessMetric").value);
         renderFit("Excess", lastMcExcess, $("mcExcessMetric").value);
       });
+      if ($("mcTrendMetric"))
+        $("mcTrendMetric").addEventListener("change", () => {
+          if (!lastMcTrend) return;
+          plotMcHist("mcTrendHist", lastMcTrend, $("mcTrendMetric").value);
+          renderFit("Trend", lastMcTrend, $("mcTrendMetric").value);
+        });
       $("metricModalClose").addEventListener("click", closeMetricModal);
       $("metricModal").addEventListener("click", (e) => {
         if (e.target && e.target.id === "metricModal") closeMetricModal();

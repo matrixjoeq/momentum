@@ -134,7 +134,9 @@ def _parse_split_ratio(x: Any) -> float | None:
     return None
 
 
-def _call_fund_open_info(ak: Any, *, code: str, indicator: str) -> pd.DataFrame | None:
+def _call_fund_open_info(
+    ak: Any, *, code: str, indicator: str, suppress_errors: bool = True
+) -> pd.DataFrame | None:
     """
     AkShare compatibility wrapper:
     - newer versions: fund_open_fund_info_em(symbol=..., indicator=..., period=...)
@@ -148,16 +150,26 @@ def _call_fund_open_info(ak: Any, *, code: str, indicator: str) -> pd.DataFrame 
         return fn(symbol=code, indicator=indicator, period="成立来")
     except TypeError:
         pass
+    except Exception:
+        if suppress_errors:
+            return None
+        raise
     # Backward/variant compatibility
     try:
         return fn(fund=code, indicator=indicator)
     except TypeError:
         pass
+    except Exception:
+        if suppress_errors:
+            return None
+        raise
     # Last fallback: positional
     try:
         return fn(code, indicator)
     except Exception:
-        return None
+        if suppress_errors:
+            return None
+        raise
 
 
 def _parse_fund_events(ak: Any, *, code: str) -> list[FundEvent]:
@@ -323,7 +335,9 @@ def ingest_one_off_fund(
     end_d = _parse_yyyymmdd(end)
 
     try:
-        unit_df = _call_fund_open_info(ak, code=code, indicator="单位净值走势")
+        unit_df = _call_fund_open_info(
+            ak, code=code, indicator="单位净值走势", suppress_errors=False
+        )
         if unit_df is None:
             raise ValueError("fund_open_fund_info_em unavailable")
     except Exception as e:

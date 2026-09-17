@@ -68,6 +68,51 @@ def test_compute_gjr_garch_volatility_success_with_factory_stub() -> None:
     assert len(series.get("vol_dates") or []) == len(
         series.get("cond_vol_annualized") or []
     )
+    cmp = (diag.get("model_comparison") or {}) if isinstance(diag, dict) else {}
+    assert cmp.get("enabled") is False
+    assert cmp.get("models") == []
+
+
+def test_compute_gjr_garch_volatility_skips_six_model_fits_by_default() -> None:
+    close = _make_close_series()
+    calls = {"n": 0}
+
+    def _counting_factory(ret: pd.Series, **kwargs) -> _FakeModel:
+        calls["n"] += 1
+        return _fake_arch_model(ret, **kwargs)
+
+    out = compute_gjr_garch_volatility(
+        close,
+        max_points=300,
+        min_samples=120,
+        arch_model_factory=_counting_factory,
+    )
+    assert out["ok"] is True
+    assert calls["n"] == 1
+
+
+def test_compute_gjr_garch_volatility_model_comparison_when_enabled() -> None:
+    close = _make_close_series()
+    calls = {"n": 0}
+
+    def _counting_factory(ret: pd.Series, **kwargs) -> _FakeModel:
+        calls["n"] += 1
+        return _fake_arch_model(ret, **kwargs)
+
+    out = compute_gjr_garch_volatility(
+        close,
+        max_points=300,
+        min_samples=120,
+        include_model_comparison=True,
+        arch_model_factory=_counting_factory,
+    )
+    assert out["ok"] is True
+    assert calls["n"] == 7
+    diag = out["diagnostics"] or {}
+    cmp = diag.get("model_comparison") or {}
+    assert cmp.get("enabled") is True
+    assert int(cmp.get("candidate_count") or 0) == 6
+    assert len(cmp.get("models") or []) == 6
 
 
 def test_compute_gjr_garch_volatility_insufficient_samples() -> None:

@@ -523,7 +523,11 @@ def test_r_profit_scaleout_dynamic_r_and_breakeven_after_base_position_shrink() 
 def test_r_take_profit_dynamic_r_reference_after_base_position_shrink() -> None:
     idx = pd.date_range("2024-01-01", periods=7, freq="B")
     base_pos = pd.Series([0.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5], index=idx, dtype=float)
-    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    open_ = pd.Series(
+        [100.0, 100.0, 100.0, 106.0, 104.0, 104.0, 104.0],
+        index=idx,
+        dtype=float,
+    )
     close = pd.Series([100.0, 100.0, 100.0, 106.0, 104.0, 104.0, 104.0], index=idx)
     high = pd.Series([105.0, 105.0, 105.0, 106.0, 106.0, 106.0, 106.0], index=idx)
     low = pd.Series([95.0, 95.0, 95.0, 106.0, 104.0, 104.0, 104.0], index=idx)
@@ -551,6 +555,9 @@ def test_r_take_profit_dynamic_r_reference_after_base_position_shrink() -> None:
     assert ev
     assert float(ev[0].get("base_pos_scale") or 0.0) == pytest.approx(0.5, abs=1e-12)
     assert str((stats or {}).get("r_reference_mode") or "") == (
+        "close_only_dynamic_avg_cost_dynamic_risk_budget"
+    )
+    assert str((stats or {}).get("r_position_scale_mode") or "") == (
         "dynamic_base_position_scaled"
     )
 
@@ -798,7 +805,7 @@ def test_atr_stop_intraday_trigger_on_low_and_gap_open_fill() -> None:
     base_pos = pd.Series([1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
     close = pd.Series([100.0, 100.0, 100.0, 100.0], index=idx, dtype=float)
     high = pd.Series([106.0, 106.0, 106.0, 106.0], index=idx, dtype=float)
-    low_touch = pd.Series([94.0, 96.0, 97.6, 96.0], index=idx, dtype=float)
+    low_touch = pd.Series([94.0, 98.0, 97.6, 96.0], index=idx, dtype=float)
     open_touch = pd.Series([100.0, 98.0, 99.0, 100.0], index=idx, dtype=float)
     out_touch, stats_touch = _apply_atr_stop(
         base_pos,
@@ -817,9 +824,9 @@ def test_atr_stop_intraday_trigger_on_low_and_gap_open_fill() -> None:
     ev_touch = list(stats_touch.get("trigger_events") or [])
     assert ev_touch
     assert str(ev_touch[0].get("trigger_source")) == "low_touch_stop"
-    assert float(ev_touch[0].get("fill_price")) == pytest.approx(97.8)
+    assert float(ev_touch[0].get("fill_price")) == pytest.approx(98.0)
 
-    low_gap = pd.Series([94.0, 96.0, 97.9, 95.0], index=idx, dtype=float)
+    low_gap = pd.Series([94.0, 98.1, 98.1, 95.0], index=idx, dtype=float)
     open_gap = pd.Series([100.0, 98.0, 100.0, 96.8], index=idx, dtype=float)
     out_gap, stats_gap = _apply_atr_stop(
         base_pos,
@@ -977,11 +984,11 @@ def test_r_take_profit_intraday_retrace_trigger_and_gap_fill() -> None:
         tiers=tiers,
         atr_stop_enabled=True,
     )
-    assert float(out_touch.iloc[3]) == 0.0
+    assert float(out_touch.iloc[2]) == 0.0
     ev_touch = list(stats_touch.get("trigger_events") or [])
     assert ev_touch
     assert str(ev_touch[0].get("trigger_source")) == "low_touch_tp_retrace"
-    assert float(ev_touch[0].get("fill_price")) == pytest.approx(108.4)
+    assert float(ev_touch[0].get("fill_price")) == pytest.approx(107.0)
 
     open_gap = pd.Series([100.0, 100.0, 106.0, 106.0, 108.0], index=idx, dtype=float)
     out_gap, stats_gap = _apply_r_multiple_take_profit(
@@ -997,7 +1004,7 @@ def test_r_take_profit_intraday_retrace_trigger_and_gap_fill() -> None:
         tiers=tiers,
         atr_stop_enabled=True,
     )
-    assert float(out_gap.iloc[3]) == 0.0
+    assert float(out_gap.iloc[2]) == 0.0
     ev_gap = list(stats_gap.get("trigger_events") or [])
     assert ev_gap
     assert str(ev_gap[0].get("trigger_source")) == "gap_open_below_tp"
@@ -1326,12 +1333,12 @@ def test_overlay_execution_time_is_propagated_to_events() -> None:
     _, rtp_stats = _apply_r_multiple_take_profit(
         pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx[:5], dtype=float),
         open_=pd.Series(
-            [100.0, 100.0, 109.0, 109.0, 109.0], index=idx[:5], dtype=float
+            [100.0, 100.0, 120.0, 104.0, 104.0], index=idx[:5], dtype=float
         ),
         close=pd.Series(
-            [100.0, 100.0, 108.0, 108.0, 108.0], index=idx[:5], dtype=float
+            [100.0, 100.0, 120.0, 104.0, 104.0], index=idx[:5], dtype=float
         ),
-        high=pd.Series([100.0, 103.0, 110.0, 112.0, 112.0], index=idx[:5], dtype=float),
+        high=pd.Series([100.0, 103.0, 122.0, 105.0, 105.0], index=idx[:5], dtype=float),
         low=pd.Series([100.0, 97.0, 107.0, 104.0, 104.0], index=idx[:5], dtype=float),
         enabled=True,
         reentry_mode="reenter",
@@ -1402,6 +1409,53 @@ def test_overlay_execution_time_is_propagated_to_events() -> None:
     )
     ma_events = list((ma_stats or {}).get("trigger_events") or [])
     assert ma_events and str(ma_events[0].get("execution_time") or "") == "close"
+
+
+def test_static_atr_stop_keeps_entry_stop_when_later_atr_changes() -> None:
+    idx = pd.date_range("2024-01-01", periods=3, freq="B")
+    position, stats = _apply_atr_stop(
+        pd.Series([0.0, 1.0, 1.0], index=idx),
+        open_=pd.Series([100.0, 100.0, 110.0], index=idx),
+        close=pd.Series([100.0, 100.0, 110.0], index=idx),
+        high=pd.Series([101.0, 101.0, 110.0], index=idx),
+        low=pd.Series([99.0, 99.0, 99.0], index=idx),
+        mode="static",
+        atr_basis="latest",
+        reentry_mode="reenter",
+        execution_mode="intraday",
+        execution_time="full_day",
+        atr_window=2,
+        n_mult=1.0,
+        m_step=0.5,
+    )
+
+    assert float(position.iloc[-1]) == pytest.approx(1.0)
+    hold = list((stats or {}).get("trace_last_rows") or [])[-1]
+    assert hold["stop_after"] == pytest.approx(98.0)
+
+
+def test_r_pullback_full_day_uses_high_then_low_and_fills_trigger_line() -> None:
+    idx = pd.date_range("2024-01-01", periods=4, freq="B")
+    position, stats = _apply_r_multiple_take_profit(
+        pd.Series([0.0, 1.0, 1.0, 1.0], index=idx),
+        open_=pd.Series([100.0, 100.0, 115.0, 115.0], index=idx),
+        close=pd.Series([100.0, 100.0, 115.0, 115.0], index=idx),
+        high=pd.Series([105.0, 105.0, 120.0, 116.0], index=idx),
+        low=pd.Series([95.0, 95.0, 109.0, 114.0], index=idx),
+        enabled=True,
+        reentry_mode="reenter",
+        execution_mode="intraday",
+        execution_time="full_day",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.0, "retrace_ratio": 0.5}],
+        atr_stop_enabled=True,
+    )
+
+    assert float(position.loc[idx[2]]) == pytest.approx(0.0)
+    event = list((stats or {}).get("trigger_events") or [])[0]
+    assert event["trigger_source"] == "low_touch_tp_retrace"
+    assert event["fill_price"] == pytest.approx(110.0)
 
 
 def test_intraday_or_arbitration_prioritizes_full_exit_then_max_partial() -> None:
@@ -2194,7 +2248,9 @@ def test_trend_single_monthly_risk_budget_include_new_trade_switch(session_facto
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=40, freq="B")]
     with sf() as db:
         for i, d in enumerate(dates):
-            _add_price(db, code=code, day=d, close=float(100.0 + i * 0.8))
+            turn = 25
+            close = 100.0 + min(i, turn) * 0.8 - max(0, i - turn) * 2.0
+            _add_price(db, code=code, day=d, close=float(close))
         db.commit()
         out_no_new = compute_trend_backtest(
             db,

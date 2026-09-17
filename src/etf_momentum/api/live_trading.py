@@ -294,6 +294,11 @@ def _round_half_up_int(x: float) -> int:
     return int(Decimal(str(x)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
+def _commit_write_db(db: Session) -> None:
+    """Commit before returning HTTP responses so immediate follow-up GETs see writes."""
+    db.commit()
+
+
 def _default_trade_fee(price: float, quantity: float) -> float:
     amount = float(price) * float(quantity)
     return _round_fee_2(max(amount * TRADE_FEE_RATE, TRADE_FEE_MIN))
@@ -775,6 +780,29 @@ def _calc_metrics(nav: pd.Series, ret: pd.Series) -> dict[str, Any]:
         "ulcer_index": _safe_json_float(ui),
         "ulcer_performance_index": _safe_json_float(upi),
     }
+
+
+def _delete_closed_rounds_for_trade(db: Session, trade_id: int) -> None:
+    """Remove closed-round snapshots that reference a trade before deleting it."""
+    round_ids = [
+        int(x[0])
+        for x in db.query(LiveClosedRoundLeg.round_id)
+        .filter(LiveClosedRoundLeg.trade_id == int(trade_id))
+        .distinct()
+        .all()
+    ]
+    if not round_ids:
+        return
+    (
+        db.query(LiveClosedRoundLeg)
+        .filter(LiveClosedRoundLeg.round_id.in_(round_ids))
+        .delete(synchronize_session=False)
+    )
+    (
+        db.query(LiveClosedRound)
+        .filter(LiveClosedRound.id.in_(round_ids))
+        .delete(synchronize_session=False)
+    )
 
 
 def _delete_existing_scope_rows(db: Session, scope: _Scope) -> None:
@@ -4364,6 +4392,7 @@ def live_add_trade(payload: LiveTradeCreateRequest, db: Session = Depends(get_se
         .filter(LiveRepoTradeDetail.trade_id == int(row.id))
         .one_or_none()
     )
+    _commit_write_db(db)
     return _serialize_trade(row, repo_detail=repo_detail)
 
 
@@ -4432,6 +4461,7 @@ def live_update_trade(
         strategy_ids={old_strategy_id, int(row.strategy_id)},
         account_ids={old_account_id, int(row.account_id)},
     )
+    _commit_write_db(db)
     return _serialize_trade(row, repo_detail=repo_detail)
 
 
@@ -4450,6 +4480,7 @@ def live_add_trades_batch(
     _replay_touched_scopes(
         db, strategy_ids=touched_strategy_ids, account_ids=touched_account_ids
     )
+    _commit_write_db(db)
     return {"ok": True, "inserted": len(inserted)}
 
 
@@ -4765,6 +4796,7 @@ def live_trade_audit_fee_quantity_confirm(
             strategy_ids=touched_strategy_ids,
             account_ids=touched_account_ids,
         )
+    _commit_write_db(db)
     return LiveTradeAuditConfirmOut(
         requested=int(len(req_ids)),
         updated=int(len(updated_trade_ids)),
@@ -4790,6 +4822,12 @@ def live_delete_trade(
         .one_or_none()
     )
     snapshot = _serialize_trade(row, repo_detail=repo_detail).model_dump()
+    _delete_closed_rounds_for_trade(db, int(trade_id))
+    (
+        db.query(LiveRepoTradeDetail)
+        .filter(LiveRepoTradeDetail.open_trade_id == int(trade_id))
+        .update({"open_trade_id": None}, synchronize_session=False)
+    )
     (
         db.query(LiveRepoTradeDetail)
         .filter(LiveRepoTradeDetail.trade_id == int(trade_id))
@@ -4807,6 +4845,7 @@ def live_delete_trade(
         snapshot={"before": snapshot},
     )
     _replay_touched_scopes(db, strategy_ids={strategy_id}, account_ids={account_id})
+    _commit_write_db(db)
     return {"ok": True}
 
 
@@ -4847,6 +4886,7 @@ def live_add_corporate_action(
                 strategy_id=None,
             ),
         )
+    _commit_write_db(db)
     return LiveCorporateActionOut(
         id=int(row.id),
         account_id=row.account_id,

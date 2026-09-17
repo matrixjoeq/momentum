@@ -5,7 +5,6 @@ import json
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, text
 
-from etf_momentum.analysis.off_fund_regression import DEFAULT_CN_STOCK_FACTORS
 from etf_momentum.db.schema import ensure_runtime_schema
 
 
@@ -33,6 +32,10 @@ def test_off_fund_research_state_get_put_roundtrip(api_client: TestClient) -> No
             "drift_rebalance_enabled": False,
             "drift_abs_threshold": 0.12,
             "drift_rel_threshold": 0.31,
+            "invest_mode": "dca",
+            "dca_base_amount": 0.0,
+            "dca_periodic_amount": 1000.0,
+            "dca_frequency": "monthly",
             "show_non_group_codes": False,
             "pair_chart_prefs_json": '{"pair_slot_01":{"base":"CSI300","peer":"CSI500"}}',
         },
@@ -49,6 +52,8 @@ def test_off_fund_research_state_get_put_roundtrip(api_client: TestClient) -> No
     assert s1["drift_rebalance_enabled"] is False
     assert s1["drift_abs_threshold"] == 0.12
     assert s1["drift_rel_threshold"] == 0.31
+    assert s1["invest_mode"] == "dca"
+    assert s1["dca_base_amount"] == 0.0
     assert s1["show_non_group_codes"] is False
     assert (
         s1["pair_chart_prefs_json"]
@@ -63,6 +68,7 @@ def test_off_fund_research_state_get_put_roundtrip(api_client: TestClient) -> No
     assert s2["start_date"] == "20180101"
     assert s2["end_date"] == "20251231"
     assert s2["rebalance_cycle"] == "monthly"
+    assert s2["dca_base_amount"] == 0.0
     assert s2["show_non_group_codes"] is False
     assert (
         s2["pair_chart_prefs_json"]
@@ -88,6 +94,12 @@ def test_off_fund_research_state_rejects_invalid_payload(
         json={"drift_abs_threshold": 1.5},
     )
     assert bad_bound.status_code == 422
+
+    negative_base = client.put(
+        "/api/off-fund/research/state",
+        json={"invest_mode": "dca", "dca_base_amount": -1.0},
+    )
+    assert negative_base.status_code == 422
 
     too_long = client.put(
         "/api/off-fund/research/state",
@@ -118,14 +130,13 @@ def test_off_fund_research_state_rejects_invalid_payload(
 
 def test_off_fund_research_state_trim_and_order(api_client: TestClient) -> None:
     client = api_client
-    slot_count = max(0, len(DEFAULT_CN_STOCK_FACTORS) - 1)
+    slot_count = 60
     too_many: dict[str, dict[str, str]] = {
         f"pair_slot_{i:02d}": {"base": "CSI300", "peer": "CSI500"}
         for i in range(1, slot_count + 1)
     }
+    too_many["pair_slot_61"] = {"base": "CSI300", "peer": "CSI500"}
     too_many["pair_slot_extra_01"] = {"base": "CSI300", "peer": "CSI500"}
-    too_many["pair_slot_extra_02"] = {"base": "CSI300", "peer": "CSI500"}
-    too_many["pair_slot_extra_03"] = {"base": "CSI300", "peer": "CSI500"}
     r = client.put(
         "/api/off-fund/research/state",
         json={"pair_chart_prefs_json": json.dumps(too_many)},
@@ -133,15 +144,14 @@ def test_off_fund_research_state_trim_and_order(api_client: TestClient) -> None:
     assert r.status_code == 200
     out = r.json()
     assert out["meta"]["contract_version"] == "pair_contract_v1"
-    assert out["meta"]["warnings"] == ["prefs_trimmed_to_21"]
+    assert out["meta"]["warnings"] == ["prefs_trimmed_to_60"]
     prefs = out["pair_chart_prefs_json"]
     assert isinstance(prefs, str)
     assert '"pair_slot_01"' in prefs
-    assert f'"pair_slot_{slot_count:02d}"' in prefs
-    assert '"pair_slot_extra_01"' in prefs
-    assert '"pair_slot_extra_02"' in prefs
-    assert '"pair_slot_extra_03"' not in prefs
-    assert prefs.index('"pair_slot_01"') < prefs.index(f'"pair_slot_{slot_count:02d}"')
+    assert '"pair_slot_60"' in prefs
+    assert '"pair_slot_61"' not in prefs
+    assert '"pair_slot_extra_01"' not in prefs
+    assert prefs.index('"pair_slot_01"') < prefs.index('"pair_slot_60"')
 
 
 def test_off_fund_state_put_legacy_body_keeps_pair_prefs(
@@ -214,16 +224,15 @@ def test_off_fund_state_partial_put_keeps_unspecified_fields(
     )
 
 
-def test_off_fund_state_roundtrip_persists_extra_pair_slots(
-    api_client: TestClient,
-) -> None:
+def test_off_fund_state_drops_pair_slots_beyond_60(api_client: TestClient) -> None:
     client = api_client
     payload = {
         "pair_chart_prefs_json": json.dumps(
             {
                 "pair_slot_01": {"base": "CSI300", "peer": "CSI500"},
-                "pair_slot_extra_01": {"base": "CSI500", "peer": "CYB"},
-                "pair_slot_extra_02": {"base": "HSI", "peer": "NASDAQ100"},
+                "pair_slot_60": {"base": "CSI300", "peer": "CYB"},
+                "pair_slot_61": {"base": "CSI500", "peer": "CYB"},
+                "pair_slot_extra_01": {"base": "HSI", "peer": "NASDAQ100"},
             }
         )
     }
@@ -231,15 +240,61 @@ def test_off_fund_state_roundtrip_persists_extra_pair_slots(
     assert r1.status_code == 200
     out1 = r1.json()
     prefs1 = json.loads(out1["pair_chart_prefs_json"])
-    assert prefs1["pair_slot_extra_01"] == {"base": "CSI500", "peer": "CYB"}
-    assert prefs1["pair_slot_extra_02"] == {"base": "HSI", "peer": "NASDAQ100"}
+    assert prefs1["pair_slot_01"] == {"base": "CSI300", "peer": "CSI500"}
+    assert prefs1["pair_slot_60"] == {"base": "CSI300", "peer": "CYB"}
+    assert "pair_slot_61" not in prefs1
+    assert "pair_slot_extra_01" not in prefs1
 
     r2 = client.get("/api/off-fund/research/state")
     assert r2.status_code == 200
     out2 = r2.json()
     prefs2 = json.loads(out2["pair_chart_prefs_json"])
-    assert prefs2["pair_slot_extra_01"] == {"base": "CSI500", "peer": "CYB"}
-    assert prefs2["pair_slot_extra_02"] == {"base": "HSI", "peer": "NASDAQ100"}
+    assert prefs2["pair_slot_60"] == {"base": "CSI300", "peer": "CYB"}
+    assert "pair_slot_61" not in prefs2
+    assert "pair_slot_extra_01" not in prefs2
+
+
+def test_off_fund_state_keeps_pair_global_base(api_client: TestClient) -> None:
+    client = api_client
+    payload = {
+        "pair_chart_prefs_json": json.dumps(
+            {
+                "global_base": "CSI500",
+                "benchmark_market": "on_exchange",
+                "pair_slot_01": {"base": "CSI500", "peer": "CSI1000"},
+            }
+        )
+    }
+    r1 = client.put("/api/off-fund/research/state", json=payload)
+    assert r1.status_code == 200
+    out1 = r1.json()
+    prefs1 = json.loads(out1["pair_chart_prefs_json"])
+    assert prefs1["global_base"] == "CSI500"
+    assert prefs1["pair_slot_01"]["base"] == "CSI500"
+
+
+def test_off_fund_state_keeps_pair_benchmark_market(api_client: TestClient) -> None:
+    client = api_client
+    payload = {
+        "pair_chart_prefs_json": json.dumps(
+            {
+                "benchmark_market": "off_fund",
+                "pair_slot_01": {"base": "CSI300", "peer": "CSI500"},
+            }
+        )
+    }
+    r1 = client.put("/api/off-fund/research/state", json=payload)
+    assert r1.status_code == 200
+    out1 = r1.json()
+    prefs1 = json.loads(out1["pair_chart_prefs_json"])
+    assert prefs1["benchmark_market"] == "off_fund"
+    assert prefs1["pair_slot_01"] == {"base": "CSI300", "peer": "CSI500"}
+
+    r2 = client.get("/api/off-fund/research/state")
+    assert r2.status_code == 200
+    out2 = r2.json()
+    prefs2 = json.loads(out2["pair_chart_prefs_json"])
+    assert prefs2["benchmark_market"] == "off_fund"
 
 
 def test_runtime_schema_adds_pair_chart_prefs_column(tmp_path) -> None:

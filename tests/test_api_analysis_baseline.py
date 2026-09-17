@@ -245,6 +245,74 @@ def test_api_baseline_analysis_happy_path(api_client):
     assert data["fft_roll"]["ew"]["step"] == 5
     assert "nav_rsi" in data
     assert data["nav_rsi"]["windows"] == [14]
+    assert "cvar_overlay" in data
+    by = data["cvar_overlay"]["by_portfolio"]
+    for mode in ("EW", "RP", "IVOL", "CUSTOM"):
+        assert "prompt" in by[mode]
+        assert "sim" in by[mode]
+
+
+def test_api_baseline_cvar_defaults_and_bounds(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/baseline",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "benchmark_code": "510300",
+            "adjust": "hfq",
+            "rebalance": "yearly",
+        },
+    )
+    assert data["cvar_overlay"]["window"] == 60
+    assert data["cvar_overlay"]["budget_pct"] == pytest.approx(0.02)
+    err_w = post_json(
+        c,
+        "/api/analysis/baseline",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "cvar_window": 19,
+        },
+        expected_status=422,
+    )
+    assert "cvar_window" in str(err_w.get("detail") or err_w)
+    err_b = post_json(
+        c,
+        "/api/analysis/baseline",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "cvar_budget_pct": 0.2,
+        },
+        expected_status=422,
+    )
+    assert "cvar_budget_pct" in str(err_b.get("detail") or err_b)
+    ok_long = post_json_ok(
+        c,
+        "/api/analysis/baseline",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "benchmark_code": "510300",
+            "adjust": "hfq",
+            "rebalance": "yearly",
+            "cvar_window": 3000,
+        },
+    )
+    assert ok_long["cvar_overlay"]["window"] == 3000
 
 
 def test_api_baseline_analysis_accepts_dca_payload(api_client):
@@ -269,7 +337,7 @@ def test_api_baseline_analysis_accepts_dca_payload(api_client):
             "exec_price": "close",
             "holding_mode": "EW",
             "dca_enabled": True,
-            "dca_base_amount": 100000.0,
+            "dca_base_amount": 0.0,
             "dca_periodic_amount": 20000.0,
             "dca_frequency": "weekly",
         },
@@ -293,6 +361,7 @@ def test_api_baseline_analysis_accepts_dca_payload(api_client):
     m_off = data_off.get("metrics") or {}
     assert bool(m.get("dca_enabled")) is True
     assert str(m.get("dca_frequency") or "") == "weekly"
+    assert float(m.get("dca_base_amount")) == 0.0
     assert m.get("dca_total_invested") is not None
     assert m.get("dca_final_value") is not None
     assert m.get("dca_cumulative_return") is not None
@@ -304,6 +373,37 @@ def test_api_baseline_analysis_accepts_dca_payload(api_client):
     assert float(m.get("avg_annual_turnover") or 0.0) > float(
         m_off.get("avg_annual_turnover") or 0.0
     )
+
+    negative_base = c.post(
+        "/api/analysis/baseline",
+        json={
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240112",
+            "adjust": "hfq",
+            "dca_enabled": True,
+            "dca_base_amount": -1.0,
+            "dca_periodic_amount": 20000.0,
+            "dca_frequency": "weekly",
+        },
+    )
+    assert negative_base.status_code == 422
+
+    no_contributions = c.post(
+        "/api/analysis/baseline",
+        json={
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240112",
+            "adjust": "hfq",
+            "dca_enabled": True,
+            "dca_base_amount": 0.0,
+            "dca_periodic_amount": 0.0,
+            "dca_frequency": "none",
+        },
+    )
+    assert no_contributions.status_code == 400
+    assert "zero base amount" in str(no_contributions.json().get("detail") or "")
 
 
 def test_api_baseline_analysis_lppl_contract(api_client):

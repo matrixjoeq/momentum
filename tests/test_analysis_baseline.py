@@ -58,6 +58,15 @@ def test_compute_baseline_basic_metrics(session_factory):
     assert out["nav"]["dates"][0] == "2024-01-01"
     assert "EW" in out["nav"]["series"]
     assert out["nav"]["series"]["EW"][0] == pytest.approx(1.0)
+    assert "current_holdings" in out
+    assert "current_holdings_by_portfolio" in out
+    ew_hold = out["current_holdings_by_portfolio"]["EW"]
+    assert isinstance(ew_hold, list)
+    assert len(ew_hold) == 2
+    assert {str(x["code"]) for x in ew_hold} == {code_a, code_b}
+    for row in ew_hold:
+        assert "weight" in row
+        assert float(row["weight"]) > 0.0
     assert out["metrics"]["cumulative_return"] == pytest.approx(
         out["nav"]["series"]["EW"][-1] - 1.0, rel=1e-12
     )
@@ -109,7 +118,7 @@ def test_compute_baseline_supports_dca_metrics(session_factory):
                 rolling_months=[],
                 rolling_years=[],
                 dca_enabled=True,
-                dca_base_amount=100.0,
+                dca_base_amount=0.0,
                 dca_periodic_amount=20.0,
                 dca_frequency="daily",
             ),
@@ -117,7 +126,7 @@ def test_compute_baseline_supports_dca_metrics(session_factory):
 
     m = out["metrics"]
     assert bool(m.get("dca_enabled")) is True
-    expected_invested = 100.0 + 20.0 * (len(dates) - 1)
+    expected_invested = 20.0 * (len(dates) - 1)
     assert float(m["dca_total_invested"]) == pytest.approx(expected_invested, rel=1e-12)
     assert float(m["dca_final_value"]) > expected_invested
     assert float(m["dca_cumulative_return"]) == pytest.approx(
@@ -127,19 +136,22 @@ def test_compute_baseline_supports_dca_metrics(session_factory):
     dca_series = (out.get("dca") or {}).get("series") or {}
     acct = [float(x) for x in (dca_series.get("account_value") or [])]
     assert len(acct) == len(dates)
-    expected_curve_cum = float(acct[-1] / acct[0] - 1.0)
-    assert float(m["cumulative_return"]) == pytest.approx(expected_curve_cum, rel=1e-12)
-    expected_ann = float((acct[-1] / acct[0]) ** (252.0 / (len(acct) - 1)) - 1.0)
+    assert acct[0] == pytest.approx(0.0, abs=1e-12)
+    # Strategy metrics are time-weighted and must not count deposits as gains.
+    strategy_nav = [float(x) for x in out["nav"]["series"]["EW"]]
+    strat_cum = float(strategy_nav[-1] / strategy_nav[0] - 1.0)
+    assert float(m["cumulative_return"]) == pytest.approx(strat_cum, rel=1e-12)
+    expected_ann = float(
+        (strategy_nav[-1] / strategy_nav[0]) ** (252.0 / (len(strategy_nav) - 1)) - 1.0
+    )
     assert float(m["annualized_return"]) == pytest.approx(expected_ann, rel=1e-12)
     peak = -float("inf")
     mdd = 0.0
-    for v in acct:
+    for v in strategy_nav:
         peak = max(peak, float(v))
         mdd = min(mdd, float(v) / peak - 1.0)
     assert float(m["max_drawdown"]) == pytest.approx(float(mdd), rel=1e-12)
-    strat_cum = float(out["nav"]["series"]["EW"][-1] - 1.0)
     assert float(m["dca_time_weighted_return"]) == pytest.approx(strat_cum, rel=1e-12)
-    assert float(m["cumulative_return"]) != pytest.approx(strat_cum, rel=1e-9, abs=1e-9)
     assert np.isfinite(float(m["dca_money_weighted_return"]))
     dca = out.get("dca") or {}
     assert bool(dca.get("enabled")) is True
@@ -550,3 +562,260 @@ def test_compute_baseline_includes_daily_log_return_acf(session_factory):
         p = float(row["p_value"])
         assert 0.0 <= p <= 1.0
         assert "conclusion" in row
+
+
+def _assert_cvar_overlay_shape(out):
+    ov = out["cvar_overlay"]
+    assert ov["confidence"] == pytest.approx(0.95)
+    by = ov["by_portfolio"]
+    for mode in ("EW", "RP", "IVOL", "CUSTOM"):
+        pack = by[mode]
+        assert "prompt" in pack and "sim" in pack
+        prompt = pack["prompt"]
+        assert prompt["status"] in {
+            "ok",
+            "insufficient_samples",
+            "non_positive_cvar",
+            "invalid_cvar",
+        }
+        assert prompt["applies_to"] == "下一交易日"
+        sim = pack["sim"]
+        dates = out["nav"]["dates"]
+        assert len(sim["nav"]) == len(dates)
+        assert len(sim["scale"]) == len(dates)
+        assert sim["nav"][0] == pytest.approx(1.0)
+        m = sim["metrics"]
+        for k in (
+            "cumulative_return",
+            "annualized_return",
+            "annualized_volatility",
+            "max_drawdown",
+        ):
+            assert k in m
+
+
+def test_compute_baseline_cvar_overlay_does_not_change_orig_nav(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code_a = "AAA"
+        code_b = "BBB"
+        dates = [dt.date(2024, 1, d) for d in range(1, 7)]
+        closes_a = [100, 101, 102, 103, 104, 105]
+        # Keep the first portfolio return non-zero so the test catches any
+        # overlay recurrence that accidentally drops r_orig[0].
+        closes_b = [200, 202, 204, 206, 208, 210]
+        for d, ca, cb in zip(dates, closes_a, closes_b, strict=True):
+            db.add(
+                EtfPrice(
+                    code=code_a,
+                    trade_date=d,
+                    close=float(ca),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code=code_b,
+                    trade_date=d,
+                    close=float(cb),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+        inp = BaselineInputs(
+            codes=[code_a, code_b],
+            start=dates[0],
+            end=dates[-1],
+            benchmark_code=code_a,
+            adjust="qfq",
+            rolling_weeks=[],
+            rolling_months=[],
+            rolling_years=[],
+        )
+        out = compute_baseline(db, inp)
+
+    orig_ew = list(out["nav"]["series"]["EW"])
+    _assert_cvar_overlay_shape(out)
+    assert out["nav"]["series"]["EW"] == orig_ew
+    ov = out["cvar_overlay"]["by_portfolio"]["EW"]
+    assert ov["prompt"]["status"] == "insufficient_samples"
+    assert ov["sim"]["nav"] == pytest.approx(orig_ew, rel=0.0, abs=1e-12)
+    holds = out["current_holdings_by_portfolio"]["EW"]
+    sug = {x["code"]: float(x["weight"]) for x in ov["prompt"]["suggested_weights"]}
+    for row in holds:
+        code = str(row["code"])
+        assert code in sug
+        assert sug[code] == pytest.approx(float(row["weight"]), rel=0.0, abs=1e-9)
+    asof = ov["prompt"]["asof"]
+    assert asof == dates[-1].isoformat()
+    assert asof != inp.end.strftime("%Y%m%d")
+
+
+def test_compute_baseline_cvar_hs_skips_raw_missing_price_days(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code_a = "AAA"
+        code_b = "BBB"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(21)]
+        for i, d in enumerate(dates):
+            if i != 10:
+                db.add(
+                    EtfPrice(
+                        code=code_a,
+                        trade_date=d,
+                        close=float(100.0 + i),
+                        source="eastmoney",
+                        adjust="qfq",
+                    )
+                )
+            db.add(
+                EtfPrice(
+                    code=code_b,
+                    trade_date=d,
+                    close=float(200.0 + i),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+        out = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code_a, code_b],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code_b,
+                adjust="qfq",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+                cvar_window=20,
+            ),
+        )
+
+    prompt = out["cvar_overlay"]["by_portfolio"]["EW"]["prompt"]
+    assert prompt["status"] == "insufficient_samples"
+    # First row plus the missing row and its following row have no genuine
+    # close-to-close return, leaving 18 valid observations.
+    assert prompt["sample_count"] == 18
+
+
+def test_compute_baseline_cvar_rebalance_none_scale_one_matches_nav(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code = "AAA"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(8)]
+        closes = [100.0 + i for i in range(8)]
+        for d, c in zip(dates, closes, strict=True):
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=float(c),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+        out = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code,
+                adjust="qfq",
+                rebalance="none",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+            ),
+        )
+    ew = out["nav"]["series"]["EW"]
+    ov = out["cvar_overlay"]["by_portfolio"]["EW"]
+    assert all(abs(float(x) - 1.0) <= 1e-12 for x in ov["sim"]["scale"])
+    assert ov["sim"]["nav"] == pytest.approx(ew, rel=0.0, abs=1e-12)
+
+
+def test_compute_baseline_cvar_shrink_and_dca_uses_twr(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code = "AAA"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(40)]
+        closes = [100.0]
+        for i in range(1, 40):
+            closes.append(closes[-1] * 0.97)
+        for d, c in zip(dates, closes, strict=True):
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=float(c),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+        out = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code,
+                adjust="qfq",
+                rebalance="weekly",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+                cvar_window=20,
+                cvar_budget_pct=0.02,
+                dca_enabled=True,
+                dca_base_amount=100.0,
+                dca_periodic_amount=10.0,
+                dca_frequency="daily",
+            ),
+        )
+        out_no_dca = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code,
+                adjust="qfq",
+                rebalance="weekly",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+                cvar_window=20,
+                cvar_budget_pct=0.02,
+                dca_enabled=False,
+            ),
+        )
+    orig = out["nav"]["series"]["EW"]
+    ov = out["cvar_overlay"]["by_portfolio"]["EW"]
+    assert orig[0] == pytest.approx(1.0)
+    assert ov["sim"]["nav"][0] == pytest.approx(1.0)
+    assert min(float(x) for x in ov["sim"]["scale"]) < 1.0
+    ov_no_dca = out_no_dca["cvar_overlay"]["by_portfolio"]["EW"]
+    assert ov["sim"]["nav"] == pytest.approx(
+        ov_no_dca["sim"]["nav"], rel=0.0, abs=1e-12
+    )
+    assert ov["sim"]["scale"] == pytest.approx(
+        ov_no_dca["sim"]["scale"], rel=0.0, abs=1e-12
+    )
+    dca_acct = ((out.get("dca") or {}).get("series") or {}).get("account_value") or []
+    if dca_acct:
+        assert ov["sim"]["nav"][-1] != pytest.approx(float(dca_acct[-1]), abs=1e-6)
+    prompt = ov["prompt"]
+    if prompt["status"] == "ok" and float(prompt["scale"]) < 1.0 - 1e-12:
+        holds = out["current_holdings_by_portfolio"]["EW"]
+        sug = {x["code"]: float(x["weight"]) for x in prompt["suggested_weights"]}
+        for row in holds:
+            code = str(row["code"])
+            assert sug[code] == pytest.approx(
+                float(row["weight"]) * float(prompt["scale"]), rel=0.0, abs=1e-9
+            )

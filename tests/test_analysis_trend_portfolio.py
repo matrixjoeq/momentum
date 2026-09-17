@@ -690,7 +690,14 @@ def test_trend_portfolio_trade_statistics_have_samples_user_case_like(session_fa
         for k, code in enumerate(codes):
             drift = 0.00012 + 0.000025 * float(k)
             for i, d in enumerate(dates):
-                px = 100.0 * ((1.0 + drift) ** (float(i) / float(n) * float(n)))
+                turn = max(1, n - 60)
+                rising_days = min(i, turn)
+                falling_days = max(0, i - turn)
+                px = (
+                    100.0
+                    * ((1.0 + drift) ** float(rising_days))
+                    * (0.99 ** float(falling_days))
+                )
                 _add_price(db, code=code, day=d, close=float(px))
         db.commit()
         out = compute_trend_portfolio_backtest(
@@ -712,6 +719,14 @@ def test_trend_portfolio_trade_statistics_have_samples_user_case_like(session_fa
     overall = ts.get("overall") or {}
     by_code = ts.get("by_code") or {}
     ecs = ts.get("entry_condition_stats") or {}
+    episode_counts = ts.get("episode_counts") or {}
+    assert ts.get("scope") == "closed_trades_only"
+    assert int(episode_counts.get("closed") or 0) == int(
+        overall.get("total_trades") or 0
+    )
+    assert int(episode_counts.get("all") or 0) == int(
+        episode_counts.get("closed") or 0
+    ) + int(episode_counts.get("open_mtm") or 0)
     assert int(overall.get("total_trades") or 0) > 0
     assert any(int((v or {}).get("total_trades") or 0) > 0 for v in by_code.values())
     assert "overall" in ecs
