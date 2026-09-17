@@ -1,5 +1,9 @@
 from pathlib import Path
 
+RESEARCH_HTML = (
+    Path(__file__).resolve().parents[1] / "src/etf_momentum/web/research.html"
+)
+
 
 def _trade_ret(
     *,
@@ -72,7 +76,7 @@ def test_monthday_2x2_entry_exit_price_is_strict_trade_interval() -> None:
 
 
 def test_research_html_uses_trade_return_helper_for_2x2_calendar_effect() -> None:
-    html = Path("src/etf_momentum/web/research.html").read_text(encoding="utf-8")
+    html = RESEARCH_HTML.read_text(encoding="utf-8")
     assert "const _tradeRet = (i, j, pxE0, pxX0) => {" in html
     assert "const r = _tradeRet(i, j, pxE, pxX);" in html
     # Previous inline formula path should not exist anymore.

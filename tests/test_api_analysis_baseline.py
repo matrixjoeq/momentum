@@ -315,7 +315,7 @@ def test_api_baseline_cvar_defaults_and_bounds(api_client):
     assert ok_long["cvar_overlay"]["window"] == 3000
 
 
-def test_api_baseline_analysis_accepts_dca_payload(api_client):
+def test_api_baseline_analysis_accepts_dca_payload(api_client, engine):
     c = api_client
     upsert_and_fetch_etfs(
         c,
@@ -323,6 +323,17 @@ def test_api_baseline_analysis_accepts_dca_payload(api_client):
         names=_BASELINE_NAMES,
         start_date="20240102",
         end_date="20240112",
+    )
+    remaining_dates = [
+        d.date() for d in pd.date_range("2024-01-04", "2024-01-12", freq="B")
+    ]
+    seed_prices(
+        engine,
+        code_to_series={
+            "510300": [102.0 + i for i in range(len(remaining_dates))],
+            "511010": [101.0 + i * 0.2 for i in range(len(remaining_dates))],
+        },
+        dates=remaining_dates,
     )
     data = post_json_ok(
         c,
